@@ -305,7 +305,7 @@ public abstract class SocketWrapperBaseEndpoint<S, U> extends AbstractJsseEndpoi
 
 		@Override
 		public final void run() {
-			synchronized (object) {// socketWrapper
+			synchronized (socketWrapper) {// socketWrapper
 				// It is possible that processing may be triggered for read and
 				// write at the same time. The sync above makes sure that processing
 				// does not occur in parallel. The test below ensures that if the

@@ -157,7 +157,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	/**
 	 * @return the socket wrapper being used.
 	 */
-	protected final Channel<?> getSocketWrapper() {
+	protected final Channel<?> getChannel() {
 		return channel;
 	}
 
@@ -975,7 +975,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	@Override
 	public void processSocketEvent(SocketEvent event, boolean dispatch) {
-		Channel<?> channel = getSocketWrapper();
+		Channel<?> channel = getChannel();
 		if (channel != null) {
 			channel.processSocket(event, dispatch);
 		}
@@ -984,7 +984,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	protected abstract boolean isReadyForWrite();
 
 	protected void executeDispatches() {
-		Channel<?> channel = getSocketWrapper();
+		Channel<?> channel = getChannel();
 		Iterator<DispatchType> dispatches = getIteratorAndClearDispatches();
 		if (channel != null) {
 			synchronized (channel) {
