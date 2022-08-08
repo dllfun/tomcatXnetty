@@ -50,7 +50,6 @@ import org.apache.tomcat.util.collections.SynchronizedStack;
 import org.apache.tomcat.util.modeler.Registry;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint;
-import org.apache.tomcat.util.net.Endpoint.Handler;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 import org.apache.tomcat.util.threads.ResizableExecutor;
@@ -964,6 +963,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, Endpoint.H
 	 *
 	 * @return if processing was triggered successfully
 	 */
+	@Override
 	public boolean processSocket(Channel<S> channel, SocketEvent event, boolean dispatch) {
 		try {
 			if (channel == null) {
