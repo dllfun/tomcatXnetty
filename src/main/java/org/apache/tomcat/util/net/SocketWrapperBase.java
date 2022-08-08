@@ -494,10 +494,11 @@ public abstract class SocketWrapperBase<E> extends AbstractChannel<E> {
 	 */
 	protected abstract void doWrite(boolean block, ByteBuffer from) throws IOException;
 
-	@Override
-	public void processSocket(SocketEvent socketStatus, boolean dispatch) {
-		((SocketWrapperBaseEndpoint) endpoint).processSocket(this, socketStatus, dispatch);
-	}
+	// @Override
+	// public void processSocket(SocketEvent socketStatus, boolean dispatch) {
+	// ((SocketWrapperBaseEndpoint) endpoint).getHandler().processSocket(this,
+	// socketStatus, dispatch);
+	// }
 
 	// public abstract void registerReadInterest();
 

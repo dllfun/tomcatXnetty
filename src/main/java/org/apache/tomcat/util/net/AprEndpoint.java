@@ -452,16 +452,6 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 	@Override
 	public void startInternal() throws Exception {
 
-		if (socketProperties.getProcessorCache() != 0) {
-			processorCache = new SynchronizedStack<>(SynchronizedStack.DEFAULT_SIZE,
-					socketProperties.getProcessorCache());
-		}
-
-		// Create worker collection
-		if (getExecutor() == null) {
-			createExecutor();
-		}
-
 		initializeConnectionLatch();
 
 		// Start poller thread
@@ -530,12 +520,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			}
 			sendfile = null;
 		}
-		if (processorCache != null) {
-			processorCache.clear();
-			processorCache = null;
-		}
 
-		shutdownExecutor();
 	}
 
 	/**
@@ -562,7 +547,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			rootPool = 0;
 		}
 
-		getHandler().recycle();
+		// getHandler().recycle();
 	}
 
 	@Override
@@ -677,7 +662,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			wrapper.setSecure(isSSLEnabled());
 			wrapper.setReadTimeout(getConnectionTimeout());
 			wrapper.setWriteTimeout(getConnectionTimeout());
-			getExecutor().execute(new SocketWithOptionsProcessor(wrapper));
+			getHandler().getProtocol().getExecutor().execute(new SocketWithOptionsProcessor(wrapper));
 			return true;
 		} catch (RejectedExecutionException x) {
 			log.warn(sm.getString("endpoint.rejectedExecution", socket), x);
@@ -718,14 +703,8 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 		} else if (event == SocketEvent.OPEN_WRITE && socketWrapper.getWriteOperation() != null) {
 			return socketWrapper.getWriteOperation().process();
 		} else {
-			return processSocket(socketWrapper, event, true);
+			return getHandler().processSocket(socketWrapper, event, true);
 		}
-	}
-
-	@Override
-	protected SocketProcessorBase<Long> createSocketProcessor(SocketWrapperBase<Long> socketWrapper,
-			SocketEvent event) {
-		return new SocketProcessor(socketWrapper, event);
 	}
 
 	private void closeSocketInternal(long socket) {
@@ -1029,7 +1008,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 
 		protected void start() {
 			pollerThread = new Thread(poller, getName() + "-Poller");
-			pollerThread.setPriority(threadPriority);
+			pollerThread.setPriority(getHandler().getProtocol().getThreadPriority());
 			pollerThread.setDaemon(true);
 			pollerThread.start();
 		}
@@ -1206,7 +1185,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 							socketWrapper.getWriteOperation().process();
 						}
 					} else {
-						processSocket(socketWrapper, SocketEvent.ERROR, true);
+						getHandler().processSocket(socketWrapper, SocketEvent.ERROR, true);
 					}
 				}
 				socket = timeouts.check(date);
@@ -1585,7 +1564,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 
 		protected void start() {
 			sendfileThread = new Thread(sendfile, getName() + "-Sendfile");
-			sendfileThread.setPriority(threadPriority);
+			sendfileThread.setPriority(getHandler().getProtocol().getThreadPriority());
 			sendfileThread.setDaemon(true);
 			sendfileThread.start();
 		}
@@ -1916,38 +1895,6 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			}
 		}
 
-	}
-
-	// -------------------------------------------- SocketProcessor Inner Class
-
-	/**
-	 * This class is the equivalent of the Worker, but will simply use in an
-	 * external Executor thread pool.
-	 */
-	protected class SocketProcessor extends SocketProcessorBase<Long> {
-
-		public SocketProcessor(SocketWrapperBase<Long> socketWrapper, SocketEvent event) {
-			super(socketWrapper, event);
-		}
-
-		@Override
-		protected void doRun() {
-			try {
-				// Process the request from this socket
-				SocketState state = getHandler().process(socketWrapper, event);
-				if (state == Handler.SocketState.CLOSED) {
-					// Close socket and pool
-					socketWrapper.close();
-				}
-			} finally {
-				socketWrapper = null;
-				event = null;
-				// return to cache
-				if (isRunning() && !isPaused() && processorCache != null) {
-					processorCache.push(this);
-				}
-			}
-		}
 	}
 
 	public static class AprSocketWrapper extends SocketWrapperBase<Long> {

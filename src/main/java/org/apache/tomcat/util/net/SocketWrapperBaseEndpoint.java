@@ -53,11 +53,6 @@ public abstract class SocketWrapperBaseEndpoint<S, U> extends AbstractJsseEndpoi
 	 */
 	protected Acceptor<U> acceptor;
 
-	/**
-	 * Cache for SocketProcessor objects
-	 */
-	protected SynchronizedStack<SocketProcessorBase<S>> processorCache;
-
 	private static Object object = new Object();
 
 	public SocketWrapperBaseEndpoint() {
@@ -70,7 +65,7 @@ public abstract class SocketWrapperBaseEndpoint<S, U> extends AbstractJsseEndpoi
 		acceptor.setThreadName(threadName);
 		Thread t = new Thread(acceptor, threadName);
 		t.setPriority(getAcceptorThreadPriority());
-		t.setDaemon(getDaemon());
+		t.setDaemon(getHandler().getProtocol().getDaemon());
 		t.start();
 	}
 
@@ -238,86 +233,4 @@ public abstract class SocketWrapperBaseEndpoint<S, U> extends AbstractJsseEndpoi
 		return null;
 	}
 
-	// ---------------------------------------------- Request processing methods
-
-	/**
-	 * Process the given SocketWrapper with the given status. Used to trigger
-	 * processing as if the Poller (for those endpoints that have one) selected the
-	 * socket.
-	 *
-	 * @param socketWrapper The socket wrapper to process
-	 * @param event         The socket event to be processed
-	 * @param dispatch      Should the processing be performed on a new container
-	 *                      thread
-	 *
-	 * @return if processing was triggered successfully
-	 */
-	public final boolean processSocket(SocketWrapperBase<S> socketWrapper, SocketEvent event, boolean dispatch) {
-		try {
-			if (socketWrapper == null) {
-				return false;
-			}
-			SocketProcessorBase<S> sc = null;
-			if (processorCache != null) {
-				sc = processorCache.pop();
-			}
-			if (sc == null) {
-				sc = createSocketProcessor(socketWrapper, event);
-			} else {
-				sc.reset(socketWrapper, event);
-			}
-			Executor executor = getExecutor();
-			if (dispatch && executor != null) {
-				executor.execute(sc);
-			} else {
-				sc.run();
-			}
-		} catch (RejectedExecutionException ree) {
-			getLog().warn(sm.getString("endpoint.executor.fail", socketWrapper), ree);
-			return false;
-		} catch (Throwable t) {
-			ExceptionUtils.handleThrowable(t);
-			// This means we got an OOM or similar creating a thread, or that
-			// the pool and its queue are full
-			getLog().error(sm.getString("endpoint.process.fail"), t);
-			return false;
-		}
-		return true;
-	}
-
-	protected abstract SocketProcessorBase<S> createSocketProcessor(SocketWrapperBase<S> socketWrapper,
-			SocketEvent event);
-
-	protected static abstract class SocketProcessorBase<S> implements Runnable {
-
-		protected SocketWrapperBase<S> socketWrapper;
-		protected SocketEvent event;
-
-		public SocketProcessorBase(SocketWrapperBase<S> socketWrapper, SocketEvent event) {
-			reset(socketWrapper, event);
-		}
-
-		public void reset(SocketWrapperBase<S> socketWrapper, SocketEvent event) {
-			Objects.requireNonNull(event);
-			this.socketWrapper = socketWrapper;
-			this.event = event;
-		}
-
-		@Override
-		public final void run() {
-			synchronized (socketWrapper) {// socketWrapper
-				// It is possible that processing may be triggered for read and
-				// write at the same time. The sync above makes sure that processing
-				// does not occur in parallel. The test below ensures that if the
-				// first event to be processed results in the socket being closed,
-				// the subsequent events are not processed.
-				if (socketWrapper.isClosed()) {
-					return;
-				}
-				doRun();
-			}
-		}
-
-		protected abstract void doRun();
-	}
 }

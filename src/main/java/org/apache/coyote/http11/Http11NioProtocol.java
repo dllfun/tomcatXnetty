@@ -16,84 +16,180 @@
  */
 package org.apache.coyote.http11;
 
+import java.io.IOException;
+import java.nio.channels.CancelledKeyException;
+import java.nio.channels.SelectionKey;
+
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
+import org.apache.tomcat.util.ExceptionUtils;
+import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.NioChannel;
 import org.apache.tomcat.util.net.NioEndpoint;
-
+import org.apache.tomcat.util.net.SocketEvent;
 
 /**
- * Abstract the protocol implementation, including threading, etc.
- * Processor is single threaded and specific to stream-based protocols,
- * will not fit Jk protocols like JNI.
+ * Abstract the protocol implementation, including threading, etc. Processor is
+ * single threaded and specific to stream-based protocols, will not fit Jk
+ * protocols like JNI.
  *
  * @author Remy Maucherat
  * @author Costin Manolache
  */
 public class Http11NioProtocol extends AbstractHttp11JsseProtocol<NioChannel> {
 
-    private static final Log log = LogFactory.getLog(Http11NioProtocol.class);
+	private static final Log log = LogFactory.getLog(Http11NioProtocol.class);
 
+	public Http11NioProtocol() {
+		super(new NioEndpoint());
+	}
 
-    public Http11NioProtocol() {
-        super(new NioEndpoint());
-    }
+	@Override
+	protected Log getLog() {
+		return log;
+	}
 
+	// -------------------- Pool setup --------------------
 
-    @Override
-    protected Log getLog() { return log; }
+	/**
+	 * NO-OP.
+	 *
+	 * @param count Unused
+	 *
+	 * @deprecated This setter will be removed in Tomcat 10.
+	 */
+	@Deprecated
+	public void setPollerThreadCount(int count) {
+	}
 
+	/**
+	 * Always returns 1.
+	 *
+	 * @return 1
+	 *
+	 * @deprecated This getter will be removed in Tomcat 10.
+	 */
+	@Deprecated
+	public int getPollerThreadCount() {
+		return 1;
+	}
 
-    // -------------------- Pool setup --------------------
+	public void setSelectorTimeout(long timeout) {
+		((NioEndpoint) getEndpoint()).setSelectorTimeout(timeout);
+	}
 
-    /**
-     * NO-OP.
-     *
-     * @param count Unused
-     *
-     * @deprecated This setter will be removed in Tomcat 10.
-     */
-    @Deprecated
-    public void setPollerThreadCount(int count) {
-    }
+	public long getSelectorTimeout() {
+		return ((NioEndpoint) getEndpoint()).getSelectorTimeout();
+	}
 
-    /**
-     * Always returns 1.
-     *
-     * @return 1
-     *
-     * @deprecated This getter will be removed in Tomcat 10.
-     */
-    @Deprecated
-    public int getPollerThreadCount() {
-        return 1;
-    }
+	public void setPollerThreadPriority(int threadPriority) {
+		((NioEndpoint) getEndpoint()).setPollerThreadPriority(threadPriority);
+	}
 
-    public void setSelectorTimeout(long timeout) {
-        ((NioEndpoint)getEndpoint()).setSelectorTimeout(timeout);
-    }
+	public int getPollerThreadPriority() {
+		return ((NioEndpoint) getEndpoint()).getPollerThreadPriority();
+	}
 
-    public long getSelectorTimeout() {
-        return ((NioEndpoint)getEndpoint()).getSelectorTimeout();
-    }
+	// ----------------------------------------------------- JMX related methods
 
-    public void setPollerThreadPriority(int threadPriority) {
-        ((NioEndpoint)getEndpoint()).setPollerThreadPriority(threadPriority);
-    }
+	@Override
+	protected String getNamePrefix() {
+		if (isSSLEnabled()) {
+			return "https-" + getSslImplementationShortName() + "-nio";
+		} else {
+			return "http-nio";
+		}
+	}
 
-    public int getPollerThreadPriority() {
-      return ((NioEndpoint)getEndpoint()).getPollerThreadPriority();
-    }
+	@Override
+	public void processSocket(Channel<NioChannel> channel, SocketEvent event) {
 
+		NioChannel socket = channel.getSocket();
+		if (socket == null || !socket.isOpen()) {
+			channel.close();
+			return;
+		}
+		// Poller poller = NioEndpoint.this.poller;
+		// if (poller == null) {
+		// channel.close();
+		// return;
+		// }
 
-    // ----------------------------------------------------- JMX related methods
+		try {
+			int handshake = -1;
+			try {
+				if (socket.isHandshakeComplete()) {
+					// No TLS handshaking required. Let the handler
+					// process this socket / event combination.
+					handshake = 0;
+				} else if (event == SocketEvent.STOP || event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
+					// Unable to complete the TLS handshake. Treat it as
+					// if the handshake failed.
+					handshake = -1;
+				} else {
+					handshake = socket.handshake(event == SocketEvent.OPEN_READ, event == SocketEvent.OPEN_WRITE);
+					// The handshake process reads/writes from/to the
+					// socket. status may therefore be OPEN_WRITE once
+					// the handshake completes. However, the handshake
+					// happens when the socket is opened so the status
+					// must always be OPEN_READ after it completes. It
+					// is OK to always set this as it is only used if
+					// the handshake completes.
+					event = SocketEvent.OPEN_READ;
+				}
+			} catch (IOException x) {
+				handshake = -1;
+				if (log.isDebugEnabled())
+					log.debug("Error during SSL handshake", x);
+			} catch (CancelledKeyException ckx) {
+				handshake = -1;
+			}
+			if (handshake == 0) {
+				SocketState state = SocketState.OPEN;
+				// Process the request from this socket
+				if (event == null) {
+					System.out.println(socket.getIOChannel().socket().getPort() + " process " + SocketEvent.OPEN_READ);
+					state = process(channel, SocketEvent.OPEN_READ);
+				} else {
+					System.out.println(socket.getIOChannel().socket().getPort() + " process " + event);
+					state = process(channel, event);
+				}
+				if (state == SocketState.CLOSED) {
+					// poller.cancelledKey(socket.getIOChannel().keyFor(poller.getSelector()),
+					// socketWrapper);
+					channel.close();
+				}
+			} else if (handshake == -1) {
+				process(channel, SocketEvent.CONNECT_FAIL);
+				// poller.cancelledKey(socket.getIOChannel().keyFor(poller.getSelector()),
+				// socketWrapper);
+				channel.close();
+			} else if (handshake == SelectionKey.OP_READ) {
+				System.out.println(socket.getIOChannel().socket().getPort() + " registerReadInterest ");
+				channel.registerReadInterest();
+			} else if (handshake == SelectionKey.OP_WRITE) {
+				System.out.println(socket.getIOChannel().socket().getPort() + " registerWriteInterest ");
+				channel.registerWriteInterest();
+			}
+		} catch (CancelledKeyException cx) {
+			// poller.cancelledKey(socket.getIOChannel().keyFor(poller.getSelector()),
+			// socketWrapper);
+			channel.close();
+		} catch (VirtualMachineError vme) {
+			ExceptionUtils.handleThrowable(vme);
+		} catch (Throwable t) {
+			log.error(sm.getString("endpoint.processing.fail"), t);
+			// poller.cancelledKey(socket.getIOChannel().keyFor(poller.getSelector()),
+			// socketWrapper);
+			channel.close();
+		} finally {
+			channel = null;
+			event = null;
+			// return to cache
+			// if (isRunning() && !isPaused() && processorCache != null) {
+			// processorCache.push(this);
+			// }
+		}
 
-    @Override
-    protected String getNamePrefix() {
-        if (isSSLEnabled()) {
-            return "https-" + getSslImplementationShortName()+ "-nio";
-        } else {
-            return "http-nio";
-        }
-    }
+	}
 }

@@ -109,11 +109,6 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 	@Override
 	public void startInternal() throws Exception {
 
-		// Create worker collection
-		if (getExecutor() == null) {
-			createExecutor();
-		}
-
 		bootstrap = new ServerBootstrap();
 		if (Epoll.isAvailable()) {
 			bootstrap.channel(EpollServerSocketChannel.class);
@@ -236,86 +231,6 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		} catch (Throwable e) {
 			logger.warn(e.getMessage(), e);
 		}
-	}
-
-	/**
-	 * Process the given SocketWrapper with the given status. Used to trigger
-	 * processing as if the Poller (for those endpoints that have one) selected the
-	 * socket.
-	 *
-	 * @param socketWrapper The socket wrapper to process
-	 * @param event         The socket event to be processed
-	 * @param dispatch      Should the processing be performed on a new container
-	 *                      thread
-	 *
-	 * @return if processing was triggered successfully
-	 */
-	public boolean processSocket(NettyChannel nettyChannel, SocketEvent event, boolean dispatch) {
-		if (nettyChannel == null) {
-			return false;
-		}
-
-		try {
-
-			Runnable runnable = new Runnable() {
-
-				@Override
-				public void run() {
-
-					synchronized (nettyChannel) {
-
-						io.netty.channel.Channel channel = nettyChannel.getSocket();
-						if (channel == null) {
-							nettyChannel.close();
-							return;
-						}
-
-						try {
-
-							SocketState state = SocketState.OPEN;
-							// Process the request from this socket
-							if (event == null) {
-								state = getHandler().process(nettyChannel, SocketEvent.OPEN_READ);
-							} else {
-								state = getHandler().process(nettyChannel, event);
-							}
-							if (state == SocketState.CLOSED) {
-								// System.out.println("close netty channel");
-								nettyChannel.close();
-							}
-
-						} catch (CancelledKeyException cx) {
-							nettyChannel.close();
-						} catch (VirtualMachineError vme) {
-							ExceptionUtils.handleThrowable(vme);
-						} catch (Throwable t) {
-							// log.error(sm.getString("endpoint.processing.fail"), t);
-							nettyChannel.close();
-						}
-
-					}
-				}
-			};
-
-			Executor executor = getExecutor();
-			if (dispatch && executor != null) {
-				executor.execute(runnable);
-			} else {
-				runnable.run();
-			}
-
-		} catch (RejectedExecutionException ree) {
-			getLog().warn(sm.getString("endpoint.executor.fail", nettyChannel), ree);
-			return false;
-		} catch (Throwable t) {
-			ExceptionUtils.handleThrowable(t);
-			// This means we got an OOM or similar creating a thread, or that
-			// the pool and its queue are full
-			getLog().error(sm.getString("endpoint.process.fail"), t);
-			return false;
-		}
-
-		return true;
 	}
 
 	NettyChannel getOrAddChannel(SocketChannel channel) {
@@ -609,16 +524,16 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			}
 		}
 
-		@Override
-		public void processSocket(SocketEvent socketStatus, boolean dispatch) {
-			endpoint.processSocket(this, socketStatus, dispatch);
-		}
+		// @Override
+		// public void processSocket(SocketEvent socketStatus, boolean dispatch) {
+		// endpoint.getHandler().processSocket(this, socketStatus, dispatch);
+		// }
 
 		@Override
 		public void registerReadInterest() {
 			// System.out.println("registe read");
 			if (!peekIsEmpty()) {
-				endpoint.processSocket(this, SocketEvent.OPEN_READ, true);
+				endpoint.getHandler().processSocket(this, SocketEvent.OPEN_READ, true);
 			} else {
 				channel.read();
 			}
@@ -1480,7 +1395,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
 
 			if (nettyChannel.needDispatch()) {
-				NettyEndpoint.this.processSocket(nettyChannel, SocketEvent.OPEN_READ, true);
+				NettyEndpoint.this.getHandler().processSocket(nettyChannel, SocketEvent.OPEN_READ, true);
 			}
 			super.channelInactive(ctx);
 		}
@@ -1496,7 +1411,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 				if (nettyChannel.needDispatch()) {
 					System.out.println(ctx.channel().toString() + " " + "processSocketRead");
-					NettyEndpoint.this.processSocket(nettyChannel, SocketEvent.OPEN_READ, true);
+					NettyEndpoint.this.getHandler().processSocket(nettyChannel, SocketEvent.OPEN_READ, true);
 				}
 
 			} else {
@@ -1533,7 +1448,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			System.out.println(ctx.channel().toString() + " " + "exceptionCaught");
 			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
 			cause.printStackTrace();
-			NettyEndpoint.this.processSocket(nettyChannel, SocketEvent.ERROR, true);
+			NettyEndpoint.this.getHandler().processSocket(nettyChannel, SocketEvent.ERROR, true);
 			super.exceptionCaught(ctx, cause);
 		}
 
@@ -1555,4 +1470,5 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		}
 
 	}
+
 }

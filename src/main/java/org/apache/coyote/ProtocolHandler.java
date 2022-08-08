@@ -76,6 +76,18 @@ public interface ProtocolHandler {
 	 */
 	public void setUtilityExecutor(ScheduledExecutorService utilityExecutor);
 
+	public int getMaxThreads();
+
+	public void setMaxThreads(int maxThreads);
+
+	public int getMinSpareThreads();
+
+	public void setMinSpareThreads(int minSpareThreads);
+
+	public int getThreadPriority();
+
+	public void setThreadPriority(int threadPriority);
+
 	/**
 	 * Initialise the protocol.
 	 *

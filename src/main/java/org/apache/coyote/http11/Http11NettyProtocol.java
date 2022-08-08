@@ -16,9 +16,16 @@
  */
 package org.apache.coyote.http11;
 
+import java.nio.channels.CancelledKeyException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
+import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.NettyEndpoint;
+import org.apache.tomcat.util.net.SocketEvent;
+import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 
 import io.netty.channel.Channel;
 
@@ -78,4 +85,38 @@ public class Http11NettyProtocol extends AbstractHttp11JsseProtocol<Channel> {
 			return "http-netty";
 		}
 	}
+
+	@Override
+	public void processSocket(org.apache.tomcat.util.net.Channel<Channel> nettyChannel, SocketEvent event) {
+		io.netty.channel.Channel channel = nettyChannel.getSocket();
+		if (channel == null) {
+			nettyChannel.close();
+			return;
+		}
+
+		try {
+
+			SocketState state = SocketState.OPEN;
+			// Process the request from this socket
+			if (event == null) {
+				state = process(nettyChannel, SocketEvent.OPEN_READ);
+			} else {
+				state = process(nettyChannel, event);
+			}
+			if (state == SocketState.CLOSED) {
+				// System.out.println("close netty channel");
+				nettyChannel.close();
+			}
+
+		} catch (CancelledKeyException cx) {
+			nettyChannel.close();
+		} catch (VirtualMachineError vme) {
+			ExceptionUtils.handleThrowable(vme);
+			nettyChannel.close();
+		} catch (Throwable t) {
+			// log.error(sm.getString("endpoint.processing.fail"), t);
+			nettyChannel.close();
+		}
+	}
+
 }

@@ -37,7 +37,6 @@ import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.Adapter;
 import org.apache.coyote.ErrorState;
 import org.apache.coyote.ChannelHandler;
-import org.apache.coyote.InputReader;
 import org.apache.coyote.OutputBuffer;
 import org.apache.coyote.Request;
 import org.apache.coyote.RequestInfo;
@@ -251,7 +250,7 @@ public class AjpProcessor extends AbstractProcessor {
 	// ------------------------------------------------------------ Constructor
 
 	public AjpProcessor(AbstractAjpProtocol<?> protocol, Adapter adapter) {
-		super(adapter);
+		super(protocol, adapter);
 		this.protocol = protocol;
 
 		int packetSize = protocol.getPacketSize();

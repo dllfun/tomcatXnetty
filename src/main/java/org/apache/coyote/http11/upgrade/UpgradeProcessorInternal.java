@@ -21,6 +21,7 @@ import java.io.IOException;
 import javax.servlet.ServletInputStream;
 import javax.servlet.ServletOutputStream;
 
+import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.UpgradeToken;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -35,8 +36,8 @@ public class UpgradeProcessorInternal extends UpgradeProcessorBase {
 
 	private final InternalHttpUpgradeHandler internalHttpUpgradeHandler;
 
-	public UpgradeProcessorInternal(Channel<?> channel, UpgradeToken upgradeToken) {
-		super(upgradeToken);
+	public UpgradeProcessorInternal(AbstractProtocol<?> protocol, Channel<?> channel, UpgradeToken upgradeToken) {
+		super(protocol, upgradeToken);
 		this.internalHttpUpgradeHandler = (InternalHttpUpgradeHandler) upgradeToken.getHttpUpgradeHandler();
 		/*
 		 * Leave timeouts in the hands of the upgraded protocol.

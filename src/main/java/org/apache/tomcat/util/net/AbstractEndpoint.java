@@ -38,6 +38,7 @@ import javax.management.ObjectName;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.IntrospectionUtils;
+import org.apache.tomcat.util.collections.SynchronizedStack;
 import org.apache.tomcat.util.modeler.Registry;
 import org.apache.tomcat.util.res.StringManager;
 import org.apache.tomcat.util.threads.LimitLatch;
@@ -78,11 +79,6 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 	private volatile boolean paused = false;
 
 	/**
-	 * Are we using an internal executor
-	 */
-	protected volatile boolean internalExecutor = true;
-
-	/**
 	 * counter for nr of connections handled by an endpoint
 	 */
 	private volatile LimitLatch connectionLimitLatch = null;
@@ -92,6 +88,7 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 	 */
 	protected final SocketProperties socketProperties = new SocketProperties();
 
+	@Override
 	public final SocketProperties getSocketProperties() {
 		return socketProperties;
 	}
@@ -136,20 +133,6 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 	@Override
 	public void setUseSendfile(boolean useSendfile) {
 		this.useSendfile = useSendfile;
-	}
-
-	/**
-	 * Time to wait for the internal executor (if used) to terminate when the
-	 * endpoint is stopped in milliseconds. Defaults to 5000 (5 seconds).
-	 */
-	private long executorTerminationTimeoutMillis = 5000;
-
-	public final long getExecutorTerminationTimeoutMillis() {
-		return executorTerminationTimeoutMillis;
-	}
-
-	public final void setExecutorTerminationTimeoutMillis(long executorTerminationTimeoutMillis) {
-		this.executorTerminationTimeoutMillis = executorTerminationTimeoutMillis;
 	}
 
 	/**
@@ -240,41 +223,6 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 			return latch.getCount();
 		}
 		return -1;
-	}
-
-	/**
-	 * External Executor based thread pool.
-	 */
-	private Executor executor = null;
-
-	@Override
-	public final void setExecutor(Executor executor) {
-		this.executor = executor;
-		this.internalExecutor = (executor == null);
-	}
-
-	@Override
-	public final Executor getExecutor() {
-		return executor;
-	}
-
-	/**
-	 * External Executor based thread pool for utility tasks.
-	 */
-	private ScheduledExecutorService utilityExecutor = null;
-
-	@Override
-	public final void setUtilityExecutor(ScheduledExecutorService utilityExecutor) {
-		this.utilityExecutor = utilityExecutor;
-	}
-
-	@Override
-	public final ScheduledExecutorService getUtilityExecutor() {
-		if (utilityExecutor == null) {
-			getLog().warn(sm.getString("endpoint.warn.noUtilityExecutor"));
-			utilityExecutor = new ScheduledThreadPoolExecutor(1);
-		}
-		return utilityExecutor;
 	}
 
 	/**
@@ -475,81 +423,6 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 		this.SSLEnabled = SSLEnabled;
 	}
 
-	private int minSpareThreads = 10;
-
-	@Override
-	public final void setMinSpareThreads(int minSpareThreads) {
-		this.minSpareThreads = minSpareThreads;
-		Executor executor = this.executor;
-		if (internalExecutor && executor instanceof java.util.concurrent.ThreadPoolExecutor) {
-			// The internal executor should always be an instance of
-			// j.u.c.ThreadPoolExecutor but it may be null if the endpoint is
-			// not running.
-			// This check also avoids various threading issues.
-			((java.util.concurrent.ThreadPoolExecutor) executor).setCorePoolSize(minSpareThreads);
-		}
-	}
-
-	@Override
-	public final int getMinSpareThreads() {
-		return Math.min(getMinSpareThreadsInternal(), getMaxThreads());
-	}
-
-	private int getMinSpareThreadsInternal() {
-		if (internalExecutor) {
-			return minSpareThreads;
-		} else {
-			return -1;
-		}
-	}
-
-	/**
-	 * Maximum amount of worker threads.
-	 */
-	private int maxThreads = 200;
-
-	@Override
-	public final void setMaxThreads(int maxThreads) {
-		this.maxThreads = maxThreads;
-		Executor executor = this.executor;
-		if (internalExecutor && executor instanceof java.util.concurrent.ThreadPoolExecutor) {
-			// The internal executor should always be an instance of
-			// j.u.c.ThreadPoolExecutor but it may be null if the endpoint is
-			// not running.
-			// This check also avoids various threading issues.
-			((java.util.concurrent.ThreadPoolExecutor) executor).setMaximumPoolSize(maxThreads);
-		}
-	}
-
-	@Override
-	public final int getMaxThreads() {
-		if (internalExecutor) {
-			return maxThreads;
-		} else {
-			return -1;
-		}
-	}
-
-	/**
-	 * Priority of the worker threads.
-	 */
-	protected int threadPriority = Thread.NORM_PRIORITY;
-
-	@Override
-	public final void setThreadPriority(int threadPriority) {
-		// Can't change this once the executor has started
-		this.threadPriority = threadPriority;
-	}
-
-	@Override
-	public final int getThreadPriority() {
-		if (internalExecutor) {
-			return threadPriority;
-		} else {
-			return -1;
-		}
-	}
-
 	/**
 	 * Max keep alive requests
 	 */
@@ -591,21 +464,6 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 
 	public final String getDomain() {
 		return domain;
-	}
-
-	/**
-	 * The default is true - the created threads will be in daemon mode. If set to
-	 * false, the control thread will not be daemon - and will keep the process
-	 * alive.
-	 */
-	private boolean daemon = true;
-
-	public final void setDaemon(boolean b) {
-		daemon = b;
-	}
-
-	public final boolean getDaemon() {
-		return daemon;
 	}
 
 	/**
@@ -701,46 +559,7 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 		return value;
 	}
 
-	/**
-	 * Return the amount of threads that are managed by the pool.
-	 *
-	 * @return the amount of threads that are managed by the pool
-	 */
-	public final int getCurrentThreadCount() {
-		Executor executor = this.executor;
-		if (executor != null) {
-			if (executor instanceof ThreadPoolExecutor) {
-				return ((ThreadPoolExecutor) executor).getPoolSize();
-			} else if (executor instanceof ResizableExecutor) {
-				return ((ResizableExecutor) executor).getPoolSize();
-			} else {
-				return -1;
-			}
-		} else {
-			return -2;
-		}
-	}
-
-	/**
-	 * Return the amount of threads that are in use
-	 *
-	 * @return the amount of threads that are in use
-	 */
-	public final int getCurrentThreadsBusy() {
-		Executor executor = this.executor;
-		if (executor != null) {
-			if (executor instanceof ThreadPoolExecutor) {
-				return ((ThreadPoolExecutor) executor).getActiveCount();
-			} else if (executor instanceof ResizableExecutor) {
-				return ((ResizableExecutor) executor).getActiveCount();
-			} else {
-				return -1;
-			}
-		} else {
-			return -2;
-		}
-	}
-
+	@Override
 	public final boolean isRunning() {
 		return running;
 	}
@@ -748,39 +567,6 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 	@Override
 	public final boolean isPaused() {
 		return paused;
-	}
-
-	public final void createExecutor() {
-		internalExecutor = true;
-		TaskQueue taskqueue = new TaskQueue();
-		TaskThreadFactory tf = new TaskThreadFactory(getName() + "-exec-", daemon, getThreadPriority());
-		executor = new ThreadPoolExecutor(getMinSpareThreads(), getMaxThreads(), 60, TimeUnit.SECONDS, taskqueue, tf);
-		taskqueue.setParent((ThreadPoolExecutor) executor);
-	}
-
-	public void shutdownExecutor() {// final
-		Executor executor = this.executor;
-		if (executor != null && internalExecutor) {
-			this.executor = null;
-			if (executor instanceof ThreadPoolExecutor) {
-				// this is our internal one, so we need to shut it down
-				ThreadPoolExecutor tpe = (ThreadPoolExecutor) executor;
-				tpe.shutdownNow();
-				long timeout = getExecutorTerminationTimeoutMillis();
-				if (timeout > 0) {
-					try {
-						tpe.awaitTermination(timeout, TimeUnit.MILLISECONDS);
-					} catch (InterruptedException e) {
-						// Ignore
-					}
-					if (tpe.isTerminating()) {
-						getLog().warn(sm.getString("endpoint.warn.executorShutdown", getName()));
-					}
-				}
-				TaskQueue queue = (TaskQueue) tpe.getQueue();
-				queue.setParent(null);
-			}
-		}
 	}
 
 	/**
@@ -913,7 +699,7 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 			paused = true;
 			releaseConnectionLatch();
 			pauseInternal();
-			getHandler().pause();
+			// getHandler().pause();
 		}
 	}
 

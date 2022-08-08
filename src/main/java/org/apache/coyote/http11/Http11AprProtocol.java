@@ -19,6 +19,10 @@ package org.apache.coyote.http11;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.AprEndpoint;
+import org.apache.tomcat.util.net.Channel;
+import org.apache.tomcat.util.net.SocketEvent;
+import org.apache.tomcat.util.net.Endpoint.Handler;
+import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 
 /**
  * Abstract the protocol implementation, including threading, etc. Processor is
@@ -82,4 +86,24 @@ public class Http11AprProtocol extends AbstractHttp11Protocol<Long> {
 			return "http-apr";
 		}
 	}
+
+	@Override
+	public void processSocket(Channel<Long> channel, SocketEvent event) {
+		try {
+			// Process the request from this socket
+			SocketState state = process(channel, event);
+			if (state == Handler.SocketState.CLOSED) {
+				// Close socket and pool
+				channel.close();
+			}
+		} finally {
+			channel = null;
+			event = null;
+			// return to cache
+			// if (isRunning() && !isPaused() && processorCache != null) {
+			// processorCache.push(this);
+			// }
+		}
+	}
+
 }

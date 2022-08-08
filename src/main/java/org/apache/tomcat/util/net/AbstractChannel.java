@@ -123,22 +123,6 @@ public abstract class AbstractChannel<E> implements Channel<E> {
 		this.currentProcessor = currentProcessor;
 	}
 
-	/**
-	 * Transfers processing to a container thread.
-	 *
-	 * @param runnable The actions to process on a container thread
-	 *
-	 * @throws RejectedExecutionException If the runnable cannot be executed
-	 */
-	@Override
-	public void execute(Runnable runnable) {
-		Executor executor = endpoint.getExecutor();
-		if (!endpoint.isRunning() || executor == null) {
-			throw new RejectedExecutionException();
-		}
-		executor.execute(runnable);
-	}
-
 	@Override
 	public IOException getError() {
 		return error;
@@ -613,7 +597,7 @@ public abstract class AbstractChannel<E> implements Channel<E> {
 		 */
 		protected boolean process() {
 			try {
-				getEndpoint().getExecutor().execute(this);
+				getEndpoint().getHandler().getProtocol().getExecutor().execute(this);
 				return true;
 			} catch (RejectedExecutionException ree) {
 				log.warn(sm.getString("endpoint.executor.fail", AbstractChannel.this), ree);

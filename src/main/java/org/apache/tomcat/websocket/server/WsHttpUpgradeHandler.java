@@ -29,6 +29,7 @@ import javax.websocket.Endpoint;
 import javax.websocket.Extension;
 import javax.websocket.server.ServerEndpointConfig;
 
+import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -51,6 +52,7 @@ public class WsHttpUpgradeHandler implements InternalHttpUpgradeHandler {
 
 	private final ClassLoader applicationClassLoader;
 
+	private AbstractProtocol<?> protocol;
 	private Channel<?> channel;
 
 	private Endpoint endpoint;

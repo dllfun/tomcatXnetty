@@ -94,6 +94,10 @@ public class Http2Protocol implements UpgradeProtocol {
 	// Reference to HTTP/1.1 protocol that this instance is configured under
 	private AbstractProtocol<?> http11Protocol = null;
 
+	public Http2Protocol() {
+
+	}
+
 	@Override
 	public String getHttpUpgradeName(boolean isSSLEnabled) {
 		if (isSSLEnabled) {
@@ -115,7 +119,7 @@ public class Http2Protocol implements UpgradeProtocol {
 
 	@Override
 	public Processor getProcessor(Channel<?> channel, Adapter adapter) {
-		UpgradeProcessorInternal processor = new UpgradeProcessorInternal(channel,
+		UpgradeProcessorInternal processor = new UpgradeProcessorInternal(http11Protocol, channel,
 				new UpgradeToken(getInternalUpgradeHandler(channel, adapter, null), null, null));
 		return processor;
 	}

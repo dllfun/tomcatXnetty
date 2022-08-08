@@ -96,7 +96,7 @@ public interface Channel<E> {
 
 	public void setCurrentProcessor(Object currentProcessor);
 
-	public void execute(Runnable runnable);
+	// public void execute(Runnable runnable);
 
 	public IOException getError();
 
@@ -152,7 +152,7 @@ public interface Channel<E> {
 
 	public boolean flush(boolean block) throws IOException;
 
-	public void processSocket(SocketEvent socketStatus, boolean dispatch);
+	//public void processSocket(SocketEvent socketStatus, boolean dispatch);
 
 	public void registerReadInterest();
 

@@ -25,6 +25,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.servlet.RequestDispatcher;
+
+import org.apache.coyote.http11.AbstractHttp11Protocol;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
@@ -45,6 +47,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	private static final StringManager sm = StringManager.getManager(AbstractProcessor.class);
 
+	protected final AbstractProtocol<?> protocol;
 	// Used to avoid useless B2C conversion on the host name.
 	private char[] hostNameC = new char[0];
 
@@ -73,11 +76,13 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	private ErrorState errorState = ErrorState.NONE;
 	protected final UserDataHelper userDataHelper;
 
-	public AbstractProcessor(Adapter adapter) {
-		this(adapter, new RequestData(), new ResponseData());
+	public AbstractProcessor(AbstractProtocol<?> protocol, Adapter adapter) {
+		this(protocol, adapter, new RequestData(), new ResponseData());
 	}
 
-	protected AbstractProcessor(Adapter adapter, RequestData requestData, ResponseData responseData) {
+	protected AbstractProcessor(AbstractProtocol<?> protocol, Adapter adapter, RequestData requestData,
+			ResponseData responseData) {
+		this.protocol = protocol;
 		this.adapter = adapter;
 		this.asyncStateMachine = new AsyncState(this);
 		this.requestData = requestData;
@@ -177,7 +182,8 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 		if (channel == null) {
 			throw new RejectedExecutionException(sm.getString("abstractProcessor.noExecute"));
 		} else {
-			channel.execute(runnable);
+			// channel.execute(runnable);
+			protocol.getExecutor().execute(runnable);
 		}
 	}
 
@@ -975,16 +981,19 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	@Override
 	public void processSocketEvent(SocketEvent event, boolean dispatch) {
-		Channel<?> channel = getChannel();
+		Channel channel = getChannel();
 		if (channel != null) {
-			channel.processSocket(event, dispatch);
+
+			// TODO sads
+			// channel.processSocket(event, dispatch);
+			protocol.processSocket(channel, event, dispatch);
 		}
 	}
 
 	protected abstract boolean isReadyForWrite();
 
 	protected void executeDispatches() {
-		Channel<?> channel = getChannel();
+		Channel channel = getChannel();
 		Iterator<DispatchType> dispatches = getIteratorAndClearDispatches();
 		if (channel != null) {
 			synchronized (channel) {
@@ -1006,7 +1015,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 				 */
 				while (dispatches != null && dispatches.hasNext()) {
 					DispatchType dispatchType = dispatches.next();
-					channel.processSocket(dispatchType.getSocketStatus(), false);
+					protocol.processSocket(channel, dispatchType.getSocketStatus(), false);
 				}
 			}
 		}

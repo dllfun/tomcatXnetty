@@ -94,7 +94,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 
 	protected final Http2Protocol protocol;
 	private final Adapter adapter;
-	protected volatile Channel<?> channel;
+	protected volatile Channel channel;
 	private volatile SSLSupport sslSupport;
 
 	private volatile Http2Parser parser;
@@ -268,11 +268,11 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	void processStreamOnContainerThread(StreamProcessor streamProcessor, SocketEvent event) {
 		StreamRunnable streamRunnable = new StreamRunnable(streamProcessor, event);
 		if (streamConcurrency == null) {
-			channel.execute(streamRunnable);
+			protocol.getHttp11Protocol().getExecutor().execute(streamRunnable);
 		} else {
 			if (getStreamConcurrency() < protocol.getMaxConcurrentStreamExecution()) {
 				increaseStreamConcurrency();
-				channel.execute(streamRunnable);
+				protocol.getHttp11Protocol().getExecutor().execute(streamRunnable);
 			} else {
 				queuedRunnable.offer(streamRunnable);
 			}
@@ -416,7 +416,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 		if (now == -1 || connectionTimeout > -1 && now > connectionTimeout) {
 			// Have to dispatch as this will be executed from a non-container
 			// thread.
-			channel.processSocket(SocketEvent.TIMEOUT, true);
+			protocol.getHttp11Protocol().processSocket(channel, SocketEvent.TIMEOUT, true);
 		}
 	}
 
@@ -486,7 +486,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 			StreamRunnable streamRunnable = queuedRunnable.poll();
 			if (streamRunnable != null) {
 				increaseStreamConcurrency();
-				channel.execute(streamRunnable);
+				protocol.getHttp11Protocol().getExecutor().execute(streamRunnable);
 			}
 		}
 	}

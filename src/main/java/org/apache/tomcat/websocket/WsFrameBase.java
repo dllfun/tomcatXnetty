@@ -693,98 +693,98 @@ public abstract class WsFrameBase {
 		}
 	}
 
-	public void suspend() {
-		while (true) {
-			switch (readState) {
-			case WAITING:
-				if (!READ_STATE_UPDATER.compareAndSet(this, ReadState.WAITING, ReadState.SUSPENDING_WAIT)) {
-					continue;
-				}
-				return;
-			case PROCESSING:
-				if (!READ_STATE_UPDATER.compareAndSet(this, ReadState.PROCESSING, ReadState.SUSPENDING_PROCESS)) {
-					continue;
-				}
-				return;
-			case SUSPENDING_WAIT:
-				if (readState != ReadState.SUSPENDING_WAIT) {
-					continue;
-				} else {
-					if (getLog().isWarnEnabled()) {
-						getLog().warn(sm.getString("wsFrame.suspendRequested"));
-					}
-				}
-				return;
-			case SUSPENDING_PROCESS:
-				if (readState != ReadState.SUSPENDING_PROCESS) {
-					continue;
-				} else {
-					if (getLog().isWarnEnabled()) {
-						getLog().warn(sm.getString("wsFrame.suspendRequested"));
-					}
-				}
-				return;
-			case SUSPENDED:
-				if (readState != ReadState.SUSPENDED) {
-					continue;
-				} else {
-					if (getLog().isWarnEnabled()) {
-						getLog().warn(sm.getString("wsFrame.alreadySuspended"));
-					}
-				}
-				return;
-			case CLOSING:
-				return;
-			default:
-				throw new IllegalStateException(sm.getString("wsFrame.illegalReadState", state));
-			}
-		}
-	}
+//	public void suspend() {
+//		while (true) {
+//			switch (readState) {
+//			case WAITING:
+//				if (!READ_STATE_UPDATER.compareAndSet(this, ReadState.WAITING, ReadState.SUSPENDING_WAIT)) {
+//					continue;
+//				}
+//				return;
+//			case PROCESSING:
+//				if (!READ_STATE_UPDATER.compareAndSet(this, ReadState.PROCESSING, ReadState.SUSPENDING_PROCESS)) {
+//					continue;
+//				}
+//				return;
+//			case SUSPENDING_WAIT:
+//				if (readState != ReadState.SUSPENDING_WAIT) {
+//					continue;
+//				} else {
+//					if (getLog().isWarnEnabled()) {
+//						getLog().warn(sm.getString("wsFrame.suspendRequested"));
+//					}
+//				}
+//				return;
+//			case SUSPENDING_PROCESS:
+//				if (readState != ReadState.SUSPENDING_PROCESS) {
+//					continue;
+//				} else {
+//					if (getLog().isWarnEnabled()) {
+//						getLog().warn(sm.getString("wsFrame.suspendRequested"));
+//					}
+//				}
+//				return;
+//			case SUSPENDED:
+//				if (readState != ReadState.SUSPENDED) {
+//					continue;
+//				} else {
+//					if (getLog().isWarnEnabled()) {
+//						getLog().warn(sm.getString("wsFrame.alreadySuspended"));
+//					}
+//				}
+//				return;
+//			case CLOSING:
+//				return;
+//			default:
+//				throw new IllegalStateException(sm.getString("wsFrame.illegalReadState", state));
+//			}
+//		}
+//	}
 
-	public void resume() {
-		while (true) {
-			switch (readState) {
-			case WAITING:
-				if (readState != ReadState.WAITING) {
-					continue;
-				} else {
-					if (getLog().isWarnEnabled()) {
-						getLog().warn(sm.getString("wsFrame.alreadyResumed"));
-					}
-				}
-				return;
-			case PROCESSING:
-				if (readState != ReadState.PROCESSING) {
-					continue;
-				} else {
-					if (getLog().isWarnEnabled()) {
-						getLog().warn(sm.getString("wsFrame.alreadyResumed"));
-					}
-				}
-				return;
-			case SUSPENDING_WAIT:
-				if (!READ_STATE_UPDATER.compareAndSet(this, ReadState.SUSPENDING_WAIT, ReadState.WAITING)) {
-					continue;
-				}
-				return;
-			case SUSPENDING_PROCESS:
-				if (!READ_STATE_UPDATER.compareAndSet(this, ReadState.SUSPENDING_PROCESS, ReadState.PROCESSING)) {
-					continue;
-				}
-				return;
-			case SUSPENDED:
-				if (!READ_STATE_UPDATER.compareAndSet(this, ReadState.SUSPENDED, ReadState.WAITING)) {
-					continue;
-				}
-				resumeProcessing();
-				return;
-			case CLOSING:
-				return;
-			default:
-				throw new IllegalStateException(sm.getString("wsFrame.illegalReadState", state));
-			}
-		}
-	}
+//	public void resume() {
+//		while (true) {
+//			switch (readState) {
+//			case WAITING:
+//				if (readState != ReadState.WAITING) {
+//					continue;
+//				} else {
+//					if (getLog().isWarnEnabled()) {
+//						getLog().warn(sm.getString("wsFrame.alreadyResumed"));
+//					}
+//				}
+//				return;
+//			case PROCESSING:
+//				if (readState != ReadState.PROCESSING) {
+//					continue;
+//				} else {
+//					if (getLog().isWarnEnabled()) {
+//						getLog().warn(sm.getString("wsFrame.alreadyResumed"));
+//					}
+//				}
+//				return;
+//			case SUSPENDING_WAIT:
+//				if (!READ_STATE_UPDATER.compareAndSet(this, ReadState.SUSPENDING_WAIT, ReadState.WAITING)) {
+//					continue;
+//				}
+//				return;
+//			case SUSPENDING_PROCESS:
+//				if (!READ_STATE_UPDATER.compareAndSet(this, ReadState.SUSPENDING_PROCESS, ReadState.PROCESSING)) {
+//					continue;
+//				}
+//				return;
+//			case SUSPENDED:
+//				if (!READ_STATE_UPDATER.compareAndSet(this, ReadState.SUSPENDED, ReadState.WAITING)) {
+//					continue;
+//				}
+//				resumeProcessing();
+//				return;
+//			case CLOSING:
+//				return;
+//			default:
+//				throw new IllegalStateException(sm.getString("wsFrame.illegalReadState", state));
+//			}
+//		}
+//	}
 
 	protected boolean isSuspended() {
 		return readState.isSuspended();

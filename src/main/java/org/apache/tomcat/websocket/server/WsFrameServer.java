@@ -39,10 +39,10 @@ public class WsFrameServer extends WsFrameBase {
 	private final Channel<?> channel;
 	private final ClassLoader applicationClassLoader;
 
-	public WsFrameServer(Channel<?> socketWrapper, WsSession wsSession, Transformation transformation,
+	public WsFrameServer(Channel<?> channel, WsSession wsSession, Transformation transformation,
 			ClassLoader applicationClassLoader) {
 		super(wsSession, transformation);
-		this.channel = socketWrapper;
+		this.channel = channel;
 		this.applicationClassLoader = applicationClassLoader;
 	}
 
@@ -128,7 +128,8 @@ public class WsFrameServer extends WsFrameBase {
 
 	@Override
 	protected void resumeProcessing() {
-		channel.processSocket(SocketEvent.OPEN_READ, true);
+		// TODO aaa
+		// channel.processSocket(SocketEvent.OPEN_READ, true);
 	}
 
 	SocketState notifyDataAvailable() throws IOException {

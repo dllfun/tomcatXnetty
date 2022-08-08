@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import javax.servlet.http.WebConnection;
 
 import org.apache.coyote.AbstractProcessorLight;
+import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.AsyncState;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.ResponseData;
@@ -33,9 +34,12 @@ public abstract class UpgradeProcessorBase extends AbstractProcessorLight implem
 
 	protected static final int INFINITE_TIMEOUT = -1;
 
+	protected final AbstractProtocol<?> protocol;
+
 	private final UpgradeToken upgradeToken;
 
-	public UpgradeProcessorBase(UpgradeToken upgradeToken) {
+	public UpgradeProcessorBase(AbstractProtocol<?> protocol, UpgradeToken upgradeToken) {
+		this.protocol = protocol;
 		this.upgradeToken = upgradeToken;
 	}
 

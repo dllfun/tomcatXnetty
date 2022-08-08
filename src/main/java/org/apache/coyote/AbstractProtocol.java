@@ -24,8 +24,10 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -51,8 +53,12 @@ import org.apache.tomcat.util.net.Endpoint;
 import org.apache.tomcat.util.net.Endpoint.Handler;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
+import org.apache.tomcat.util.threads.ResizableExecutor;
+import org.apache.tomcat.util.threads.TaskQueue;
+import org.apache.tomcat.util.threads.TaskThreadFactory;
+import org.apache.tomcat.util.threads.ThreadPoolExecutor;
 
-public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegistration {
+public abstract class AbstractProtocol<S> implements ProtocolHandler, Endpoint.Handler<S>, MBeanRegistration {
 
 	/**
 	 * The string manager for this package.
@@ -81,9 +87,9 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	 * ProtocolHandler implementation (ProtocolHandler using NIO, requires NIO
 	 * Endpoint etc.).
 	 */
-	private final Endpoint<S> endpoint;
+	protected final Endpoint<S> endpoint;
 
-	private Handler<S> handler;
+	// private Handler<S> handler;
 
 	private final Set<Processor> waitingProcessors = Collections
 			.newSetFromMap(new ConcurrentHashMap<Processor, Boolean>());
@@ -93,6 +99,25 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	 */
 	private ScheduledFuture<?> timeoutFuture = null;
 	private ScheduledFuture<?> monitorFuture;
+
+	/**
+	 * External Executor based thread pool.
+	 */
+	private Executor executor = null;
+
+	/**
+	 * Are we using an internal executor
+	 */
+	protected volatile boolean internalExecutor = true;
+
+	/**
+	 * External Executor based thread pool for utility tasks.
+	 */
+	private ScheduledExecutorService utilityExecutor = null;
+
+	private final RequestGroupInfo global = new RequestGroupInfo();
+	private final AtomicLong registerCount = new AtomicLong(0);
+	private final RecycledProcessors recycledProcessors = new RecycledProcessors();
 
 	public AbstractProtocol(Endpoint<S> endpoint) {
 		this.endpoint = endpoint;
@@ -209,31 +234,59 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	// ---------------------- Properties that are passed through to the EndPoint
 
 	@Override
-	public Executor getExecutor() {
-		return endpoint.getExecutor();
+	public final void setExecutor(Executor executor) {
+		this.executor = executor;
+		this.internalExecutor = (executor == null);
 	}
 
 	@Override
-	public void setExecutor(Executor executor) {
-		endpoint.setExecutor(executor);
+	public final Executor getExecutor() {
+		return executor;
+	}
+
+	public boolean isInternalExecutor() {
+		return internalExecutor;
 	}
 
 	@Override
-	public ScheduledExecutorService getUtilityExecutor() {
-		return endpoint.getUtilityExecutor();
+	public final void setUtilityExecutor(ScheduledExecutorService utilityExecutor) {
+		this.utilityExecutor = utilityExecutor;
 	}
 
 	@Override
-	public void setUtilityExecutor(ScheduledExecutorService utilityExecutor) {
-		endpoint.setUtilityExecutor(utilityExecutor);
+	public final ScheduledExecutorService getUtilityExecutor() {
+		if (utilityExecutor == null) {
+			getLog().warn(sm.getString("endpoint.warn.noUtilityExecutor"));
+			utilityExecutor = new ScheduledThreadPoolExecutor(1);
+		}
+		return utilityExecutor;
 	}
 
-	public int getMaxThreads() {
-		return endpoint.getMaxThreads();
+	/**
+	 * Maximum amount of worker threads.
+	 */
+	private int maxThreads = 200;
+
+	@Override
+	public final void setMaxThreads(int maxThreads) {
+		this.maxThreads = maxThreads;
+		Executor executor = this.executor;
+		if (internalExecutor && executor instanceof java.util.concurrent.ThreadPoolExecutor) {
+			// The internal executor should always be an instance of
+			// j.u.c.ThreadPoolExecutor but it may be null if the endpoint is
+			// not running.
+			// This check also avoids various threading issues.
+			((java.util.concurrent.ThreadPoolExecutor) executor).setMaximumPoolSize(maxThreads);
+		}
 	}
 
-	public void setMaxThreads(int maxThreads) {
-		endpoint.setMaxThreads(maxThreads);
+	@Override
+	public final int getMaxThreads() {
+		if (internalExecutor) {
+			return maxThreads;
+		} else {
+			return -1;
+		}
 	}
 
 	public int getMaxConnections() {
@@ -244,20 +297,154 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		endpoint.setMaxConnections(maxConnections);
 	}
 
-	public int getMinSpareThreads() {
-		return endpoint.getMinSpareThreads();
+	private int minSpareThreads = 10;
+
+	@Override
+	public final void setMinSpareThreads(int minSpareThreads) {
+		this.minSpareThreads = minSpareThreads;
+		Executor executor = this.executor;
+		if (internalExecutor && executor instanceof java.util.concurrent.ThreadPoolExecutor) {
+			// The internal executor should always be an instance of
+			// j.u.c.ThreadPoolExecutor but it may be null if the endpoint is
+			// not running.
+			// This check also avoids various threading issues.
+			((java.util.concurrent.ThreadPoolExecutor) executor).setCorePoolSize(minSpareThreads);
+		}
 	}
 
-	public void setMinSpareThreads(int minSpareThreads) {
-		endpoint.setMinSpareThreads(minSpareThreads);
+	@Override
+	public final int getMinSpareThreads() {
+		return Math.min(getMinSpareThreadsInternal(), getMaxThreads());
 	}
 
-	public int getThreadPriority() {
-		return endpoint.getThreadPriority();
+	private int getMinSpareThreadsInternal() {
+		if (internalExecutor) {
+			return minSpareThreads;
+		} else {
+			return -1;
+		}
 	}
 
-	public void setThreadPriority(int threadPriority) {
-		endpoint.setThreadPriority(threadPriority);
+	/**
+	 * Priority of the worker threads.
+	 */
+	protected int threadPriority = Thread.NORM_PRIORITY;
+
+	@Override
+	public final void setThreadPriority(int threadPriority) {
+		// Can't change this once the executor has started
+		this.threadPriority = threadPriority;
+	}
+
+	@Override
+	public final int getThreadPriority() {
+		if (internalExecutor) {
+			return threadPriority;
+		} else {
+			return -1;
+		}
+	}
+
+	/**
+	 * Time to wait for the internal executor (if used) to terminate when the
+	 * endpoint is stopped in milliseconds. Defaults to 5000 (5 seconds).
+	 */
+	private long executorTerminationTimeoutMillis = 5000;
+
+	public final long getExecutorTerminationTimeoutMillis() {
+		return executorTerminationTimeoutMillis;
+	}
+
+	public final void setExecutorTerminationTimeoutMillis(long executorTerminationTimeoutMillis) {
+		this.executorTerminationTimeoutMillis = executorTerminationTimeoutMillis;
+	}
+
+	/**
+	 * The default is true - the created threads will be in daemon mode. If set to
+	 * false, the control thread will not be daemon - and will keep the process
+	 * alive.
+	 */
+	private boolean daemon = true;
+
+	public final void setDaemon(boolean b) {
+		daemon = b;
+	}
+
+	public final boolean getDaemon() {
+		return daemon;
+	}
+
+	public final void createExecutor() {
+		internalExecutor = true;
+		TaskQueue taskqueue = new TaskQueue();
+		TaskThreadFactory tf = new TaskThreadFactory(getName() + "-exec-", daemon, getThreadPriority());
+		executor = new ThreadPoolExecutor(getMinSpareThreads(), getMaxThreads(), 60, TimeUnit.SECONDS, taskqueue, tf);
+		taskqueue.setParent((ThreadPoolExecutor) executor);
+	}
+
+	public void shutdownExecutor() {// final
+		Executor executor = this.executor;
+		if (executor != null && internalExecutor) {
+			this.executor = null;
+			if (executor instanceof ThreadPoolExecutor) {
+				// this is our internal one, so we need to shut it down
+				ThreadPoolExecutor tpe = (ThreadPoolExecutor) executor;
+				tpe.shutdownNow();
+				long timeout = getExecutorTerminationTimeoutMillis();
+				if (timeout > 0) {
+					try {
+						tpe.awaitTermination(timeout, TimeUnit.MILLISECONDS);
+					} catch (InterruptedException e) {
+						// Ignore
+					}
+					if (tpe.isTerminating()) {
+						getLog().warn(sm.getString("endpoint.warn.executorShutdown", getName()));
+					}
+				}
+				TaskQueue queue = (TaskQueue) tpe.getQueue();
+				queue.setParent(null);
+			}
+		}
+	}
+
+	/**
+	 * Return the amount of threads that are managed by the pool.
+	 *
+	 * @return the amount of threads that are managed by the pool
+	 */
+	public final int getCurrentThreadCount() {
+		Executor executor = this.executor;
+		if (executor != null) {
+			if (executor instanceof ThreadPoolExecutor) {
+				return ((ThreadPoolExecutor) executor).getPoolSize();
+			} else if (executor instanceof ResizableExecutor) {
+				return ((ResizableExecutor) executor).getPoolSize();
+			} else {
+				return -1;
+			}
+		} else {
+			return -2;
+		}
+	}
+
+	/**
+	 * Return the amount of threads that are in use
+	 *
+	 * @return the amount of threads that are in use
+	 */
+	public final int getCurrentThreadsBusy() {
+		Executor executor = this.executor;
+		if (executor != null) {
+			if (executor instanceof ThreadPoolExecutor) {
+				return ((ThreadPoolExecutor) executor).getActiveCount();
+			} else if (executor instanceof ResizableExecutor) {
+				return ((ResizableExecutor) executor).getActiveCount();
+			} else {
+				return -1;
+			}
+		} else {
+			return -2;
+		}
 	}
 
 	public int getAcceptCount() {
@@ -441,13 +628,13 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		return endpoint;
 	}
 
-	protected final Handler<S> getHandler() {
-		return handler;
-	}
+	// protected final Handler<S> getHandler() {
+	// return handler;
+	// }
 
-	protected final void setHandler(Handler<S> handler) {
-		this.handler = handler;
-	}
+	// protected final void setHandler(Handler<S> handler) {
+	// this.handler = handler;
+	// }
 
 	// -------------------------------------------------------- Abstract methods
 
@@ -590,7 +777,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 
 		if (this.domain != null) {
 			rgOname = new ObjectName(domain + ":type=GlobalRequestProcessor,name=" + getName());
-			Registry.getRegistry(null, null).registerComponent(getHandler().getGlobal(), rgOname, null);
+			Registry.getRegistry(null, null).registerComponent(getGlobal(), rgOname, null);
 		}
 
 		String endpointName = getName();
@@ -602,11 +789,15 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 
 	@Override
 	public void start() throws Exception {
+
 		if (getLog().isInfoEnabled()) {
 			getLog().info(sm.getString("abstractProtocolHandler.start", getName()));
 			logPortOffset();
 		}
-
+		// Create worker collection
+		if (getExecutor() == null) {
+			createExecutor();
+		}
 		endpoint.start();
 		monitorFuture = getUtilityExecutor().scheduleWithFixedDelay(new Runnable() {
 			@Override
@@ -660,6 +851,22 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 
 		stopAsyncTimeout();
 		endpoint.pause();
+
+		/*
+		 * Inform all the processors associated with current connections that the
+		 * endpoint is being paused. Most won't care. Those processing multiplexed
+		 * streams may wish to take action. For example, HTTP/2 may wish to stop
+		 * accepting new streams.
+		 *
+		 * Note that even if the endpoint is resumed, there is (currently) no API to
+		 * inform the Processors of this.
+		 */
+		for (Channel<S> channel : endpoint.getConnections()) {
+			Processor processor = (Processor) channel.getCurrentProcessor();
+			if (processor != null) {
+				processor.pause();
+			}
+		}
 	}
 
 	public boolean isPaused() {
@@ -694,6 +901,10 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 
 		endpoint.stop();
+
+		shutdownExecutor();
+
+		recycle();
 	}
 
 	@Override
@@ -723,6 +934,8 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 				Registry.getRegistry(null, null).unregisterComponent(rgOname);
 			}
 		}
+
+		recycle();
 	}
 
 	@Override
@@ -737,449 +950,492 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 	}
 
-	// ------------------------------------------- Connection handler base class
+	// ---------------------------------------------- Request processing methods
 
-	protected static class ConnectionHandler<S> implements Endpoint.Handler<S> {
-
-		private final AbstractProtocol<S> proto;
-		private final RequestGroupInfo global = new RequestGroupInfo();
-		private final AtomicLong registerCount = new AtomicLong(0);
-		private final RecycledProcessors recycledProcessors = new RecycledProcessors(this);
-
-		public ConnectionHandler(AbstractProtocol<S> proto) {
-			this.proto = proto;
-		}
-
-		protected AbstractProtocol<S> getProtocol() {
-			return proto;
-		}
-
-		protected Log getLog() {
-			return getProtocol().getLog();
-		}
-
-		@Override
-		public Object getGlobal() {
-			return global;
-		}
-
-		@Override
-		public void recycle() {
-			recycledProcessors.clear();
-		}
-
-		@Override
-		public SocketState process(Channel<S> channel, SocketEvent event) {
-			if (getLog().isDebugEnabled()) {
-				getLog().debug(sm.getString("abstractConnectionHandler.process", channel.getSocket(), event));
-			}
+	/**
+	 * Process the given SocketWrapper with the given status. Used to trigger
+	 * processing as if the Poller (for those endpoints that have one) selected the
+	 * socket.
+	 *
+	 * @param socketWrapper The socket wrapper to process
+	 * @param event         The socket event to be processed
+	 * @param dispatch      Should the processing be performed on a new container
+	 *                      thread
+	 *
+	 * @return if processing was triggered successfully
+	 */
+	public boolean processSocket(Channel<S> channel, SocketEvent event, boolean dispatch) {
+		try {
 			if (channel == null) {
-				// Nothing to do. Socket has been closed.
-				return SocketState.CLOSED;
+				return false;
 			}
 
-			S socket = channel.getSocket();
+			Runnable runnable = new Runnable() {
 
-			Processor processor = (Processor) channel.getCurrentProcessor();
-			if (getLog().isDebugEnabled()) {
-				getLog().debug(sm.getString("abstractConnectionHandler.connectionsGet", processor, socket));
+				@Override
+				public void run() {
+					synchronized (channel) {
+						// It is possible that processing may be triggered for read and
+						// write at the same time. The sync above makes sure that processing
+						// does not occur in parallel. The test below ensures that if the
+						// first event to be processed results in the socket being closed,
+						// the subsequent events are not processed.
+						if (channel.isClosed()) {
+							return;
+						}
+						processSocket(channel, event);
+					}
+				}
+			};
+
+			// SocketProcessorBase<S> sc = endpoint.popSocketProcessor();
+			// if (sc == null) {
+			// sc = endpoint.createSocketProcessor(channel, event);
+			// } else {
+			// sc.reset(channel, event);
+			// }
+			Executor executor = getExecutor();
+			if (dispatch && executor != null) {
+				executor.execute(runnable);
+			} else {
+				runnable.run();
+			}
+		} catch (RejectedExecutionException ree) {
+			getLog().warn(sm.getString("endpoint.executor.fail", channel), ree);
+			return false;
+		} catch (Throwable t) {
+			ExceptionUtils.handleThrowable(t);
+			// This means we got an OOM or similar creating a thread, or that
+			// the pool and its queue are full
+			getLog().error(sm.getString("endpoint.process.fail"), t);
+			return false;
+		}
+		return true;
+	}
+
+	// protected abstract void processSocket(Channel<S> channel, SocketEvent event);
+
+	@Override
+	public AbstractProtocol<S> getProtocol() {
+		return this;
+	}
+
+	@Override
+	public Object getGlobal() {
+		return global;
+	}
+
+	// @Override
+	protected void recycle() {
+		recycledProcessors.clear();
+	}
+
+	@Override
+	public SocketState process(Channel<S> channel, SocketEvent event) {
+		if (getLog().isDebugEnabled()) {
+			getLog().debug(sm.getString("abstractConnectionHandler.process", channel.getSocket(), event));
+		}
+		if (channel == null) {
+			// Nothing to do. Socket has been closed.
+			return SocketState.CLOSED;
+		}
+
+		S socket = channel.getSocket();
+
+		Processor processor = (Processor) channel.getCurrentProcessor();
+		if (getLog().isDebugEnabled()) {
+			getLog().debug(sm.getString("abstractConnectionHandler.connectionsGet", processor, socket));
+		}
+
+		// Timeouts are calculated on a dedicated thread and then
+		// dispatched. Because of delays in the dispatch process, the
+		// timeout may no longer be required. Check here and avoid
+		// unnecessary processing.
+		if (SocketEvent.TIMEOUT == event && (processor == null || !processor.isAsync() && !processor.isUpgrade()
+				|| processor.isAsync() && !processor.checkAsyncTimeoutGeneration())) {
+			// This is effectively a NO-OP
+			return SocketState.OPEN;
+		}
+
+		if (processor != null) {
+			// Make sure an async timeout doesn't fire
+			getProtocol().removeWaitingProcessor(processor);
+		} else if (event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
+			// Nothing to do. Endpoint requested a close and there is no
+			// longer a processor associated with this socket.
+			return SocketState.CLOSED;
+		}
+
+		ContainerThreadMarker.set();
+
+		try {
+			if (processor == null) {
+				String negotiatedProtocol = channel.getNegotiatedProtocol();
+				// OpenSSL typically returns null whereas JSSE typically
+				// returns "" when no protocol is negotiated
+				if (negotiatedProtocol != null && negotiatedProtocol.length() > 0) {
+					UpgradeProtocol upgradeProtocol = getProtocol().getNegotiatedProtocol(negotiatedProtocol);
+					if (upgradeProtocol != null) {
+						processor = upgradeProtocol.getProcessor(channel, getProtocol().getAdapter());
+						if (getLog().isDebugEnabled()) {
+							getLog().debug(sm.getString("abstractConnectionHandler.processorCreate", processor));
+						}
+					} else if (negotiatedProtocol.equals("http/1.1")) {
+						// Explicitly negotiated the default protocol.
+						// Obtain a processor below.
+					} else {
+						// TODO:
+						// OpenSSL 1.0.2's ALPN callback doesn't support
+						// failing the handshake with an error if no
+						// protocol can be negotiated. Therefore, we need to
+						// fail the connection here. Once this is fixed,
+						// replace the code below with the commented out
+						// block.
+						if (getLog().isDebugEnabled()) {
+							getLog().debug(sm.getString("abstractConnectionHandler.negotiatedProcessor.fail",
+									negotiatedProtocol));
+						}
+						return SocketState.CLOSED;
+						/*
+						 * To replace the code above once OpenSSL 1.1.0 is used. // Failed to create
+						 * processor. This is a bug. throw new IllegalStateException(sm.getString(
+						 * "abstractConnectionHandler.negotiatedProcessor.fail", negotiatedProtocol));
+						 */
+					}
+				}
+			}
+			if (processor == null) {
+				processor = recycledProcessors.pop();
+				if (getLog().isDebugEnabled()) {
+					getLog().debug(sm.getString("abstractConnectionHandler.processorPop", processor));
+				}
+			}
+			if (processor == null) {
+				processor = getProtocol().createProcessor();
+				register(processor);
+				if (getLog().isDebugEnabled()) {
+					getLog().debug(sm.getString("abstractConnectionHandler.processorCreate", processor));
+				}
 			}
 
-			// Timeouts are calculated on a dedicated thread and then
-			// dispatched. Because of delays in the dispatch process, the
-			// timeout may no longer be required. Check here and avoid
-			// unnecessary processing.
-			if (SocketEvent.TIMEOUT == event && (processor == null || !processor.isAsync() && !processor.isUpgrade()
-					|| processor.isAsync() && !processor.checkAsyncTimeoutGeneration())) {
-				// This is effectively a NO-OP
-				return SocketState.OPEN;
-			}
+			processor.setSslSupport(channel.getSslSupport(getProtocol().getClientCertProvider()));
 
-			if (processor != null) {
-				// Make sure an async timeout doesn't fire
-				getProtocol().removeWaitingProcessor(processor);
-			} else if (event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
-				// Nothing to do. Endpoint requested a close and there is no
-				// longer a processor associated with this socket.
-				return SocketState.CLOSED;
-			}
+			// Associate the processor with the connection
+			channel.setCurrentProcessor(processor);
 
-			ContainerThreadMarker.set();
+			SocketState state = SocketState.CLOSED;
+			do {
+				state = processor.process(channel, event);
 
-			try {
-				if (processor == null) {
-					String negotiatedProtocol = channel.getNegotiatedProtocol();
-					// OpenSSL typically returns null whereas JSSE typically
-					// returns "" when no protocol is negotiated
-					if (negotiatedProtocol != null && negotiatedProtocol.length() > 0) {
-						UpgradeProtocol upgradeProtocol = getProtocol().getNegotiatedProtocol(negotiatedProtocol);
+				if (state == SocketState.UPGRADING) {
+					// Get the HTTP upgrade handler
+					UpgradeToken upgradeToken = processor.getUpgradeToken();
+					// Retrieve leftover input
+					ByteBuffer leftOverInput = processor.getLeftoverInput();
+					if (upgradeToken == null) {
+						// Assume direct HTTP/2 connection
+						UpgradeProtocol upgradeProtocol = getProtocol().getUpgradeProtocol("h2c");
 						if (upgradeProtocol != null) {
 							processor = upgradeProtocol.getProcessor(channel, getProtocol().getAdapter());
-							if (getLog().isDebugEnabled()) {
-								getLog().debug(sm.getString("abstractConnectionHandler.processorCreate", processor));
-							}
-						} else if (negotiatedProtocol.equals("http/1.1")) {
-							// Explicitly negotiated the default protocol.
-							// Obtain a processor below.
-						} else {
-							// TODO:
-							// OpenSSL 1.0.2's ALPN callback doesn't support
-							// failing the handshake with an error if no
-							// protocol can be negotiated. Therefore, we need to
-							// fail the connection here. Once this is fixed,
-							// replace the code below with the commented out
-							// block.
-							if (getLog().isDebugEnabled()) {
-								getLog().debug(sm.getString("abstractConnectionHandler.negotiatedProcessor.fail",
-										negotiatedProtocol));
-							}
-							return SocketState.CLOSED;
-							/*
-							 * To replace the code above once OpenSSL 1.1.0 is used. // Failed to create
-							 * processor. This is a bug. throw new IllegalStateException(sm.getString(
-							 * "abstractConnectionHandler.negotiatedProcessor.fail", negotiatedProtocol));
-							 */
-						}
-					}
-				}
-				if (processor == null) {
-					processor = recycledProcessors.pop();
-					if (getLog().isDebugEnabled()) {
-						getLog().debug(sm.getString("abstractConnectionHandler.processorPop", processor));
-					}
-				}
-				if (processor == null) {
-					processor = getProtocol().createProcessor();
-					register(processor);
-					if (getLog().isDebugEnabled()) {
-						getLog().debug(sm.getString("abstractConnectionHandler.processorCreate", processor));
-					}
-				}
-
-				processor.setSslSupport(channel.getSslSupport(getProtocol().getClientCertProvider()));
-
-				// Associate the processor with the connection
-				channel.setCurrentProcessor(processor);
-
-				SocketState state = SocketState.CLOSED;
-				do {
-					state = processor.process(channel, event);
-
-					if (state == SocketState.UPGRADING) {
-						// Get the HTTP upgrade handler
-						UpgradeToken upgradeToken = processor.getUpgradeToken();
-						// Retrieve leftover input
-						ByteBuffer leftOverInput = processor.getLeftoverInput();
-						if (upgradeToken == null) {
-							// Assume direct HTTP/2 connection
-							UpgradeProtocol upgradeProtocol = getProtocol().getUpgradeProtocol("h2c");
-							if (upgradeProtocol != null) {
-								processor = upgradeProtocol.getProcessor(channel, getProtocol().getAdapter());
-								channel.unRead(leftOverInput);
-								// Associate with the processor with the connection
-								channel.setCurrentProcessor(processor);
-							} else {
-								if (getLog().isDebugEnabled()) {
-									getLog().debug(
-											sm.getString("abstractConnectionHandler.negotiatedProcessor.fail", "h2c"));
-								}
-								return SocketState.CLOSED;
-							}
-						} else {
-							HttpUpgradeHandler httpUpgradeHandler = upgradeToken.getHttpUpgradeHandler();
-							// Release the Http11 processor to be re-used
-							release(processor);
-							// Create the upgrade processor
-							processor = getProtocol().createUpgradeProcessor(channel, upgradeToken);
-							if (getLog().isDebugEnabled()) {
-								getLog().debug(
-										sm.getString("abstractConnectionHandler.upgradeCreate", processor, channel));
-							}
 							channel.unRead(leftOverInput);
-							// Mark the connection as upgraded
-							channel.setUpgraded(true);
 							// Associate with the processor with the connection
 							channel.setCurrentProcessor(processor);
-							// Initialise the upgrade handler (which may trigger
-							// some IO using the new protocol which is why the lines
-							// above are necessary)
-							// This cast should be safe. If it fails the error
-							// handling for the surrounding try/catch will deal with
-							// it.
-							if (upgradeToken.getInstanceManager() == null) {
+						} else {
+							if (getLog().isDebugEnabled()) {
+								getLog().debug(
+										sm.getString("abstractConnectionHandler.negotiatedProcessor.fail", "h2c"));
+							}
+							return SocketState.CLOSED;
+						}
+					} else {
+						HttpUpgradeHandler httpUpgradeHandler = upgradeToken.getHttpUpgradeHandler();
+						// Release the Http11 processor to be re-used
+						release(processor);
+						// Create the upgrade processor
+						processor = getProtocol().createUpgradeProcessor(channel, upgradeToken);
+						if (getLog().isDebugEnabled()) {
+							getLog().debug(sm.getString("abstractConnectionHandler.upgradeCreate", processor, channel));
+						}
+						channel.unRead(leftOverInput);
+						// Mark the connection as upgraded
+						channel.setUpgraded(true);
+						// Associate with the processor with the connection
+						channel.setCurrentProcessor(processor);
+						// Initialise the upgrade handler (which may trigger
+						// some IO using the new protocol which is why the lines
+						// above are necessary)
+						// This cast should be safe. If it fails the error
+						// handling for the surrounding try/catch will deal with
+						// it.
+						if (upgradeToken.getInstanceManager() == null) {
+							httpUpgradeHandler.init((WebConnection) processor);
+							if (channel.isClosed()) {
+								state = SocketState.CLOSED;
+							}
+						} else {
+							ClassLoader oldCL = upgradeToken.getContextBind().bind(false, null);
+							try {
 								httpUpgradeHandler.init((WebConnection) processor);
 								if (channel.isClosed()) {
 									state = SocketState.CLOSED;
 								}
-							} else {
-								ClassLoader oldCL = upgradeToken.getContextBind().bind(false, null);
-								try {
-									httpUpgradeHandler.init((WebConnection) processor);
-									if (channel.isClosed()) {
-										state = SocketState.CLOSED;
-									}
-								} finally {
-									upgradeToken.getContextBind().unbind(false, oldCL);
-								}
-							}
-							if (state != SocketState.CLOSED) {
-								if (httpUpgradeHandler instanceof InternalHttpUpgradeHandler) {
-									if (((InternalHttpUpgradeHandler) httpUpgradeHandler).hasAsyncIO()) {
-										// The handler will initiate all further I/O
-										state = SocketState.LONG;
-									}
-								}
-							}
-						}
-					}
-				} while (state == SocketState.UPGRADING);
-
-				if (state == SocketState.LONG) {
-					// In the middle of processing a request/response. Keep the
-					// socket associated with the processor. Exact requirements
-					// depend on type of long poll
-					longPoll(channel, processor);
-					if (processor.isAsync()) {
-						getProtocol().addWaitingProcessor(processor);
-					}
-				} else if (state == SocketState.OPEN) {
-					// In keep-alive but between requests. OK to recycle
-					// processor. Continue to poll for the next request.
-					channel.setCurrentProcessor(null);
-					release(processor);
-					channel.registerReadInterest();
-				} else if (state == SocketState.SENDFILE) {
-					// Sendfile in progress. If it fails, the socket will be
-					// closed. If it works, the socket either be added to the
-					// poller (or equivalent) to await more data or processed
-					// if there are any pipe-lined requests remaining.
-				} else if (state == SocketState.UPGRADED) {
-					// Don't add sockets back to the poller if this was a
-					// non-blocking write otherwise the poller may trigger
-					// multiple read events which may lead to thread starvation
-					// in the connector. The write() method will add this socket
-					// to the poller if necessary.
-					if (event != SocketEvent.OPEN_WRITE) {
-						longPoll(channel, processor);
-						getProtocol().addWaitingProcessor(processor);
-					}
-				} else if (state == SocketState.SUSPENDED) {
-					// Don't add sockets back to the poller.
-					// The resumeProcessing() method will add this socket
-					// to the poller.
-				} else {
-					// Connection closed. OK to recycle the processor.
-					// Processors handling upgrades require additional clean-up
-					// before release.
-					channel.setCurrentProcessor(null);
-					if (processor.isUpgrade()) {
-						UpgradeToken upgradeToken = processor.getUpgradeToken();
-						HttpUpgradeHandler httpUpgradeHandler = upgradeToken.getHttpUpgradeHandler();
-						InstanceManager instanceManager = upgradeToken.getInstanceManager();
-						if (instanceManager == null) {
-							httpUpgradeHandler.destroy();
-						} else {
-							ClassLoader oldCL = upgradeToken.getContextBind().bind(false, null);
-							try {
-								httpUpgradeHandler.destroy();
 							} finally {
-								try {
-									instanceManager.destroyInstance(httpUpgradeHandler);
-								} catch (Throwable e) {
-									ExceptionUtils.handleThrowable(e);
-									getLog().error(sm.getString("abstractConnectionHandler.error"), e);
-								}
 								upgradeToken.getContextBind().unbind(false, oldCL);
 							}
 						}
+						if (state != SocketState.CLOSED) {
+							if (httpUpgradeHandler instanceof InternalHttpUpgradeHandler) {
+								if (((InternalHttpUpgradeHandler) httpUpgradeHandler).hasAsyncIO()) {
+									// The handler will initiate all further I/O
+									state = SocketState.LONG;
+								}
+							}
+						}
 					}
-					release(processor);
 				}
-				return state;
-			} catch (java.net.SocketException e) {
-				// SocketExceptions are normal
-				getLog().debug(sm.getString("abstractConnectionHandler.socketexception.debug"), e);
-			} catch (java.io.IOException e) {
-				// IOExceptions are normal
-				getLog().debug(sm.getString("abstractConnectionHandler.ioexception.debug"), e);
-			} catch (ProtocolException e) {
-				// Protocol exceptions normally mean the client sent invalid or
-				// incomplete data.
-				getLog().debug(sm.getString("abstractConnectionHandler.protocolexception.debug"), e);
-			}
-			// Future developers: if you discover any other
-			// rare-but-nonfatal exceptions, catch them here, and log as
-			// above.
-			catch (OutOfMemoryError oome) {
-				// Try and handle this here to give Tomcat a chance to close the
-				// connection and prevent clients waiting until they time out.
-				// Worst case, it isn't recoverable and the attempt at logging
-				// will trigger another OOME.
-				getLog().error(sm.getString("abstractConnectionHandler.oome"), oome);
-			} catch (Throwable e) {
-				ExceptionUtils.handleThrowable(e);
-				// any other exception or error is odd. Here we log it
-				// with "ERROR" level, so it will show up even on
-				// less-than-verbose logs.
-				getLog().error(sm.getString("abstractConnectionHandler.error"), e);
-			} finally {
-				ContainerThreadMarker.clear();
-			}
+			} while (state == SocketState.UPGRADING);
 
-			// Make sure socket/processor is removed from the list of current
-			// connections
-			channel.setCurrentProcessor(null);
-			release(processor);
-			return SocketState.CLOSED;
-		}
-
-		protected void longPoll(Channel<?> channel, Processor processor) {
-			if (!processor.isAsync()) {
-				// This is currently only used with HTTP
-				// Either:
-				// - this is an upgraded connection
-				// - the request line/headers have not been completely
-				// read
+			if (state == SocketState.LONG) {
+				// In the middle of processing a request/response. Keep the
+				// socket associated with the processor. Exact requirements
+				// depend on type of long poll
+				longPoll(channel, processor);
+				if (processor.isAsync()) {
+					getProtocol().addWaitingProcessor(processor);
+				}
+			} else if (state == SocketState.OPEN) {
+				// In keep-alive but between requests. OK to recycle
+				// processor. Continue to poll for the next request.
+				channel.setCurrentProcessor(null);
+				release(processor);
 				channel.registerReadInterest();
-			}
-		}
-
-		@Override
-		public Set<S> getOpenSockets() {
-			Set<Channel<S>> set = proto.getEndpoint().getConnections();
-			Set<S> result = new HashSet<>();
-			for (Channel<S> socketWrapper : set) {
-				S socket = socketWrapper.getSocket();
-				if (socket != null) {
-					result.add(socket);
+			} else if (state == SocketState.SENDFILE) {
+				// Sendfile in progress. If it fails, the socket will be
+				// closed. If it works, the socket either be added to the
+				// poller (or equivalent) to await more data or processed
+				// if there are any pipe-lined requests remaining.
+			} else if (state == SocketState.UPGRADED) {
+				// Don't add sockets back to the poller if this was a
+				// non-blocking write otherwise the poller may trigger
+				// multiple read events which may lead to thread starvation
+				// in the connector. The write() method will add this socket
+				// to the poller if necessary.
+				if (event != SocketEvent.OPEN_WRITE) {
+					longPoll(channel, processor);
+					getProtocol().addWaitingProcessor(processor);
 				}
-			}
-			return result;
-		}
-
-		/**
-		 * Expected to be used by the handler once the processor is no longer required.
-		 *
-		 * @param processor Processor being released (that was associated with the
-		 *                  socket)
-		 */
-		private void release(Processor processor) {
-			if (processor != null) {
-				processor.recycle();
+			} else if (state == SocketState.SUSPENDED) {
+				// Don't add sockets back to the poller.
+				// The resumeProcessing() method will add this socket
+				// to the poller.
+			} else {
+				// Connection closed. OK to recycle the processor.
+				// Processors handling upgrades require additional clean-up
+				// before release.
+				channel.setCurrentProcessor(null);
 				if (processor.isUpgrade()) {
-					// UpgradeProcessorInternal instances can utilise AsyncIO.
-					// If they do, the processor will not pass through the
-					// process() method and be removed from waitingProcessors
-					// so do that here.
-					if (processor instanceof UpgradeProcessorInternal) {
-						if (((UpgradeProcessorInternal) processor).hasAsyncIO()) {
-							getProtocol().removeWaitingProcessor(processor);
+					UpgradeToken upgradeToken = processor.getUpgradeToken();
+					HttpUpgradeHandler httpUpgradeHandler = upgradeToken.getHttpUpgradeHandler();
+					InstanceManager instanceManager = upgradeToken.getInstanceManager();
+					if (instanceManager == null) {
+						httpUpgradeHandler.destroy();
+					} else {
+						ClassLoader oldCL = upgradeToken.getContextBind().bind(false, null);
+						try {
+							httpUpgradeHandler.destroy();
+						} finally {
+							try {
+								instanceManager.destroyInstance(httpUpgradeHandler);
+							} catch (Throwable e) {
+								ExceptionUtils.handleThrowable(e);
+								getLog().error(sm.getString("abstractConnectionHandler.error"), e);
+							}
+							upgradeToken.getContextBind().unbind(false, oldCL);
 						}
-					}
-				} else {
-					// After recycling, only instances of UpgradeProcessorBase
-					// will return true for isUpgrade().
-					// Instances of UpgradeProcessorBase should not be added to
-					// recycledProcessors since that pool is only for AJP or
-					// HTTP processors
-					recycledProcessors.push(processor);
-					if (getLog().isDebugEnabled()) {
-						getLog().debug("Pushed Processor [" + processor + "]");
 					}
 				}
+				release(processor);
+			}
+			return state;
+		} catch (java.net.SocketException e) {
+			// SocketExceptions are normal
+			getLog().debug(sm.getString("abstractConnectionHandler.socketexception.debug"), e);
+		} catch (java.io.IOException e) {
+			// IOExceptions are normal
+			getLog().debug(sm.getString("abstractConnectionHandler.ioexception.debug"), e);
+		} catch (ProtocolException e) {
+			// Protocol exceptions normally mean the client sent invalid or
+			// incomplete data.
+			getLog().debug(sm.getString("abstractConnectionHandler.protocolexception.debug"), e);
+		}
+		// Future developers: if you discover any other
+		// rare-but-nonfatal exceptions, catch them here, and log as
+		// above.
+		catch (OutOfMemoryError oome) {
+			// Try and handle this here to give Tomcat a chance to close the
+			// connection and prevent clients waiting until they time out.
+			// Worst case, it isn't recoverable and the attempt at logging
+			// will trigger another OOME.
+			getLog().error(sm.getString("abstractConnectionHandler.oome"), oome);
+		} catch (Throwable e) {
+			ExceptionUtils.handleThrowable(e);
+			// any other exception or error is odd. Here we log it
+			// with "ERROR" level, so it will show up even on
+			// less-than-verbose logs.
+			getLog().error(sm.getString("abstractConnectionHandler.error"), e);
+		} finally {
+			ContainerThreadMarker.clear();
+		}
+
+		// Make sure socket/processor is removed from the list of current
+		// connections
+		channel.setCurrentProcessor(null);
+		release(processor);
+		return SocketState.CLOSED;
+	}
+
+	/**
+	 * Transfers processing to a container thread.
+	 *
+	 * @param runnable The actions to process on a container thread
+	 *
+	 * @throws RejectedExecutionException If the runnable cannot be executed
+	 */
+	@Override
+	public void execute(Runnable runnable) {
+		Executor executor = getExecutor();
+		if (!endpoint.isRunning() || executor == null) {
+			throw new RejectedExecutionException();
+		}
+		executor.execute(runnable);
+	}
+
+	protected void longPoll(Channel<?> channel, Processor processor) {
+		if (!processor.isAsync()) {
+			// This is currently only used with HTTP
+			// Either:
+			// - this is an upgraded connection
+			// - the request line/headers have not been completely
+			// read
+			channel.registerReadInterest();
+		}
+	}
+
+	@Override
+	public Set<S> getOpenSockets() {
+		Set<Channel<S>> set = endpoint.getConnections();
+		Set<S> result = new HashSet<>();
+		for (Channel<S> socketWrapper : set) {
+			S socket = socketWrapper.getSocket();
+			if (socket != null) {
+				result.add(socket);
 			}
 		}
+		return result;
+	}
 
-		/**
-		 * Expected to be used by the Endpoint to release resources on socket close,
-		 * errors etc.
-		 */
-		@Override
-		public void release(Channel<S> channel) {
-			Processor processor = (Processor) channel.getCurrentProcessor();
-			channel.setCurrentProcessor(null);
-			release(processor);
-		}
-
-		protected void register(Processor processor) {
-			if (getProtocol().getDomain() != null) {
-				synchronized (this) {
-					try {
-						long count = registerCount.incrementAndGet();
-						RequestInfo rp = processor.getRequestData().getRequestProcessor();
-						rp.setGlobalProcessor(global);
-						ObjectName rpName = new ObjectName(
-								getProtocol().getDomain() + ":type=RequestProcessor,worker=" + getProtocol().getName()
-										+ ",name=" + getProtocol().getProtocolName() + "Request" + count);
-						if (getLog().isDebugEnabled()) {
-							getLog().debug("Register [" + processor + "] as [" + rpName + "]");
-						}
-						Registry.getRegistry(null, null).registerComponent(rp, rpName, null);
-						rp.setRpName(rpName);
-					} catch (Exception e) {
-						getLog().warn(sm.getString("abstractProtocol.processorRegisterError"), e);
+	/**
+	 * Expected to be used by the handler once the processor is no longer required.
+	 *
+	 * @param processor Processor being released (that was associated with the
+	 *                  socket)
+	 */
+	private void release(Processor processor) {
+		if (processor != null) {
+			processor.recycle();
+			if (processor.isUpgrade()) {
+				// UpgradeProcessorInternal instances can utilise AsyncIO.
+				// If they do, the processor will not pass through the
+				// process() method and be removed from waitingProcessors
+				// so do that here.
+				if (processor instanceof UpgradeProcessorInternal) {
+					if (((UpgradeProcessorInternal) processor).hasAsyncIO()) {
+						getProtocol().removeWaitingProcessor(processor);
 					}
 				}
-			}
-		}
-
-		protected void unregister(Processor processor) {
-			if (getProtocol().getDomain() != null) {
-				synchronized (this) {
-					try {
-						RequestData r = processor.getRequestData();
-						if (r == null) {
-							// Probably an UpgradeProcessor
-							return;
-						}
-						RequestInfo rp = r.getRequestProcessor();
-						rp.setGlobalProcessor(null);
-						ObjectName rpName = rp.getRpName();
-						if (getLog().isDebugEnabled()) {
-							getLog().debug("Unregister [" + rpName + "]");
-						}
-						Registry.getRegistry(null, null).unregisterComponent(rpName);
-						rp.setRpName(null);
-					} catch (Exception e) {
-						getLog().warn(sm.getString("abstractProtocol.processorUnregisterError"), e);
-					}
-				}
-			}
-		}
-
-		@Override
-		public final void pause() {
-			/*
-			 * Inform all the processors associated with current connections that the
-			 * endpoint is being paused. Most won't care. Those processing multiplexed
-			 * streams may wish to take action. For example, HTTP/2 may wish to stop
-			 * accepting new streams.
-			 *
-			 * Note that even if the endpoint is resumed, there is (currently) no API to
-			 * inform the Processors of this.
-			 */
-			for (Channel<S> channel : proto.getEndpoint().getConnections()) {
-				Processor processor = (Processor) channel.getCurrentProcessor();
-				if (processor != null) {
-					processor.pause();
+			} else {
+				// After recycling, only instances of UpgradeProcessorBase
+				// will return true for isUpgrade().
+				// Instances of UpgradeProcessorBase should not be added to
+				// recycledProcessors since that pool is only for AJP or
+				// HTTP processors
+				recycledProcessors.push(processor);
+				if (getLog().isDebugEnabled()) {
+					getLog().debug("Pushed Processor [" + processor + "]");
 				}
 			}
 		}
 	}
 
-	protected static class RecycledProcessors extends SynchronizedStack<Processor> {
+	/**
+	 * Expected to be used by the Endpoint to release resources on socket close,
+	 * errors etc.
+	 */
+	@Override
+	public void release(Channel<S> channel) {
+		Processor processor = (Processor) channel.getCurrentProcessor();
+		channel.setCurrentProcessor(null);
+		release(processor);
+	}
 
-		private final transient ConnectionHandler<?> handler;
+	protected void register(Processor processor) {
+		if (getDomain() != null) {
+			synchronized (this) {
+				try {
+					long count = registerCount.incrementAndGet();
+					RequestInfo rp = processor.getRequestData().getRequestProcessor();
+					rp.setGlobalProcessor(global);
+					ObjectName rpName = new ObjectName(getProtocol().getDomain() + ":type=RequestProcessor,worker="
+							+ getProtocol().getName() + ",name=" + getProtocol().getProtocolName() + "Request" + count);
+					if (getLog().isDebugEnabled()) {
+						getLog().debug("Register [" + processor + "] as [" + rpName + "]");
+					}
+					Registry.getRegistry(null, null).registerComponent(rp, rpName, null);
+					rp.setRpName(rpName);
+				} catch (Exception e) {
+					getLog().warn(sm.getString("abstractProtocol.processorRegisterError"), e);
+				}
+			}
+		}
+	}
+
+	protected void unregister(Processor processor) {
+		if (getDomain() != null) {
+			synchronized (this) {
+				try {
+					RequestData r = processor.getRequestData();
+					if (r == null) {
+						// Probably an UpgradeProcessor
+						return;
+					}
+					RequestInfo rp = r.getRequestProcessor();
+					rp.setGlobalProcessor(null);
+					ObjectName rpName = rp.getRpName();
+					if (getLog().isDebugEnabled()) {
+						getLog().debug("Unregister [" + rpName + "]");
+					}
+					Registry.getRegistry(null, null).unregisterComponent(rpName);
+					rp.setRpName(null);
+				} catch (Exception e) {
+					getLog().warn(sm.getString("abstractProtocol.processorUnregisterError"), e);
+				}
+			}
+		}
+	}
+
+	protected class RecycledProcessors extends SynchronizedStack<Processor> {
+
+		// private final transient ConnectionHandler<?> handler;
 		protected final AtomicInteger size = new AtomicInteger(0);
 
-		public RecycledProcessors(ConnectionHandler<?> handler) {
-			this.handler = handler;
+		public RecycledProcessors() {
+			// this.handler = handler;
 		}
 
 		@SuppressWarnings("sync-override") // Size may exceed cache size a bit
 		@Override
 		public boolean push(Processor processor) {
-			int cacheSize = handler.getProtocol().getProcessorCache();
+			int cacheSize = getProtocol().getProcessorCache();
 			boolean offer = cacheSize == -1 ? true : size.get() < cacheSize;
 			// avoid over growing our cache or add after we have stopped
 			boolean result = false;
@@ -1190,7 +1446,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 				}
 			}
 			if (!result)
-				handler.unregister(processor);
+				unregister(processor);
 			return result;
 		}
 
@@ -1208,7 +1464,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		public synchronized void clear() {
 			Processor next = pop();
 			while (next != null) {
-				handler.unregister(next);
+				unregister(next);
 				next = pop();
 			}
 			super.clear();

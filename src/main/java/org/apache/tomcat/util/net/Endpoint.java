@@ -2,8 +2,8 @@ package org.apache.tomcat.util.net;
 
 import java.net.InetAddress;
 import java.util.Set;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ScheduledExecutorService;
+
+import org.apache.coyote.AbstractProtocol;
 
 public interface Endpoint<S> {
 
@@ -18,6 +18,12 @@ public interface Endpoint<S> {
 			OPEN, CLOSED, LONG, ASYNC_END, SENDFILE, UPGRADING, UPGRADED, SUSPENDED
 		}
 
+		public AbstractProtocol<S> getProtocol();
+
+		public boolean processSocket(Channel<S> channel, SocketEvent event, boolean dispatch);
+
+		public void processSocket(Channel<S> channel, SocketEvent event);
+
 		/**
 		 * Process the provided socket with the given current status.
 		 *
@@ -27,6 +33,8 @@ public interface Endpoint<S> {
 		 * @return The state of the socket after processing
 		 */
 		public SocketState process(Channel<S> channel, SocketEvent status);
+
+		public void execute(Runnable runnable);
 
 		/**
 		 * Obtain the GlobalRequestProcessor associated with the handler.
@@ -59,15 +67,17 @@ public interface Endpoint<S> {
 		 * it is possible that the endpoint will be resumed so the handler should not
 		 * assume that a stop will follow.
 		 */
-		public void pause();
+		// public void pause();
 
 		/**
 		 * Recycle resources associated with the handler.
 		 */
-		public void recycle();
+		// public void recycle();
 	}
 
 	public void setHandler(Handler<S> handler);
+
+	public SocketProperties getSocketProperties();
 
 	public boolean setProperty(String name, String value);
 
@@ -77,29 +87,29 @@ public interface Endpoint<S> {
 
 	public boolean getUseSendfile();
 
-	public Executor getExecutor();
+	// public Executor getExecutor();
 
-	public void setExecutor(Executor executor);
+	// public void setExecutor(Executor executor);
 
-	public ScheduledExecutorService getUtilityExecutor();
+	// public ScheduledExecutorService getUtilityExecutor();
 
-	public void setUtilityExecutor(ScheduledExecutorService utilityExecutor);
+	// public void setUtilityExecutor(ScheduledExecutorService utilityExecutor);
 
-	public int getMaxThreads();
+	// public int getMaxThreads();
 
-	public void setMaxThreads(int maxThreads);
+	// public void setMaxThreads(int maxThreads);
 
 	public int getMaxConnections();
 
 	public void setMaxConnections(int maxCon);
 
-	public int getMinSpareThreads();
+	// public int getMinSpareThreads();
 
-	public void setMinSpareThreads(int minSpareThreads);
+	// public void setMinSpareThreads(int minSpareThreads);
 
-	public int getThreadPriority();
+	// public int getThreadPriority();
 
-	public void setThreadPriority(int threadPriority);
+	// public void setThreadPriority(int threadPriority);
 
 	public int getAcceptCount();
 
@@ -168,6 +178,8 @@ public interface Endpoint<S> {
 	public void start() throws Exception;
 
 	public Set<Channel<S>> getConnections();
+
+	public boolean isRunning();
 
 	public void pause();
 

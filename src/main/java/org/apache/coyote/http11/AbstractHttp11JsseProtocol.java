@@ -21,7 +21,7 @@ import org.apache.tomcat.util.net.openssl.OpenSSLImplementation;
 
 public abstract class AbstractHttp11JsseProtocol<S> extends AbstractHttp11Protocol<S> {
 
-	private AbstractJsseEndpoint<S, ?> endpoint;
+	protected AbstractJsseEndpoint<S, ?> endpoint;
 
 	public AbstractHttp11JsseProtocol(AbstractJsseEndpoint<S, ?> endpoint) {
 		super(endpoint);

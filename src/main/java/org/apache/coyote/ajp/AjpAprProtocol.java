@@ -19,44 +19,70 @@ package org.apache.coyote.ajp;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.AprEndpoint;
-
+import org.apache.tomcat.util.net.Channel;
+import org.apache.tomcat.util.net.SocketEvent;
+import org.apache.tomcat.util.net.Endpoint.Handler;
+import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 
 /**
  * This the APR/native based protocol handler implementation for AJP.
  */
 public class AjpAprProtocol extends AbstractAjpProtocol<Long> {
 
-    private static final Log log = LogFactory.getLog(AjpAprProtocol.class);
+	private static final Log log = LogFactory.getLog(AjpAprProtocol.class);
 
-    @Override
-    protected Log getLog() { return log; }
+	@Override
+	protected Log getLog() {
+		return log;
+	}
 
+	@Override
+	public boolean isAprRequired() {
+		// Override since this protocol implementation requires the APR/native
+		// library
+		return true;
+	}
 
-    @Override
-    public boolean isAprRequired() {
-        // Override since this protocol implementation requires the APR/native
-        // library
-        return true;
-    }
+	// ------------------------------------------------------------ Constructor
 
+	public AjpAprProtocol() {
+		super(new AprEndpoint());
+	}
 
-    // ------------------------------------------------------------ Constructor
+	// --------------------------------------------------------- Public Methods
 
-    public AjpAprProtocol() {
-        super(new AprEndpoint());
-    }
+	public int getPollTime() {
+		return ((AprEndpoint) getEndpoint()).getPollTime();
+	}
 
+	public void setPollTime(int pollTime) {
+		((AprEndpoint) getEndpoint()).setPollTime(pollTime);
+	}
 
-    // --------------------------------------------------------- Public Methods
+	// ----------------------------------------------------- JMX related methods
 
-    public int getPollTime() { return ((AprEndpoint)getEndpoint()).getPollTime(); }
-    public void setPollTime(int pollTime) { ((AprEndpoint)getEndpoint()).setPollTime(pollTime); }
+	@Override
+	protected String getNamePrefix() {
+		return "ajp-apr";
+	}
 
+	@Override
+	public void processSocket(Channel<Long> channel, SocketEvent event) {
+		try {
+			// Process the request from this socket
+			SocketState state = process(channel, event);
+			if (state == Handler.SocketState.CLOSED) {
+				// Close socket and pool
+				channel.close();
+			}
+		} finally {
+			channel = null;
+			event = null;
+			// return to cache
+			// if (isRunning() && !isPaused() && processorCache != null) {
+			// processorCache.push(this);
+			// }
+		}
+	}
 
-    // ----------------------------------------------------- JMX related methods
-
-    @Override
-    protected String getNamePrefix() {
-        return "ajp-apr";
-    }
 }

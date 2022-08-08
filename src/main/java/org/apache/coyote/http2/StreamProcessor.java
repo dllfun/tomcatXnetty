@@ -51,7 +51,8 @@ class StreamProcessor extends AbstractProcessor {
 	private SendfileState sendfileState = null;
 
 	StreamProcessor(Http2UpgradeHandler handler, Stream stream, Adapter adapter, Channel<?> channel) {
-		super(adapter, stream.getCoyoteRequest(), stream.getCoyoteResponse());
+		super(handler.getProtocol().getHttp11Protocol(), adapter, stream.getCoyoteRequest(),
+				stream.getCoyoteResponse());
 		this.handler = handler;
 		this.stream = stream;
 		this.stream.setProcessor(this);

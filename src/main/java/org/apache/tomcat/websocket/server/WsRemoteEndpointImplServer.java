@@ -259,7 +259,10 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 			if (useDispatch) {
 				OnResultRunnable r = new OnResultRunnable(sh, t);
 				try {
-					socketWrapper.execute(r);
+
+					// TODO sss
+					// socketWrapper.execute(r);
+					r.run();
 				} catch (RejectedExecutionException ree) {
 					// Can't use the executor so call the runnable directly.
 					// This may not be strictly specification compliant in all

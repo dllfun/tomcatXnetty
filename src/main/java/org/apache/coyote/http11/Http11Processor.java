@@ -136,7 +136,7 @@ public class Http11Processor extends AbstractProcessor {
 	private SendfileDataBase sendfileData = null;
 
 	public Http11Processor(AbstractHttp11Protocol<?> protocol, Adapter adapter) {
-		super(adapter);
+		super(protocol, adapter);
 		this.protocol = protocol;
 
 		httpParser = new HttpParser(protocol.getRelaxedPathChars(), protocol.getRelaxedQueryChars());
@@ -281,6 +281,7 @@ public class Http11Processor extends AbstractProcessor {
 					}
 				}
 			} catch (IOException e) {
+				e.printStackTrace();
 				System.err.println(e.getMessage());
 				if (log.isDebugEnabled()) {
 					log.debug(sm.getString("http11processor.header.parse"), e);

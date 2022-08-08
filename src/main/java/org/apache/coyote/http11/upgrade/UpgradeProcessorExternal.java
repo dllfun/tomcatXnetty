@@ -21,6 +21,7 @@ import java.io.IOException;
 import javax.servlet.ServletInputStream;
 import javax.servlet.ServletOutputStream;
 
+import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.UpgradeToken;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -38,8 +39,8 @@ public class UpgradeProcessorExternal extends UpgradeProcessorBase {
 	private final UpgradeServletInputStream upgradeServletInputStream;
 	private final UpgradeServletOutputStream upgradeServletOutputStream;
 
-	public UpgradeProcessorExternal(Channel<?> wrapper, UpgradeToken upgradeToken) {
-		super(upgradeToken);
+	public UpgradeProcessorExternal(AbstractProtocol<?> protocol, Channel<?> wrapper, UpgradeToken upgradeToken) {
+		super(protocol, upgradeToken);
 		this.upgradeServletInputStream = new UpgradeServletInputStream(this, wrapper);
 		this.upgradeServletOutputStream = new UpgradeServletOutputStream(this, wrapper);
 

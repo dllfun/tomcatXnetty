@@ -29,6 +29,10 @@ import org.apache.tomcat.util.net.openssl.ciphers.Cipher;
 
 public abstract class AbstractJsseEndpoint<S, U> extends AbstractEndpoint<S, U> {
 
+	public AbstractJsseEndpoint() {
+
+	}
+
 	private String sslImplementationName = null;
 	private int sniParseLimit = 64 * 1024;
 
