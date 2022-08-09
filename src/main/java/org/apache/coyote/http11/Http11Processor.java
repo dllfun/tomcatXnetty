@@ -230,73 +230,77 @@ public class Http11Processor extends AbstractProcessor {
 	@Override
 	public boolean processInIoThread(Channel<?> channel, SocketEvent event) throws IOException {
 
-		// Setting up the I/O
-		setChannel(channel);
-		System.out.println("parse in io thread start");
+		if (event == SocketEvent.OPEN_READ) {
 
-		try {
-			if (!inputBuffer.parseRequestLine(false, protocol.getConnectionTimeout(), protocol.getKeepAliveTimeout())) {
-				if (inputBuffer.getParsingRequestLinePhase() == -1) {
-					return true;
-				} else if (handleIncompleteRequestLineRead()) {
-					return false;
+			// Setting up the I/O
+			setChannel(channel);
+			System.out.println("parse in io thread start");
+
+			try {
+				if (!inputBuffer.parseRequestLine(false, protocol.getConnectionTimeout(),
+						protocol.getKeepAliveTimeout())) {
+					if (inputBuffer.getParsingRequestLinePhase() == -1) {
+						return true;
+					} else if (handleIncompleteRequestLineRead()) {
+						return false;
+					}
 				}
+
+				prepareRequestProtocol();
+
+				if (protocol.isPaused()) {
+					// 503 - Service unavailable
+					responseData.setStatus(503);
+					setErrorState(ErrorState.CLOSE_CLEAN, null);
+				} else {
+					// Set this every time in case limit has been changed via JMX
+					requestData.getMimeHeaders().setLimit(protocol.getMaxHeaderCount());
+					// Don't parse headers for HTTP/0.9
+					if (!http09 && !inputBuffer.parseHeaders()) {
+						// We've read part of the request, don't recycle it
+						// instead associate it with the socket
+						openSocket = true;
+						readComplete = false;
+						return false;
+					}
+					if (!protocol.getDisableUploadTimeout()) {
+						channel.setReadTimeout(protocol.getConnectionUploadTimeout());
+					}
+				}
+			} catch (IOException e) {
+				e.printStackTrace();
+				System.err.println(e.getMessage());
+				if (log.isDebugEnabled()) {
+					log.debug(sm.getString("http11processor.header.parse"), e);
+				}
+				setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
+			} catch (Throwable t) {
+				if (requestData.protocol().isNull()) {
+					// Avoid unknown protocol triggering an additional error
+					requestData.protocol().setString(Constants.HTTP_11);
+				}
+				ExceptionUtils.handleThrowable(t);
+				UserDataHelper.Mode logMode = userDataHelper.getNextMode();
+				if (logMode != null) {
+					String message = sm.getString("http11processor.header.parse");
+					switch (logMode) {
+					case INFO_THEN_DEBUG:
+						message += sm.getString("http11processor.fallToDebug");
+						//$FALL-THROUGH$
+					case INFO:
+						log.info(message, t);
+						break;
+					case DEBUG:
+						log.debug(message, t);
+					}
+				}
+				// 400 - Bad Request
+				responseData.setStatus(400);
+				setErrorState(ErrorState.CLOSE_CLEAN, t);
 			}
 
-			prepareRequestProtocol();
-
-			if (protocol.isPaused()) {
-				// 503 - Service unavailable
-				responseData.setStatus(503);
-				setErrorState(ErrorState.CLOSE_CLEAN, null);
-			} else {
-				// Set this every time in case limit has been changed via JMX
-				requestData.getMimeHeaders().setLimit(protocol.getMaxHeaderCount());
-				// Don't parse headers for HTTP/0.9
-				if (!http09 && !inputBuffer.parseHeaders()) {
-					// We've read part of the request, don't recycle it
-					// instead associate it with the socket
-					openSocket = true;
-					readComplete = false;
-					return false;
-				}
-				if (!protocol.getDisableUploadTimeout()) {
-					channel.setReadTimeout(protocol.getConnectionUploadTimeout());
-				}
-			}
-		} catch (IOException e) {
-			e.printStackTrace();
-			System.err.println(e.getMessage());
-			if (log.isDebugEnabled()) {
-				log.debug(sm.getString("http11processor.header.parse"), e);
-			}
-			setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
-		} catch (Throwable t) {
-			if (requestData.protocol().isNull()) {
-				// Avoid unknown protocol triggering an additional error
-				requestData.protocol().setString(Constants.HTTP_11);
-			}
-			ExceptionUtils.handleThrowable(t);
-			UserDataHelper.Mode logMode = userDataHelper.getNextMode();
-			if (logMode != null) {
-				String message = sm.getString("http11processor.header.parse");
-				switch (logMode) {
-				case INFO_THEN_DEBUG:
-					message += sm.getString("http11processor.fallToDebug");
-					//$FALL-THROUGH$
-				case INFO:
-					log.info(message, t);
-					break;
-				case DEBUG:
-					log.debug(message, t);
-				}
-			}
-			// 400 - Bad Request
-			responseData.setStatus(400);
-			setErrorState(ErrorState.CLOSE_CLEAN, t);
+			System.out.println("parse in io thread end");
 		}
-
-		System.out.println("parse in io thread end");
 		return true;
 	}
 
