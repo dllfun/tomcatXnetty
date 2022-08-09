@@ -296,7 +296,7 @@ public abstract class AbstractChannel<E> implements Channel<E> {
 	public final void close() {
 		if (closed.compareAndSet(false, true)) {
 			try {
-				getEndpoint().getHandler().release(this);
+				getEndpoint().getHandler().getProtocol().release(this);
 			} catch (Throwable e) {
 				ExceptionUtils.handleThrowable(e);
 				if (log.isDebugEnabled()) {
@@ -631,6 +631,11 @@ public abstract class AbstractChannel<E> implements Channel<E> {
 	 * handler.
 	 */
 	protected class VectoredIOCompletionHandler<A> implements CompletionHandler<Long, OperationState<A>> {
+
+		protected VectoredIOCompletionHandler() {
+
+		}
+
 		@Override
 		public void completed(Long nBytes, OperationState<A> state) {
 			if (nBytes.longValue() < 0) {

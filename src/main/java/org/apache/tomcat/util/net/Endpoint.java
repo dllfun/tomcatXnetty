@@ -20,9 +20,21 @@ public interface Endpoint<S> {
 
 		public AbstractProtocol<S> getProtocol();
 
-		public boolean processSocket(Channel<S> channel, SocketEvent event, boolean dispatch);
+		/**
+		 * Process the given SocketWrapper with the given status. Used to trigger
+		 * processing as if the Poller (for those endpoints that have one) selected the
+		 * socket.
+		 *
+		 * @param socketWrapper The socket wrapper to process
+		 * @param event         The socket event to be processed
+		 * @param dispatch      Should the processing be performed on a new container
+		 *                      thread
+		 *
+		 * @return if processing was triggered successfully
+		 */
+		public void processSocket(Channel<S> channel, SocketEvent event, boolean dispatch);
 
-		public void processSocket(Channel<S> channel, SocketEvent event);
+		// public void processSocket(Channel<S> channel, SocketEvent event);
 
 		/**
 		 * Process the provided socket with the given current status.
@@ -32,16 +44,16 @@ public interface Endpoint<S> {
 		 *
 		 * @return The state of the socket after processing
 		 */
-		public SocketState process(Channel<S> channel, SocketEvent status);
+		// public SocketState process(Channel<S> channel, SocketEvent status);
 
-		public void execute(Runnable runnable);
+		// public void execute(Runnable runnable);
 
 		/**
 		 * Obtain the GlobalRequestProcessor associated with the handler.
 		 *
 		 * @return the GlobalRequestProcessor
 		 */
-		public Object getGlobal();
+		// public Object getGlobal();
 
 		/**
 		 * Obtain the currently open sockets.
@@ -51,15 +63,15 @@ public interface Endpoint<S> {
 		 * @deprecated Unused, will be removed in Tomcat 10, replaced by
 		 *             AbstractEndpoint.getConnections
 		 */
-		@Deprecated
-		public Set<S> getOpenSockets();
+		// @Deprecated
+		// public Set<S> getOpenSockets();
 
 		/**
 		 * Release any resources associated with the given SocketWrapper.
 		 *
 		 * @param socketWrapper The socketWrapper to release resources for
 		 */
-		public void release(Channel<S> channel);
+		// public void release(Channel<S> channel);
 
 		/**
 		 * Inform the handler that the endpoint has stopped accepting any new

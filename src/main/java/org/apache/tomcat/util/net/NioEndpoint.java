@@ -51,7 +51,6 @@ import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.IntrospectionUtils;
 import org.apache.tomcat.util.collections.SynchronizedQueue;
 import org.apache.tomcat.util.collections.SynchronizedStack;
-import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SocketWrapperBase.SocketBufferHandler;
 import org.apache.tomcat.util.net.jsse.JSSESupport;
 
@@ -746,8 +745,8 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 									if (!socketWrapper.getReadOperation().process()) {
 										closeSocket = true;
 									}
-								} else if (!getHandler().processSocket(socketWrapper, SocketEvent.OPEN_READ, true)) {
-									closeSocket = true;
+								} else {
+									getHandler().processSocket(socketWrapper, SocketEvent.OPEN_READ, true);
 								}
 							}
 							if (!closeSocket && sk.isWritable()) {
@@ -755,8 +754,8 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 									if (!socketWrapper.getWriteOperation().process()) {
 										closeSocket = true;
 									}
-								} else if (!getHandler().processSocket(socketWrapper, SocketEvent.OPEN_WRITE, true)) {
-									closeSocket = true;
+								} else {
+									getHandler().processSocket(socketWrapper, SocketEvent.OPEN_WRITE, true);
 								}
 							}
 							if (closeSocket) {
@@ -844,9 +843,10 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 							if (log.isDebugEnabled()) {
 								log.debug("Connection is keep alive, processing pipe-lined data");
 							}
-							if (!getHandler().processSocket(socketWrapper, SocketEvent.OPEN_READ, true)) {
-								poller.cancelledKey(sk, socketWrapper);
-							}
+							getHandler().processSocket(socketWrapper, SocketEvent.OPEN_READ, true);
+							// if () {
+							// poller.cancelledKey(sk, socketWrapper);
+							// }
 							break;
 						}
 						case OPEN: {
@@ -958,8 +958,9 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 									if (!socketWrapper.getWriteOperation().process()) {
 										cancelledKey(key, socketWrapper);
 									}
-								} else if (!getHandler().processSocket(socketWrapper, SocketEvent.ERROR, true)) {
-									cancelledKey(key, socketWrapper);
+								} else {
+									getHandler().processSocket(socketWrapper, SocketEvent.ERROR, true);
+									// cancelledKey(key, socketWrapper);
 								}
 							}
 						}

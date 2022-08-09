@@ -627,7 +627,8 @@ public class Http11InputBuffer implements ChannelHandler {
 	 */
 	boolean parseHeaders() throws IOException {
 		if (!parsingHeader) {
-			throw new IllegalStateException(sm.getString("iib.parseheaders.ise.error"));
+			// throw new IllegalStateException(sm.getString("iib.parseheaders.ise.error"));
+			return true;
 		}
 
 		BufWrapper byteBuffer = channel.getAppReadBuffer();

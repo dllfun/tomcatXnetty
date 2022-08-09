@@ -986,7 +986,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 			// TODO sads
 			// channel.processSocket(event, dispatch);
-			protocol.processSocket(channel, event, dispatch);
+			protocol.getHandler().processSocket(channel, event, dispatch);
 		}
 	}
 
@@ -1015,7 +1015,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 				 */
 				while (dispatches != null && dispatches.hasNext()) {
 					DispatchType dispatchType = dispatches.next();
-					protocol.processSocket(channel, dispatchType.getSocketStatus(), false);
+					protocol.getHandler().processSocket(channel, dispatchType.getSocketStatus(), false);
 				}
 			}
 		}

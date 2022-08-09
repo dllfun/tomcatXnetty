@@ -18,6 +18,8 @@ package org.apache.coyote.http11;
 
 import java.io.IOException;
 
+import org.apache.coyote.AbstractProtocol.HeadHandler;
+import org.apache.coyote.AbstractProtocol.TailHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
@@ -25,6 +27,7 @@ import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Nio2Channel;
 import org.apache.tomcat.util.net.Nio2Endpoint;
 import org.apache.tomcat.util.net.SocketEvent;
+import org.apache.tomcat.util.net.Endpoint.Handler;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.Nio2Endpoint.Nio2SocketWrapper;
 
@@ -37,6 +40,13 @@ public class Http11Nio2Protocol extends AbstractHttp11JsseProtocol<Nio2Channel> 
 
 	public Http11Nio2Protocol() {
 		super(new Nio2Endpoint());
+
+		Handler tailHandler = new TailHandler();
+		Handler nio2Handler = new Nio2Handler(tailHandler, this);
+		Handler headHandler = new HeadHandler<>(nio2Handler);
+		setHandler(headHandler);
+
+		endpoint.setHandler(headHandler);
 	}
 
 	@Override
@@ -55,93 +65,4 @@ public class Http11Nio2Protocol extends AbstractHttp11JsseProtocol<Nio2Channel> 
 		}
 	}
 
-	@Override
-	public void processSocket(final Channel<Nio2Channel> channel, SocketEvent event) {
-		Nio2Channel socket = channel.getSocket();
-		if (socket == null || !socket.isOpen()) {
-			channel.close();
-			return;
-		}
-
-		boolean launch = false;
-		try {
-			int handshake = -1;
-
-			try {
-
-				if (channel.getSocket().isHandshakeComplete()) {
-					// No TLS handshaking required. Let the handler
-					// process this socket / event combination.
-					handshake = 0;
-				} else if (event == SocketEvent.STOP || event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
-					// Unable to complete the TLS handshake. Treat it as
-					// if the handshake failed.
-					handshake = -1;
-				} else {
-					handshake = channel.getSocket().handshake();
-					// The handshake process reads/writes from/to the
-					// socket. status may therefore be OPEN_WRITE once
-					// the handshake completes. However, the handshake
-					// happens when the socket is opened so the status
-					// must always be OPEN_READ after it completes. It
-					// is OK to always set this as it is only used if
-					// the handshake completes.
-					event = SocketEvent.OPEN_READ;
-				}
-			} catch (IOException x) {
-				handshake = -1;
-				if (log.isDebugEnabled()) {
-					log.debug(sm.getString("endpoint.err.handshake"), x);
-				}
-			}
-			if (handshake == 0) {
-				SocketState state = SocketState.OPEN;
-				// Process the request from this socket
-				if (event == null) {
-					state = process(channel, SocketEvent.OPEN_READ);
-				} else {
-					state = process(channel, event);
-				}
-				if (state == SocketState.CLOSED) {
-					// Close socket and pool
-					channel.close();
-				} else if (state == SocketState.UPGRADING) {
-					launch = true;
-				}
-			} else if (handshake == -1) {
-				process(channel, SocketEvent.CONNECT_FAIL);
-				channel.close();
-			}
-		} catch (VirtualMachineError vme) {
-			ExceptionUtils.handleThrowable(vme);
-		} catch (Throwable t) {
-			log.error(sm.getString("endpoint.processing.fail"), t);
-			if (channel != null) {
-				((Nio2SocketWrapper) channel).close();
-			}
-		} finally {
-			if (launch) {
-				try {
-					getExecutor().execute(new Runnable() {
-
-						@Override
-						public void run() {
-							processSocket(channel, SocketEvent.OPEN_READ);
-						}
-					});
-				} catch (NullPointerException npe) {
-					if (endpoint.isRunning()) {
-						log.error(sm.getString("endpoint.launch.fail"), npe);
-					}
-				}
-			}
-			// channel = null;
-			// event = null;
-			// return to cache
-			// if (isRunning() && !isPaused() && processorCache != null) {
-			// processorCache.push(this);
-			// }
-		}
-
-	}
 }

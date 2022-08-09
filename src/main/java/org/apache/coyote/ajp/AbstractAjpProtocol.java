@@ -52,7 +52,6 @@ public abstract class AbstractAjpProtocol<S> extends AbstractProtocol<S> {
 		getEndpoint().setAddress(InetAddress.getLoopbackAddress());
 		// ConnectionHandler<S> cHandler = new ConnectionHandler<>(this);
 		// setHandler(cHandler);
-		getEndpoint().setHandler(this);
 	}
 
 	@Override

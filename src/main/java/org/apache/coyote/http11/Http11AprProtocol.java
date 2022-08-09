@@ -16,6 +16,8 @@
  */
 package org.apache.coyote.http11;
 
+import org.apache.coyote.AbstractProtocol.HeadHandler;
+import org.apache.coyote.AbstractProtocol.TailHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.AprEndpoint;
@@ -38,6 +40,13 @@ public class Http11AprProtocol extends AbstractHttp11Protocol<Long> {
 
 	public Http11AprProtocol() {
 		super(new AprEndpoint());
+
+		Handler tailHandler = new TailHandler();
+		Handler aprHandler = new AprHandler(tailHandler);
+		Handler headHandler = new HeadHandler<>(aprHandler);
+		setHandler(headHandler);
+
+		endpoint.setHandler(headHandler);
 	}
 
 	@Override
@@ -84,25 +93,6 @@ public class Http11AprProtocol extends AbstractHttp11Protocol<Long> {
 			return "https-openssl-apr";
 		} else {
 			return "http-apr";
-		}
-	}
-
-	@Override
-	public void processSocket(Channel<Long> channel, SocketEvent event) {
-		try {
-			// Process the request from this socket
-			SocketState state = process(channel, event);
-			if (state == Handler.SocketState.CLOSED) {
-				// Close socket and pool
-				channel.close();
-			}
-		} finally {
-			channel = null;
-			event = null;
-			// return to cache
-			// if (isRunning() && !isPaused() && processorCache != null) {
-			// processorCache.push(this);
-			// }
 		}
 	}
 

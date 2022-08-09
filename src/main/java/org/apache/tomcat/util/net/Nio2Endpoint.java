@@ -297,7 +297,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 			socketWrapper.setKeepAliveLeft(Nio2Endpoint.this.getMaxKeepAliveRequests());
 			socketWrapper.setSecure(isSSLEnabled());
 			// Continue processing on the same thread as the acceptor is async
-			return getHandler().processSocket(socketWrapper, SocketEvent.OPEN_READ, false);
+			getHandler().processSocket(socketWrapper, SocketEvent.OPEN_READ, false);
+			// TODO check
+			return true;
 		} catch (Throwable t) {
 			ExceptionUtils.handleThrowable(t);
 			log.error(sm.getString("endpoint.socketOptionsError"), t);
@@ -466,10 +468,11 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 								break;
 							}
 							case PIPELINED: {
-								if (!getEndpoint().getHandler().processSocket(Nio2SocketWrapper.this,
-										SocketEvent.OPEN_READ, true)) {
-									close();
-								}
+								getEndpoint().getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.OPEN_READ,
+										true);
+								// if () {
+								// close();
+								// }
 								break;
 							}
 							case OPEN: {
@@ -566,9 +569,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 						getReadPending().release();
 						// If already closed, don't call onError and close again
 						getEndpoint().getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.STOP, false);
-					} else if (!getEndpoint().getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.ERROR,
-							true)) {
-						close();
+					} else {
+						getEndpoint().getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.ERROR, true);
+						// close();
 					}
 				}
 			};
@@ -605,10 +608,10 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 						}
 					}
 					if (notify) {
-						if (!endpoint.getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.OPEN_WRITE,
-								true)) {
-							close();
-						}
+						endpoint.getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.OPEN_WRITE, true);
+						// if () {
+						// close();
+						// }
 					}
 				}
 
@@ -622,9 +625,10 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					}
 					setError(ioe);
 					getWritePending().release();
-					if (!endpoint.getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.ERROR, true)) {
-						close();
-					}
+					endpoint.getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.ERROR, true);
+					// if () {
+					// close();
+					// }
 				}
 			};
 
@@ -657,10 +661,10 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 						}
 					}
 					if (notify) {
-						if (!endpoint.getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.OPEN_WRITE,
-								true)) {
-							close();
-						}
+						endpoint.getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.OPEN_WRITE, true);
+						// if () {
+						// close();
+						// }
 					}
 				}
 
@@ -674,9 +678,10 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					}
 					setError(ioe);
 					getWritePending().release();
-					if (!endpoint.getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.ERROR, true)) {
-						close();
-					}
+					endpoint.getHandler().processSocket(Nio2SocketWrapper.this, SocketEvent.ERROR, true);
+					// if () {
+					// close();
+					// }
 				}
 			};
 
@@ -1324,9 +1329,10 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 						if (fillReadBuffer(false) > 0) {
 							// Special case where the read completed inline, there is no notification
 							// in that case so it has to be done here
-							if (!getEndpoint().getHandler().processSocket(this, SocketEvent.OPEN_READ, true)) {
-								close();
-							}
+							getEndpoint().getHandler().processSocket(this, SocketEvent.OPEN_READ, true);
+							// if () {
+							// close();
+							// }
 						}
 					} catch (IOException e) {
 						// Will never happen
@@ -1349,9 +1355,10 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				writeInterest = true;
 				if (getWritePending().availablePermits() == 1) {
 					// If no write is pending, notify that writing is possible
-					if (!getEndpoint().getHandler().processSocket(this, SocketEvent.OPEN_WRITE, true)) {
-						close();
-					}
+					getEndpoint().getHandler().processSocket(this, SocketEvent.OPEN_WRITE, true);
+					// if () {
+					// close();
+					// }
 				}
 			}
 		}

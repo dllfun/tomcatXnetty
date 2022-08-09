@@ -703,7 +703,8 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 		} else if (event == SocketEvent.OPEN_WRITE && socketWrapper.getWriteOperation() != null) {
 			return socketWrapper.getWriteOperation().process();
 		} else {
-			return getHandler().processSocket(socketWrapper, event, true);
+			getHandler().processSocket(socketWrapper, event, true);
+			return true;
 		}
 	}
 
@@ -1871,7 +1872,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 						getPoller().add(socket.getSocket().longValue(), getConnectionTimeout(), Poll.APR_POLLIN);
 					} else {
 						// Close socket and pool
-						getHandler().process(socket, SocketEvent.CONNECT_FAIL);
+						getHandler().processSocket(socket, SocketEvent.CONNECT_FAIL, false);
 						socket.close();
 						socket = null;
 					}
@@ -1879,18 +1880,18 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 					// Process the request from this socket
 					if (!setSocketOptions(socket)) {
 						// Close socket and pool
-						getHandler().process(socket, SocketEvent.CONNECT_FAIL);
+						getHandler().processSocket(socket, SocketEvent.CONNECT_FAIL, false);
 						socket.close();
 						socket = null;
 						return;
 					}
 					// Process the request from this socket
-					Handler.SocketState state = getHandler().process(socket, SocketEvent.OPEN_READ);
-					if (state == Handler.SocketState.CLOSED) {
-						// Close socket and pool
-						socket.close();
-						socket = null;
-					}
+					getHandler().processSocket(socket, SocketEvent.OPEN_READ, false);// Handler.SocketState state =
+					// if (state == Handler.SocketState.CLOSED) {
+					// Close socket and pool
+					// socket.close();
+					// socket = null;
+					// }
 				}
 			}
 		}

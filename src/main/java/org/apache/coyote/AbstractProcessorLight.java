@@ -37,6 +37,11 @@ public abstract class AbstractProcessorLight implements Processor {
 	private Set<DispatchType> dispatches = new CopyOnWriteArraySet<>();
 
 	@Override
+	public boolean processInIoThread(Channel<?> channel, SocketEvent event) throws IOException {
+		return true;
+	}
+
+	@Override
 	public final SocketState process(Channel<?> channel, SocketEvent event) throws IOException {
 
 		SocketState state = SocketState.CLOSED;

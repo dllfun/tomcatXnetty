@@ -16,15 +16,30 @@
  */
 package org.apache.coyote.http11;
 
+import java.nio.ByteBuffer;
 import java.nio.channels.CancelledKeyException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
+import javax.servlet.http.HttpUpgradeHandler;
+import javax.servlet.http.WebConnection;
+
+import org.apache.coyote.AbstractProtocol;
+import org.apache.coyote.ContainerThreadMarker;
+import org.apache.coyote.Processor;
+import org.apache.coyote.ProtocolException;
+import org.apache.coyote.UpgradeProtocol;
+import org.apache.coyote.UpgradeToken;
+import org.apache.coyote.AbstractProtocol.HeadHandler;
+import org.apache.coyote.AbstractProtocol.TailHandler;
+import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
+import org.apache.tomcat.InstanceManager;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.NettyEndpoint;
 import org.apache.tomcat.util.net.SocketEvent;
+import org.apache.tomcat.util.net.Endpoint.Handler;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 
 import io.netty.channel.Channel;
@@ -43,6 +58,14 @@ public class Http11NettyProtocol extends AbstractHttp11JsseProtocol<Channel> {
 
 	public Http11NettyProtocol() {
 		super(new NettyEndpoint());
+
+		Handler tailHandler = new TailHandler();
+		Handler nettyHandler = new NettyHandler(tailHandler);
+		Handler headHandler = new HeadHandler<>(nettyHandler);
+		Handler parseInIoHandler = new ParseInIoHandler(headHandler);
+		setHandler(parseInIoHandler);
+
+		endpoint.setHandler(parseInIoHandler);
 	}
 
 	@Override
@@ -86,37 +109,55 @@ public class Http11NettyProtocol extends AbstractHttp11JsseProtocol<Channel> {
 		}
 	}
 
-	@Override
-	public void processSocket(org.apache.tomcat.util.net.Channel<Channel> nettyChannel, SocketEvent event) {
-		io.netty.channel.Channel channel = nettyChannel.getSocket();
-		if (channel == null) {
-			nettyChannel.close();
-			return;
+	private class NettyHandler implements Handler<Channel> {
+
+		private Handler next;
+
+		public NettyHandler(Handler next) {
+			super();
+			this.next = next;
 		}
 
-		try {
+		@Override
+		public AbstractProtocol<Channel> getProtocol() {
+			// TODO Auto-generated method stub
+			return null;
+		}
 
-			SocketState state = SocketState.OPEN;
-			// Process the request from this socket
-			if (event == null) {
-				state = process(nettyChannel, SocketEvent.OPEN_READ);
-			} else {
-				state = process(nettyChannel, event);
+		@Override
+		public void processSocket(org.apache.tomcat.util.net.Channel<Channel> nettyChannel, SocketEvent event,
+				boolean dispatch) {
+			io.netty.channel.Channel channel = nettyChannel.getSocket();
+			if (channel == null) {
+				nettyChannel.close();
+				return;
 			}
-			if (state == SocketState.CLOSED) {
+
+			try {
+
+				// SocketState state = SocketState.OPEN;
+				// Process the request from this socket
+				if (event == null) {
+					next.processSocket(nettyChannel, SocketEvent.OPEN_READ, dispatch);
+				} else {
+					next.processSocket(nettyChannel, event, dispatch);
+				}
+				// if (state == SocketState.CLOSED) {
 				// System.out.println("close netty channel");
+				// nettyChannel.close();
+				// }
+
+			} catch (CancelledKeyException cx) {
+				nettyChannel.close();
+			} catch (VirtualMachineError vme) {
+				ExceptionUtils.handleThrowable(vme);
+				nettyChannel.close();
+			} catch (Throwable t) {
+				// log.error(sm.getString("endpoint.processing.fail"), t);
 				nettyChannel.close();
 			}
-
-		} catch (CancelledKeyException cx) {
-			nettyChannel.close();
-		} catch (VirtualMachineError vme) {
-			ExceptionUtils.handleThrowable(vme);
-			nettyChannel.close();
-		} catch (Throwable t) {
-			// log.error(sm.getString("endpoint.processing.fail"), t);
-			nettyChannel.close();
 		}
+
 	}
 
 }

@@ -29,6 +29,8 @@ import org.apache.tomcat.util.net.SocketEvent;
  */
 public interface Processor {
 
+	boolean processInIoThread(Channel<?> channel, SocketEvent event) throws IOException;
+
 	/**
 	 * Process a connection. This is called whenever an event occurs (e.g. more data
 	 * arrives) that allows processing to continue for a connection that is not

@@ -416,7 +416,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 		if (now == -1 || connectionTimeout > -1 && now > connectionTimeout) {
 			// Have to dispatch as this will be executed from a non-container
 			// thread.
-			protocol.getHttp11Protocol().processSocket(channel, SocketEvent.TIMEOUT, true);
+			protocol.getHttp11Protocol().getHandler().processSocket(channel, SocketEvent.TIMEOUT, true);
 		}
 	}
 
