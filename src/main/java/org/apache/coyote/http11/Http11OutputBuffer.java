@@ -51,7 +51,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 
 	private AbstractProcessor processor;
 
-	private AsyncState asyncState;
+	// private AsyncState asyncState;
 
 	/**
 	 * Associated Coyote response.
@@ -104,7 +104,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 
 		this.processor = processor;
 
-		this.asyncState = processor.getAsyncStateMachine();
+		// this.asyncState = processor.getAsyncStateMachine();
 
 		this.responseData = processor.getResponseData();
 
@@ -271,7 +271,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 			activeFilters[i].recycle();
 		}
 		// Recycle response object
-		responseData.recycle();
+		// responseData.recycle();
 		// Reset pointers
 		if (headerBuffer.reuseable()) {
 			headerBuffer.switchToWriteMode();
@@ -530,7 +530,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 	 * @return <code>true</code> if this is blocking IO
 	 */
 	protected final boolean isBlocking() {
-		return asyncState.getWriteListener() == null;
+		return responseData.getRequestData().getAsyncStateMachine().getWriteListener() == null;
 	}
 
 	protected final boolean isReady() {

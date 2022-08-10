@@ -89,7 +89,7 @@ public interface Processor {
 
 	ResponseData getResponseData();
 
-	AsyncState getAsyncStateMachine();
+	// AsyncState getAsyncStateMachine();
 
 	/**
 	 * Recycle the processor, ready for the next request which may be on the same

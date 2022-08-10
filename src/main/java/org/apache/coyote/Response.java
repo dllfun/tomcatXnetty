@@ -54,9 +54,7 @@ public final class Response {
 	/**
 	 * Action hook.
 	 */
-	private volatile ActionHook hook;
-
-	private AsyncState asyncState;
+	private volatile AbstractProcessor processor;
 
 	private OutputBuffer outputBuffer;
 
@@ -66,10 +64,9 @@ public final class Response {
 	// private boolean registeredForWrite = false;
 	// private final Object nonBlockingStateLock = new Object();
 
-	public Response(ResponseData responseData, ActionHook hook, AsyncState asyncState, OutputBuffer outputBuffer) {
+	public Response(ResponseData responseData, AbstractProcessor processor, OutputBuffer outputBuffer) {
 		this.responseData = responseData;
-		this.hook = hook;
-		this.asyncState = asyncState;
+		this.processor = processor;
 		this.outputBuffer = outputBuffer;
 	}
 
@@ -114,31 +111,31 @@ public final class Response {
 	// }
 
 	public void actionCOMMIT() {
-		hook.commit();
+		processor.commit();
 	}
 
 	public void actionACK() {
-		hook.sendAck();
+		processor.sendAck();
 	}
 
 	public void actionCLIENT_FLUSH() {
-		hook.clientFlush();
+		processor.clientFlush();
 	}
 
 	public void actionIS_ERROR(AtomicBoolean param) {
-		hook.isError(param);
+		processor.isError(param);
 	}
 
 	public void actionIS_IO_ALLOWED(AtomicBoolean param) {
-		hook.isIoAllowed(param);
+		processor.isIoAllowed(param);
 	}
 
 	public void actionCLOSE() {
-		hook.close();
+		processor.close();
 	}
 
 	public void actionCLOSE_NOW(Object param) {
-		hook.closeNow(param);
+		processor.closeNow(param);
 	}
 
 	// -------------------- State --------------------
@@ -276,7 +273,7 @@ public final class Response {
 
 	public void setTrailerFields(Supplier<Map<String, String>> supplier) {
 		AtomicBoolean trailerFieldsSupported = new AtomicBoolean(false);
-		hook.actionIS_TRAILER_FIELDS_SUPPORTED(trailerFieldsSupported);
+		processor.actionIS_TRAILER_FIELDS_SUPPORTED(trailerFieldsSupported);
 		if (!trailerFieldsSupported.get()) {
 			throw new IllegalStateException(sm.getString("response.noTrailers.notSupported"));
 		}
@@ -392,7 +389,7 @@ public final class Response {
 			// Send the connector a request for commit. The connector should
 			// then validate the headers, send them (using sendHeaders) and
 			// set the filters accordingly.
-			hook.commit();
+			processor.commit();
 		}
 		int len = chunk.remaining();
 		outputBuffer.doWrite(chunk);
@@ -408,7 +405,7 @@ public final class Response {
 		this.responseData.recycle();
 		// Servlet 3.1 non-blocking write listener
 		// listener = null;
-		// hook.setWriteListener(null);
+		// processor.setWriteListener(null);
 		// fireListener = false;
 		// registeredForWrite = false;
 
@@ -442,11 +439,11 @@ public final class Response {
 	}
 
 	public WriteListener getWriteListener() {
-		return asyncState.getWriteListener();
+		return responseData.getRequestData().getAsyncStateMachine().getWriteListener();
 	}
 
 	public void setWriteListener(WriteListener listener) {
-		asyncState.setWriteListener(listener);
+		responseData.getRequestData().getAsyncStateMachine().setWriteListener(listener);
 
 		// The container is responsible for the first call to
 		// listener.onWritePossible(). If isReady() returns true, the container
@@ -465,16 +462,16 @@ public final class Response {
 				// happen
 				responseData.setFireListener(true);
 			}
-			hook.actionDISPATCH_WRITE();
+			processor.actionDISPATCH_WRITE();
 			if (!ContainerThreadMarker.isContainerThread()) {
 				// Not on a container thread so need to execute the dispatch
-				hook.actionDISPATCH_EXECUTE();
+				processor.actionDISPATCH_EXECUTE();
 			}
 		}
 	}
 
 	public boolean isReady() {
-		if (asyncState.getWriteListener() == null) {
+		if (responseData.getRequestData().getAsyncStateMachine().getWriteListener() == null) {
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("response.notNonBlocking"));
 			}
@@ -497,7 +494,7 @@ public final class Response {
 		AtomicBoolean ready = new AtomicBoolean(false);
 		synchronized (responseData.getNonBlockingStateLock()) {
 			if (!responseData.isRegisteredForWrite()) {
-				hook.actionNB_WRITE_INTEREST(ready);
+				processor.actionNB_WRITE_INTEREST(ready);
 				responseData.setRegisteredForWrite(!ready.get());
 			}
 		}

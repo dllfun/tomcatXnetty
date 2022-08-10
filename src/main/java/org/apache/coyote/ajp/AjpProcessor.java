@@ -281,12 +281,12 @@ public class AjpProcessor extends AbstractProcessor {
 
 	@Override
 	protected Request createRequest() {
-		return new Request(this.requestData, this, asyncStateMachine, inputReader);
+		return new Request(this.requestData, this, inputReader);
 	}
 
 	@Override
 	protected Response createResponse() {
-		return new Response(this.responseData, this, asyncStateMachine, outputBuffer);
+		return new Response(this.responseData, this, outputBuffer);
 	}
 
 	// --------------------------------------------------------- Public Methods
@@ -481,7 +481,14 @@ public class AjpProcessor extends AbstractProcessor {
 			return SocketState.CLOSED;
 		} else {
 			if (isAsync()) {
-				return SocketState.LONG;
+				SocketState state = SocketState.LONG;
+				if (isAsync()) {
+					state = requestData.asyncPostProcess();
+					if (getLog().isDebugEnabled()) {
+						getLog().debug("Socket: [" + channel + "], State after async post processing: [" + state + "]");
+					}
+				}
+				return state;
 			} else {
 				return SocketState.OPEN;
 			}
@@ -495,8 +502,6 @@ public class AjpProcessor extends AbstractProcessor {
 		request.setResponse(response);
 		getAdapter().checkRecycled(request, response);
 		super.recycle();
-		this.requestData.recycle();
-		this.responseData.recycle();
 		first = true;
 		endOfStream = false;
 		waitingForBodyMessage = false;
@@ -1148,7 +1153,7 @@ public class AjpProcessor extends AbstractProcessor {
 	}
 
 	private void writeData(ByteBuffer chunk) throws IOException {
-		boolean blocking = (asyncStateMachine.getWriteListener() == null);
+		boolean blocking = (requestData.getAsyncStateMachine().getWriteListener() == null);
 
 		int len = chunk.remaining();
 		int off = 0;

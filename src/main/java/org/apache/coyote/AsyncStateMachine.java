@@ -18,6 +18,7 @@ package org.apache.coyote;
 
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
@@ -174,10 +175,10 @@ class AsyncStateMachine {
 	private final AtomicLong generation = new AtomicLong(0);
 	// Need this to fire listener on complete
 	private AsyncContextCallback asyncCtxt = null;
-	private final AbstractProcessor processor;
+	// private final AbstractProcessor processor;
 
-	AsyncStateMachine(AbstractProcessor processor) {
-		this.processor = processor;
+	AsyncStateMachine() {
+		// this.processor = processor;
 	}
 
 	boolean isAsync() {
@@ -389,7 +390,7 @@ class AsyncStateMachine {
 		return !ContainerThreadMarker.isContainerThread();
 	}
 
-	synchronized void asyncRun(Runnable runnable) {
+	synchronized void asyncRun(Executor executor, Runnable runnable) {
 		if (state == AsyncState.STARTING || state == AsyncState.STARTED || state == AsyncState.READ_WRITE_OP) {
 			// Execute the runnable using a container thread from the
 			// Connector's thread pool. Use a wrapper to prevent a memory leak
@@ -408,7 +409,7 @@ class AsyncStateMachine {
 					Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
 				}
 
-				processor.execute(runnable);
+				executor.execute(runnable);
 			} finally {
 				if (Constants.IS_SECURITY_ENABLED) {
 					PrivilegedAction<Void> pa = new PrivilegedSetTccl(oldCL);

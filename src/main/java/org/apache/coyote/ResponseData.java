@@ -154,6 +154,8 @@ public final class ResponseData {
 	private boolean registeredForWrite = false;
 	private final Object nonBlockingStateLock = new Object();
 
+	private RequestData requestData;
+
 	public ResponseData() {
 
 	}
@@ -171,6 +173,14 @@ public final class ResponseData {
 	// public void setOutputBuffer(OutputBuffer outputBuffer) {
 	// this.outputBuffer = outputBuffer;
 	// }
+
+	public RequestData getRequestData() {
+		return requestData;
+	}
+
+	public void setRequestData(RequestData requestData) {
+		this.requestData = requestData;
+	}
 
 	public MimeHeaders getMimeHeaders() {
 		return headers;

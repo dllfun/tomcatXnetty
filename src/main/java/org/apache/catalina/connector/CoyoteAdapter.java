@@ -238,7 +238,7 @@ public class CoyoteAdapter implements Adapter {
 					// Connection will be forcibly closed which will prevent
 					// completion happening at the usual point. Need to trigger
 					// call to onComplete() here.
-					req.actionASYNC_POST_PROCESS();
+					req.asyncPostProcess();
 				}
 				success = false;
 			}
@@ -363,7 +363,7 @@ public class CoyoteAdapter implements Adapter {
 				// Connection will be forcibly closed which will prevent
 				// completion happening at the usual point. Need to trigger
 				// call to onComplete() here.
-				req.actionASYNC_POST_PROCESS();
+				req.asyncPostProcess();
 				async = false;
 			}
 

@@ -28,6 +28,7 @@ import org.apache.tomcat.util.buf.UDecoder;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.Parameters;
 import org.apache.tomcat.util.http.ServerCookies;
+import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 
 /**
  * This is a low-level, efficient representation of a server request. Most
@@ -96,6 +97,8 @@ public final class RequestData {
 	 */
 	private final Object notes[] = new Object[Constants.MAX_NOTES];
 
+	protected final AsyncState asyncStateMachine;
+
 	/**
 	 * Associated input buffer.
 	 */
@@ -148,8 +151,9 @@ public final class RequestData {
 	// ----------------------------------------------------------- Constructors
 
 	public RequestData() {
-		parameters.setQuery(queryMB);
-		parameters.setURLDecoder(urlDecoder);
+		this.asyncStateMachine = new AsyncState();
+		this.parameters.setQuery(queryMB);
+		this.parameters.setURLDecoder(urlDecoder);
 	}
 
 	public boolean sendAllDataReadEvent() {
@@ -355,7 +359,7 @@ public final class RequestData {
 
 	public void setResponseData(ResponseData responseData) {
 		this.responseData = responseData;
-		// response.setRequest(this);
+		this.responseData.setRequestData(this);
 	}
 
 	// protected void setHook(ActionHook hook) {
@@ -504,11 +508,20 @@ public final class RequestData {
 		return notes[pos];
 	}
 
+	public AsyncState getAsyncStateMachine() {
+		return asyncStateMachine;
+	}
+
+	// @Override
+	public SocketState asyncPostProcess() {
+		return asyncStateMachine.asyncPostProcess();
+	}
+
 	// -------------------- Recycling --------------------
 
 	public void recycle() {
 		bytesRead = 0;
-
+		asyncStateMachine.recycle();
 		contentLength = -1;
 		contentTypeMB = null;
 		charset = null;

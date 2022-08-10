@@ -1632,7 +1632,7 @@ public class Request implements HttpServletRequest {
 		}
 
 		AtomicBoolean result = new AtomicBoolean(false);
-		coyoteRequest.actionASYNC_IS_DISPATCHING(result);
+		coyoteRequest.asyncIsDispatching(result);
 		return result.get();
 	}
 
@@ -1642,7 +1642,7 @@ public class Request implements HttpServletRequest {
 		}
 
 		AtomicBoolean result = new AtomicBoolean(false);
-		coyoteRequest.actionASYNC_IS_COMPLETING(result);
+		coyoteRequest.asyncIsCompleting(result);
 		return result.get();
 	}
 
@@ -1652,7 +1652,7 @@ public class Request implements HttpServletRequest {
 		}
 
 		AtomicBoolean result = new AtomicBoolean(false);
-		coyoteRequest.actionASYNC_IS_ASYNC(result);
+		coyoteRequest.asyncIsAsync(result);
 		return result.get();
 	}
 

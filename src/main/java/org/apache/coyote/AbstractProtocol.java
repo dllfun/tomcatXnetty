@@ -1211,12 +1211,14 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 				return;
 			}
 
+			boolean dispatched = false;
 			try {
 				if (processor == null) {
 					String negotiatedProtocol = channel.getNegotiatedProtocol();
 					// OpenSSL typically returns null whereas JSSE typically
 					// returns "" when no protocol is negotiated
 					if (negotiatedProtocol != null && negotiatedProtocol.length() > 0) {
+						dispatched = true;
 						next.processSocket(channel, event, dispatch);
 						return;
 					}
@@ -1241,6 +1243,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 				channel.setCurrentProcessor(processor);
 
 				if (processor.processInIoThread(channel, event)) {
+					dispatched = true;
 					next.processSocket(channel, event, dispatch);
 				}
 
@@ -1274,7 +1277,9 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 
 			// Make sure socket/processor is removed from the list of current
 			// connections
-			next.processSocket(channel, event, dispatch);
+			if (!dispatched) {
+				next.processSocket(channel, event, dispatch);
+			}
 
 		}
 

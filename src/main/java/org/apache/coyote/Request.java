@@ -27,16 +27,14 @@ public final class Request implements InputReader {
 
 	private RequestData requestData;
 	private Response response;
-	private volatile ActionHook hook;
+	private volatile AbstractProcessor processor;
 	private ChannelHandler channelHandler;
-	private AsyncState asyncState;
 
 	// ----------------------------------------------------------- Constructors
 
-	public Request(RequestData requestData, ActionHook hook, AsyncState asyncState, ChannelHandler channelHandler) {
+	public Request(RequestData requestData, AbstractProcessor processor, ChannelHandler channelHandler) {
 		this.requestData = requestData;
-		this.hook = hook;
-		this.asyncState = asyncState;
+		this.processor = processor;
 		this.channelHandler = channelHandler;
 	}
 
@@ -45,11 +43,11 @@ public final class Request implements InputReader {
 	// volatile ReadListener listener;
 
 	public ReadListener getReadListener() {
-		return asyncState.getReadListener();
+		return requestData.getAsyncStateMachine().getReadListener();
 	}
 
 	public void setReadListener(ReadListener listener) {
-		asyncState.setReadListener(listener);
+		requestData.getAsyncStateMachine().setReadListener(listener);
 	}
 
 	public boolean sendAllDataReadEvent() {
@@ -64,7 +62,7 @@ public final class Request implements InputReader {
 
 	public boolean isTrailerFieldsReady() {
 		AtomicBoolean result = new AtomicBoolean(false);
-		hook.actionIS_TRAILER_FIELDS_READY(result);
+		processor.actionIS_TRAILER_FIELDS_READY(result);
 		return result.get();
 	}
 
@@ -253,7 +251,7 @@ public final class Request implements InputReader {
 	}
 
 	public void actionIS_IO_ALLOWED(AtomicBoolean param) {
-		hook.isIoAllowed(param);
+		processor.isIoAllowed(param);
 	}
 
 	public void actionDISABLE_SWALLOW_INPUT() {
@@ -261,124 +259,124 @@ public final class Request implements InputReader {
 		// No point reading the remainder of the request.
 		channelHandler.disableSwallowRequest();
 		// This is an error state. Make sure it is marked as such.
-		hook.setErrorState(ErrorState.CLOSE_CLEAN, null);
+		processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
 	}
 
 	public void actionREQ_HOST_ADDR_ATTRIBUTE() {
-		hook.actionREQ_HOST_ADDR_ATTRIBUTE();
+		processor.actionREQ_HOST_ADDR_ATTRIBUTE();
 	}
 
 	public void actionREQ_HOST_ATTRIBUTE() {
-		hook.actionREQ_HOST_ATTRIBUTE();
+		processor.actionREQ_HOST_ATTRIBUTE();
 	}
 
 	public void actionREQ_REMOTEPORT_ATTRIBUTE() {
-		hook.actionREQ_REMOTEPORT_ATTRIBUTE();
+		processor.actionREQ_REMOTEPORT_ATTRIBUTE();
 	}
 
 	public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
-		hook.actionREQ_LOCAL_NAME_ATTRIBUTE();
+		processor.actionREQ_LOCAL_NAME_ATTRIBUTE();
 	}
 
 	public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
-		hook.actionREQ_LOCAL_ADDR_ATTRIBUTE();
+		processor.actionREQ_LOCAL_ADDR_ATTRIBUTE();
 	}
 
 	public void actionREQ_LOCALPORT_ATTRIBUTE() {
-		hook.actionREQ_LOCALPORT_ATTRIBUTE();
+		processor.actionREQ_LOCALPORT_ATTRIBUTE();
 	}
 
 	public void actionREQ_SSL_ATTRIBUTE() {
-		hook.actionREQ_SSL_ATTRIBUTE();
+		processor.actionREQ_SSL_ATTRIBUTE();
 	}
 
 	public void actionREQ_SSL_CERTIFICATE() {
-		hook.actionREQ_SSL_CERTIFICATE();
+		processor.actionREQ_SSL_CERTIFICATE();
 	}
 
 	// @Override
-	public void actionASYNC_POST_PROCESS() {
-		asyncState.asyncPostProcess();
+	public void asyncPostProcess() {
+		requestData.getAsyncStateMachine().asyncPostProcess();
 	}
 
 	// @Override
-	public void actionASYNC_DISPATCHED() {
-		asyncState.asyncDispatched();
+	public void asyncDispatched() {
+		requestData.getAsyncStateMachine().asyncDispatched();
 	}
 
 	// @Override
-	public void actionASYNC_RUN(Runnable param) {
-		asyncState.asyncRun(param);
+	public void asyncRun(Runnable runnable) {
+		requestData.getAsyncStateMachine().asyncRun(processor.getProtocol().getExecutor(), runnable);
 	}
 
 	// @Override
-	public void actionASYNC_DISPATCH() {
-		if (asyncState.asyncDispatch()) {
-			hook.processSocketEvent(SocketEvent.OPEN_READ, true);
+	public void asyncDispatch() {
+		if (requestData.getAsyncStateMachine().asyncDispatch()) {
+			processor.processSocketEvent(SocketEvent.OPEN_READ, true);
 		}
 	}
 
 	// @Override
-	public void actionASYNC_START(AsyncContextCallback param) {
-		asyncState.asyncStart(param);
+	public void asyncStart(AsyncContextCallback param) {
+		requestData.getAsyncStateMachine().asyncStart(param);
 	}
 
 	// @Override
-	public void actionASYNC_COMPLETE() {
-		hook.clearDispatches();
-		if (asyncState.asyncComplete()) {
-			hook.processSocketEvent(SocketEvent.OPEN_READ, true);
+	public void asyncComplete() {
+		processor.clearDispatches();
+		if (requestData.getAsyncStateMachine().asyncComplete()) {
+			processor.processSocketEvent(SocketEvent.OPEN_READ, true);
 		}
 	}
 
 	// @Override
-	public void actionASYNC_ERROR() {
-		asyncState.asyncError();
+	public void asyncError() {
+		requestData.getAsyncStateMachine().asyncError();
 	}
 
 	// @Override
-	public void actionASYNC_IS_ASYNC(AtomicBoolean param) {
-		param.set(asyncState.isAsync());
+	public void asyncIsAsync(AtomicBoolean param) {
+		param.set(requestData.getAsyncStateMachine().isAsync());
 	}
 
 	// @Override
-	public void actionASYNC_IS_COMPLETING(AtomicBoolean param) {
-		param.set(asyncState.isCompleting());
+	public void asyncIsCompleting(AtomicBoolean param) {
+		param.set(requestData.getAsyncStateMachine().isCompleting());
 	}
 
 	// @Override
-	public void actionASYNC_IS_DISPATCHING(AtomicBoolean param) {
-		param.set(asyncState.isAsyncDispatching());
+	public void asyncIsDispatching(AtomicBoolean param) {
+		param.set(requestData.getAsyncStateMachine().isAsyncDispatching());
 	}
 
 	// @Override
-	public void actionASYNC_IS_ERROR(AtomicBoolean param) {
-		param.set(asyncState.isAsyncError());
+	public void asyncIsError(AtomicBoolean param) {
+		param.set(requestData.getAsyncStateMachine().isAsyncError());
 	}
 
 	// @Override
-	public void actionASYNC_IS_STARTED(AtomicBoolean param) {
-		param.set(asyncState.isAsyncStarted());
+	public void asyncIsStarted(AtomicBoolean param) {
+		param.set(requestData.getAsyncStateMachine().isAsyncStarted());
 	}
 
 	// @Override
-	public void actionASYNC_IS_TIMINGOUT(AtomicBoolean param) {
-		param.set(asyncState.isAsyncTimingOut());
+	public void asyncIsTimingOut(AtomicBoolean param) {
+		param.set(requestData.getAsyncStateMachine().isAsyncTimingOut());
 	}
 
 	// @Override
-	public void actionASYNC_SETTIMEOUT(Long param) {
+	public void asyncSetTimeout(Long param) {
 		if (param == null) {
 			return;
 		}
 		long timeout = param.longValue();
-		asyncState.setAsyncTimeout(timeout);
+		requestData.getAsyncStateMachine().setAsyncTimeout(timeout);
 	}
 
 	// @Override
-	public void actionASYNC_TIMEOUT(AtomicBoolean param) {
+	public void asyncTimeout(AtomicBoolean param) {
 		AtomicBoolean result = param;
-		result.set(asyncState.asyncTimeout());
+		result.set(requestData.getAsyncStateMachine().asyncTimeout());
 	}
 
 	public void actionREQUEST_BODY_FULLY_READ(AtomicBoolean param) {
@@ -392,39 +390,39 @@ public final class Request implements InputReader {
 	}
 
 	public void actionNB_WRITE_INTEREST(AtomicBoolean param) {
-		hook.actionNB_WRITE_INTEREST(param);
+		processor.actionNB_WRITE_INTEREST(param);
 	}
 
 	public void actionDISPATCH_READ() {
-		hook.actionDISPATCH_READ();
+		processor.actionDISPATCH_READ();
 	}
 
 	public void actionDISPATCH_WRITE() {
-		hook.actionDISPATCH_WRITE();
+		processor.actionDISPATCH_WRITE();
 	}
 
 	public void actionDISPATCH_EXECUTE() {
-		hook.actionDISPATCH_EXECUTE();
+		processor.actionDISPATCH_EXECUTE();
 	}
 
 	public void actionUPGRADE(UpgradeToken param) {
-		hook.actionUPGRADE(param);
+		processor.actionUPGRADE(param);
 	}
 
 	public void actionIS_PUSH_SUPPORTED(AtomicBoolean param) {
-		hook.actionIS_PUSH_SUPPORTED(param);
+		processor.actionIS_PUSH_SUPPORTED(param);
 	}
 
 	public void actionPUSH_REQUEST(RequestData param) {
-		hook.actionPUSH_REQUEST(param);
+		processor.actionPUSH_REQUEST(param);
 	}
 
 	public void actionCONNECTION_ID(AtomicReference<Object> param) {
-		hook.actionCONNECTION_ID(param);
+		processor.actionCONNECTION_ID(param);
 	}
 
 	public void actionSTREAM_ID(AtomicReference<Object> param) {
-		hook.actionSTREAM_ID(param);
+		processor.actionSTREAM_ID(param);
 	}
 
 	// -------------------- Cookies --------------------

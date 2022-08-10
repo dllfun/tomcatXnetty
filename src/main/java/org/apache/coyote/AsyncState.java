@@ -21,8 +21,8 @@ public class AsyncState extends AsyncStateMachine {
 	 */
 	volatile WriteListener writerListener;
 
-	AsyncState(AbstractProcessor processor) {
-		super(processor);
+	AsyncState() {
+		super();
 	}
 
 	public void setAsyncTimeout(long timeout) {

@@ -63,12 +63,12 @@ class StreamProcessor extends AbstractProcessor {
 
 	@Override
 	protected Request createRequest() {
-		return new Request(this.requestData, this, asyncStateMachine, stream.getInputBuffer());
+		return new Request(this.requestData, this, stream.getInputBuffer());
 	}
 
 	@Override
 	protected Response createResponse() {
-		return new Response(this.responseData, this, asyncStateMachine, stream.getOutputBuffer());
+		return new Response(this.responseData, this, stream.getOutputBuffer());
 	}
 
 	final void process(SocketEvent event) {
@@ -346,7 +346,14 @@ class StreamProcessor extends AbstractProcessor {
 			requestData.updateCounters();
 			return SocketState.CLOSED;
 		} else if (isAsync()) {
-			return SocketState.LONG;
+			SocketState state = SocketState.LONG;
+			if (isAsync()) {
+				state = requestData.asyncPostProcess();
+				if (getLog().isDebugEnabled()) {
+					getLog().debug("Socket: [" + channel + "], State after async post processing: [" + state + "]");
+				}
+			}
+			return state;
 		} else {
 			close();
 			requestData.updateCounters();

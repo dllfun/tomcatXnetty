@@ -26,7 +26,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.servlet.RequestDispatcher;
 
-import org.apache.coyote.http11.AbstractHttp11Protocol;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
@@ -43,7 +42,7 @@ import org.apache.tomcat.util.res.StringManager;
  * Provides functionality and attributes common to all supported protocols
  * (currently HTTP and AJP) for processing a single request/response.
  */
-public abstract class AbstractProcessor extends AbstractProcessorLight implements ActionHook {
+public abstract class AbstractProcessor extends AbstractProcessorLight {
 
 	private static final StringManager sm = StringManager.getManager(AbstractProcessor.class);
 
@@ -63,7 +62,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	 * prevents the response mix-up.
 	 */
 	private volatile long asyncTimeoutGeneration = 0;
-	protected final AsyncState asyncStateMachine;
 	protected final RequestData requestData;
 	protected final ResponseData responseData;
 	// protected InputHandler inputHandler;
@@ -84,13 +82,35 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 			ResponseData responseData) {
 		this.protocol = protocol;
 		this.adapter = adapter;
-		this.asyncStateMachine = new AsyncState(this);
 		this.requestData = requestData;
 		this.responseData = responseData;
 		// response.setHook(this);
 		this.requestData.setResponseData(this.responseData);
 		// request.setHook(this);
 		this.userDataHelper = new UserDataHelper(getLog());
+	}
+
+	public AbstractProtocol<?> getProtocol() {
+		return protocol;
+	}
+
+	/**
+	 * Get the associated adapter.
+	 *
+	 * @return the associated adapter
+	 */
+	public Adapter getAdapter() {
+		return adapter;
+	}
+
+	@Override
+	public RequestData getRequestData() {
+		return requestData;
+	}
+
+	@Override
+	public ResponseData getResponseData() {
+		return responseData;
 	}
 
 	/**
@@ -116,7 +136,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 			requestData.setAttribute(RequestDispatcher.ERROR_EXCEPTION, t);
 		}
 		if (blockIo && isAsync() && setError) {
-			if (asyncStateMachine.asyncError()) {
+			if (requestData.getAsyncStateMachine().asyncError()) {
 				processSocketEvent(SocketEvent.ERROR, true);
 			}
 		}
@@ -124,30 +144,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	protected ErrorState getErrorState() {
 		return errorState;
-	}
-
-	@Override
-	public RequestData getRequestData() {
-		return requestData;
-	}
-
-	@Override
-	public ResponseData getResponseData() {
-		return responseData;
-	}
-
-	@Override
-	public AsyncState getAsyncStateMachine() {
-		return asyncStateMachine;
-	}
-
-	/**
-	 * Get the associated adapter.
-	 *
-	 * @return the associated adapter
-	 */
-	public Adapter getAdapter() {
-		return adapter;
 	}
 
 	/**
@@ -177,31 +173,26 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	 * @param runnable The task representing the processing that needs to take place
 	 *                 on a container thread
 	 */
-	protected void execute(Runnable runnable) {
-		Channel<?> channel = this.channel;
-		if (channel == null) {
-			throw new RejectedExecutionException(sm.getString("abstractProcessor.noExecute"));
-		} else {
-			// channel.execute(runnable);
-			protocol.getExecutor().execute(runnable);
-		}
-	}
+//	protected void execute(Runnable runnable) {
+//		Channel<?> channel = this.channel;
+//		if (channel == null) {
+//			throw new RejectedExecutionException(sm.getString("abstractProcessor.noExecute"));
+//		} else {
+//			// channel.execute(runnable);
+//			protocol.getExecutor().execute(runnable);
+//		}
+//	}
 
 	@Override
 	public boolean isAsync() {
-		return asyncStateMachine.isAsync();
-	}
-
-	@Override
-	public SocketState asyncPostProcess() {
-		return asyncStateMachine.asyncPostProcess();
+		return requestData.getAsyncStateMachine().isAsync();
 	}
 
 	@Override
 	public final SocketState dispatch(SocketEvent event) throws IOException {
 
-		if (event == SocketEvent.OPEN_WRITE && asyncStateMachine.getWriteListener() != null) {
-			asyncStateMachine.asyncOperation();
+		if (event == SocketEvent.OPEN_WRITE && requestData.getAsyncStateMachine().getWriteListener() != null) {
+			requestData.getAsyncStateMachine().asyncOperation();
 			try {
 				if (flushBufferedWrite()) {
 					return SocketState.LONG;
@@ -213,7 +204,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 				event = SocketEvent.ERROR;
 				requestData.setAttribute(RequestDispatcher.ERROR_EXCEPTION, ioe);
 			}
-		} else if (event == SocketEvent.OPEN_READ && asyncStateMachine.getReadListener() != null) {
+		} else if (event == SocketEvent.OPEN_READ && requestData.getAsyncStateMachine().getReadListener() != null) {
 			dispatchNonBlockingRead();
 		} else if (event == SocketEvent.ERROR) {
 			// An I/O error occurred on a non-container thread. This includes:
@@ -229,10 +220,11 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 				requestData.setAttribute(RequestDispatcher.ERROR_EXCEPTION, channel.getError());
 			}
 
-			if (asyncStateMachine.getReadListener() != null || asyncStateMachine.getWriteListener() != null) {
+			if (requestData.getAsyncStateMachine().getReadListener() != null
+					|| requestData.getAsyncStateMachine().getWriteListener() != null) {
 				// The error occurred during non-blocking I/O. Set the correct
 				// state else the error handling will trigger an ISE.
-				asyncStateMachine.asyncOperation();
+				requestData.getAsyncStateMachine().asyncOperation();
 			}
 		}
 
@@ -262,6 +254,12 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 			state = SocketState.CLOSED;
 		} else if (isAsync()) {
 			state = SocketState.LONG;
+			if (isAsync()) {
+				state = requestData.getAsyncStateMachine().asyncPostProcess();
+				if (getLog().isDebugEnabled()) {
+					getLog().debug("Socket: [" + channel + "], State after async post processing: [" + state + "]");
+				}
+			}
 		} else {
 			requestData.updateCounters();
 			state = dispatchEndRequest();
@@ -638,7 +636,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	// }
 	// }
 
-	@Override
+	// @Override
 	public void commit() {
 		if (!responseData.isCommitted()) {
 			try {
@@ -650,7 +648,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 		}
 	}
 
-	@Override
+	// @Override
 	public void close() {
 		commit();
 		try {
@@ -660,12 +658,12 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 		}
 	}
 
-	@Override
+	// @Override
 	public void sendAck() {
 		ack();
 	}
 
-	@Override
+	// @Override
 	public void clientFlush() {
 		commit();
 		try {
@@ -681,17 +679,17 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	// }
 
-	@Override
+	// @Override
 	public void isError(AtomicBoolean param) {
 		param.set(getErrorState().isError());
 	}
 
-	@Override
+	// @Override
 	public void isIoAllowed(AtomicBoolean param) {
 		param.set(getErrorState().isIoAllowed());
 	}
 
-	@Override
+	// @Override
 	public void closeNow(Object param) {
 		// Prevent further writes to the response
 		setSwallowResponse();
@@ -707,52 +705,52 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	// }
 
-	@Override
+	// @Override
 	public void actionREQ_HOST_ADDR_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && channel != null) {
 			requestData.remoteAddr().setString(channel.getRemoteAddr());
 		}
 	}
 
-	@Override
+	// @Override
 	public void actionREQ_HOST_ATTRIBUTE() {
 		populateRequestAttributeRemoteHost();
 	}
 
-	@Override
+	// @Override
 	public void actionREQ_LOCALPORT_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && channel != null) {
 			requestData.setLocalPort(channel.getLocalPort());
 		}
 	}
 
-	@Override
+	// @Override
 	public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && channel != null) {
 			requestData.localAddr().setString(channel.getLocalAddr());
 		}
 	}
 
-	@Override
+	// @Override
 	public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && channel != null) {
 			requestData.localName().setString(channel.getLocalName());
 		}
 	}
 
-	@Override
+	// @Override
 	public void actionREQ_REMOTEPORT_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && channel != null) {
 			requestData.setRemotePort(channel.getRemotePort());
 		}
 	}
 
-	@Override
+	// @Override
 	public void actionREQ_SSL_ATTRIBUTE() {
 		populateSslRequestAttributes();
 	}
 
-	@Override
+	// @Override
 	public void actionREQ_SSL_CERTIFICATE() {
 		try {
 			sslReHandShake();
@@ -771,62 +769,62 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	// }
 
-	@Override
+	// @Override
 	public void actionNB_WRITE_INTEREST(AtomicBoolean param) {
 		AtomicBoolean isReady = param;
 		isReady.set(isReadyForWrite());
 	}
 
-	@Override
+	// @Override
 	public void actionDISPATCH_READ() {
 		addDispatch(DispatchType.NON_BLOCKING_READ);
 	}
 
-	@Override
+	// @Override
 	public void actionDISPATCH_WRITE() {
 		addDispatch(DispatchType.NON_BLOCKING_WRITE);
 	}
 
-	@Override
+	// @Override
 	public void actionDISPATCH_EXECUTE() {
 		executeDispatches();
 	}
 
-	@Override
+	// @Override
 	public void actionUPGRADE(UpgradeToken param) {
 		doHttpUpgrade(param);
 	}
 
-	@Override
+	// @Override
 	public void actionIS_PUSH_SUPPORTED(AtomicBoolean param) {
 		AtomicBoolean result = param;
 		result.set(isPushSupported());
 	}
 
-	@Override
+	// @Override
 	public void actionPUSH_REQUEST(RequestData param) {
 		doPush(param);
 	}
 
-	@Override
+	// @Override
 	public void actionIS_TRAILER_FIELDS_READY(AtomicBoolean param) {
 		AtomicBoolean result = param;
 		result.set(isTrailerFieldsReady());
 	}
 
-	@Override
+	// @Override
 	public void actionIS_TRAILER_FIELDS_SUPPORTED(AtomicBoolean param) {
 		AtomicBoolean result = param;
 		result.set(isTrailerFieldsSupported());
 	}
 
-	@Override
+	// @Override
 	public void actionCONNECTION_ID(AtomicReference<Object> param) {
 		AtomicReference<Object> result = param;
 		result.set(getConnectionID());
 	}
 
-	@Override
+	// @Override
 	public void actionSTREAM_ID(AtomicReference<Object> param) {
 		AtomicReference<Object> result = param;
 		result.set(getStreamID());
@@ -847,7 +845,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	 * to the adapter.
 	 */
 	protected void dispatchNonBlockingRead() {
-		asyncStateMachine.asyncOperation();
+		requestData.getAsyncStateMachine().asyncOperation();
 	}
 
 	/**
@@ -862,13 +860,13 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 		if (now < 0) {
 			doTimeoutAsync();
 		} else {
-			long asyncTimeout = asyncStateMachine.getAsyncTimeout();
+			long asyncTimeout = requestData.getAsyncStateMachine().getAsyncTimeout();
 			if (asyncTimeout > 0) {
-				long asyncStart = asyncStateMachine.getLastAsyncStart();
+				long asyncStart = requestData.getAsyncStateMachine().getLastAsyncStart();
 				if ((now - asyncStart) > asyncTimeout) {
 					doTimeoutAsync();
 				}
-			} else if (!asyncStateMachine.isAvailable()) {
+			} else if (!requestData.getAsyncStateMachine().isAvailable()) {
 				// Timeout the async process if the associated web application
 				// is no longer running.
 				doTimeoutAsync();
@@ -878,20 +876,21 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	private void doTimeoutAsync() {
 		// Avoid multiple timeouts
-		asyncStateMachine.setAsyncTimeout(-1);
-		asyncTimeoutGeneration = asyncStateMachine.getCurrentGeneration();
+		requestData.getAsyncStateMachine().setAsyncTimeout(-1);
+		asyncTimeoutGeneration = requestData.getAsyncStateMachine().getCurrentGeneration();
 		processSocketEvent(SocketEvent.TIMEOUT, true);
 	}
 
 	@Override
 	public boolean checkAsyncTimeoutGeneration() {
-		return asyncTimeoutGeneration == asyncStateMachine.getCurrentGeneration();
+		return asyncTimeoutGeneration == requestData.getAsyncStateMachine().getCurrentGeneration();
 	}
 
 	@Override
 	public void recycle() {
 		errorState = ErrorState.NONE;
-		asyncStateMachine.recycle();
+		requestData.recycle();
+		responseData.recycle();
 
 	}
 
@@ -979,7 +978,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 		// NO-OP
 	}
 
-	@Override
+	// @Override
 	public void processSocketEvent(SocketEvent event, boolean dispatch) {
 		Channel channel = getChannel();
 		if (channel != null) {

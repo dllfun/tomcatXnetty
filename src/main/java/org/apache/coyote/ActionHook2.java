@@ -40,7 +40,7 @@ import org.apache.tomcat.util.net.SocketEvent;
  *
  * @author Remy Maucherat
  */
-public interface ActionHook {
+public interface ActionHook2 {
 
 	/**
 	 * Send an action to the connector.

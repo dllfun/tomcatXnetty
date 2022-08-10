@@ -142,10 +142,10 @@ public class Http11InputBuffer implements ChannelHandler {
 
 	// ----------------------------------------------------------- Constructors
 
-	public Http11InputBuffer(AbstractProcessor processor, int headerBufferSize, boolean rejectIllegalHeader,
+	public Http11InputBuffer(RequestData requestData, int headerBufferSize, boolean rejectIllegalHeader,
 			HttpParser httpParser) {
 
-		this.requestData = processor.getRequestData();
+		this.requestData = requestData;
 		headers = requestData.getMimeHeaders();
 
 		this.headerBufferSize = headerBufferSize;
@@ -250,7 +250,7 @@ public class Http11InputBuffer implements ChannelHandler {
 	void recycle() {
 		channel.getAppReadBuffer().reset();
 		channel = null;
-		requestData.recycle();
+		// requestData.recycle();
 
 		for (int i = 0; i <= lastActiveFilter; i++) {
 			activeFilters[i].recycle();
@@ -277,7 +277,7 @@ public class Http11InputBuffer implements ChannelHandler {
 	 * pointers so that we are ready to parse the next HTTP request.
 	 */
 	void nextRequest() {
-		requestData.recycle();
+		// requestData.recycle();
 
 		channel.getAppReadBuffer().nextRequest();
 

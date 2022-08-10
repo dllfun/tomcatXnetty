@@ -807,7 +807,7 @@ class Stream extends AbstractStream implements HeaderEmitter {
 					if (chunk.remaining() > 0 && !buffer.hasRemaining()) {
 						// Only flush if we have more data to write and the buffer
 						// is full
-						if (flush(true, processor.getAsyncStateMachine().getWriteListener() == null)) {
+						if (flush(true, requestData.getAsyncStateMachine().getWriteListener() == null)) {
 							writeBuffer.add(chunk);
 							dataLeft = true;
 							break;
@@ -948,7 +948,7 @@ class Stream extends AbstractStream implements HeaderEmitter {
 			 * undefined so we do the best we can which is to perform a flush using blocking
 			 * I/O or non-blocking I/O based depending which is currently in use.
 			 */
-			flush(processor.getAsyncStateMachine().getWriteListener() == null);
+			flush(requestData.getAsyncStateMachine().getWriteListener() == null);
 		}
 
 		@Override

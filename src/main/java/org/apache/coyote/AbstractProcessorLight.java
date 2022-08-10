@@ -78,12 +78,12 @@ public abstract class AbstractProcessorLight implements Processor {
 				getLog().debug("Socket: [" + channel + "], Status in: [" + event + "], State out: [" + state + "]");
 			}
 
-			if (isAsync()) {
-				state = asyncPostProcess();
-				if (getLog().isDebugEnabled()) {
-					getLog().debug("Socket: [" + channel + "], State after async post processing: [" + state + "]");
-				}
-			}
+//			if (isAsync()) {
+//				state = asyncPostProcess();
+//				if (getLog().isDebugEnabled()) {
+//					getLog().debug("Socket: [" + channel + "], State after async post processing: [" + state + "]");
+//				}
+//			}
 
 			if (dispatches == null || !dispatches.hasNext()) {
 				// Only returns non-null iterator if there are
@@ -183,7 +183,7 @@ public abstract class AbstractProcessorLight implements Processor {
 	 */
 	protected abstract SocketState dispatch(SocketEvent event) throws IOException;
 
-	protected abstract SocketState asyncPostProcess();
+	// protected abstract SocketState asyncPostProcess();
 
 	protected abstract Log getLog();
 }

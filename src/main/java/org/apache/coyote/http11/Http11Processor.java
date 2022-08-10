@@ -142,8 +142,8 @@ public class Http11Processor extends AbstractProcessor {
 
 		httpParser = new HttpParser(protocol.getRelaxedPathChars(), protocol.getRelaxedQueryChars());
 
-		inputBuffer = new Http11InputBuffer(this, protocol.getMaxHttpHeaderSize(), protocol.getRejectIllegalHeader(),
-				httpParser);
+		inputBuffer = new Http11InputBuffer(requestData, protocol.getMaxHttpHeaderSize(),
+				protocol.getRejectIllegalHeader(), httpParser);
 		// request.setInputBuffer(inputBuffer);
 
 		outputBuffer = new Http11OutputBuffer(this, protocol.getMaxHttpHeaderSize());
@@ -177,12 +177,12 @@ public class Http11Processor extends AbstractProcessor {
 
 	@Override
 	protected Request createRequest() {
-		return new Request(this.requestData, this, asyncStateMachine, inputBuffer);
+		return new Request(this.requestData, this, inputBuffer);
 	}
 
 	@Override
 	protected Response createResponse() {
-		return new Response(this.responseData, this, asyncStateMachine, outputBuffer);
+		return new Response(this.responseData, this, outputBuffer);
 	}
 
 	/**
@@ -529,7 +529,14 @@ public class Http11Processor extends AbstractProcessor {
 		if (getErrorState().isError() || (protocol.isPaused() && !isAsync())) {
 			return SocketState.CLOSED;
 		} else if (isAsync()) {
-			return SocketState.LONG;
+			SocketState state = SocketState.LONG;
+			if (isAsync()) {
+				state = requestData.asyncPostProcess();
+				if (getLog().isDebugEnabled()) {
+					getLog().debug("Socket: [" + channel + "], State after async post processing: [" + state + "]");
+				}
+			}
+			return state;
 		} else if (isUpgrade()) {
 			return SocketState.UPGRADING;
 		} else {
