@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.servlet.ReadListener;
 
+import org.apache.catalina.core.AsyncContextImpl;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.buf.UDecoder;
@@ -300,9 +301,9 @@ public final class Request implements InputReader {
 	}
 
 	// @Override
-	public void asyncDispatched() {
-		requestData.getAsyncStateMachine().asyncDispatched();
-	}
+	// public void asyncDispatched() {
+	// requestData.getAsyncStateMachine().asyncDispatched();
+	// }
 
 	// @Override
 	public void asyncRun(Runnable runnable) {
@@ -317,8 +318,12 @@ public final class Request implements InputReader {
 	}
 
 	// @Override
-	public void asyncStart(AsyncContextCallback param) {
+	public void asyncStart(AsyncContextImpl param) {
 		requestData.getAsyncStateMachine().asyncStart(param);
+	}
+
+	public AsyncContextImpl getAsyncContext() {
+		return requestData.getAsyncStateMachine().getAsyncCtxt();
 	}
 
 	// @Override
@@ -377,6 +382,18 @@ public final class Request implements InputReader {
 	public void asyncTimeout(AtomicBoolean param) {
 		AtomicBoolean result = param;
 		result.set(requestData.getAsyncStateMachine().asyncTimeout());
+	}
+
+	public void pushDispatchingState() {
+		requestData.getAsyncStateMachine().pushDispatchingState();
+	}
+
+	public void popDispatchingState() {
+		requestData.getAsyncStateMachine().popDispatchingState();
+	}
+
+	public boolean hasStackedState() {
+		return requestData.getAsyncStateMachine().hasStackedState();
 	}
 
 	public void actionREQUEST_BODY_FULLY_READ(AtomicBoolean param) {

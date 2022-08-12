@@ -191,6 +191,13 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	@Override
 	public final SocketState dispatch(SocketEvent event) throws IOException {
 
+		if (!requestData.getAsyncStateMachine().isAsync()) {
+			if (requestData.getAsyncStateMachine().hasStackedState()) {
+				requestData.getAsyncStateMachine().popDispatchingState();
+				requestData.getAsyncStateMachine().asyncPostProcess();
+			}
+		}
+
 		if (event == SocketEvent.OPEN_WRITE && requestData.getAsyncStateMachine().getWriteListener() != null) {
 			requestData.getAsyncStateMachine().asyncOperation();
 			try {

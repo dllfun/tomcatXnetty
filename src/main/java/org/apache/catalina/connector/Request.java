@@ -388,14 +388,11 @@ public class Request implements HttpServletRequest {
 	 */
 	protected String localName = null;
 
-	/**
-	 * AsyncContext
-	 */
-	private volatile AsyncContextImpl asyncContext = null;
-
 	protected Boolean asyncSupported = null;
 
 	private HttpServletRequest applicationRequest = null;
+
+	private volatile Runnable dispatch = null;
 
 	// --------------------------------------------------------- Public Methods
 
@@ -482,10 +479,11 @@ public class Request implements HttpServletRequest {
 		}
 
 		asyncSupported = null;
+		AsyncContextImpl asyncContext = coyoteRequest.getAsyncContext();
 		if (asyncContext != null) {
 			asyncContext.recycle();
 		}
-		asyncContext = null;
+		dispatch = null;
 	}
 
 	protected void recycleSessionInfo() {
@@ -1582,6 +1580,8 @@ public class Request implements HttpServletRequest {
 			throw ise;
 		}
 
+		AsyncContextImpl asyncContext = coyoteRequest.getAsyncContext();
+
 		if (asyncContext == null) {
 			asyncContext = new AsyncContextImpl(this);
 		}
@@ -1619,6 +1619,9 @@ public class Request implements HttpServletRequest {
 
 	@Override
 	public boolean isAsyncStarted() {
+
+		AsyncContextImpl asyncContext = coyoteRequest.getAsyncContext();
+
 		if (asyncContext == null) {
 			return false;
 		}
@@ -1627,6 +1630,9 @@ public class Request implements HttpServletRequest {
 	}
 
 	public boolean isAsyncDispatching() {
+
+		AsyncContextImpl asyncContext = coyoteRequest.getAsyncContext();
+
 		if (asyncContext == null) {
 			return false;
 		}
@@ -1637,6 +1643,9 @@ public class Request implements HttpServletRequest {
 	}
 
 	public boolean isAsyncCompleting() {
+
+		AsyncContextImpl asyncContext = coyoteRequest.getAsyncContext();
+
 		if (asyncContext == null) {
 			return false;
 		}
@@ -1647,6 +1656,9 @@ public class Request implements HttpServletRequest {
 	}
 
 	public boolean isAsync() {
+
+		AsyncContextImpl asyncContext = coyoteRequest.getAsyncContext();
+
 		if (asyncContext == null) {
 			return false;
 		}
@@ -1670,11 +1682,56 @@ public class Request implements HttpServletRequest {
 		if (!isAsyncStarted()) {
 			throw new IllegalStateException(sm.getString("request.notAsync"));
 		}
+		AsyncContextImpl asyncContext = coyoteRequest.getAsyncContext();
 		return asyncContext;
 	}
 
 	public AsyncContextImpl getAsyncContextInternal() {
+		AsyncContextImpl asyncContext = coyoteRequest.getAsyncContext();
 		return asyncContext;
+	}
+
+	public void setDispatch(Runnable dispatch) {
+		this.dispatch = dispatch;
+	}
+
+	public boolean hasDispatch() {
+		return this.dispatch != null;
+	}
+
+	public void doDispatch() throws ServletException, IOException {
+		if (log.isDebugEnabled()) {
+			log.debug("intDispatch");
+		}
+		try {
+			Runnable runnable = dispatch;
+			dispatch = null;
+			runnable.run();
+			// if (!request.isAsync()) {
+			// fireOnComplete();
+			// }
+		} catch (RuntimeException x) {
+			// doInternalComplete(true);
+			if (x.getCause() instanceof ServletException) {
+				throw (ServletException) x.getCause();
+			}
+			if (x.getCause() instanceof IOException) {
+				throw (IOException) x.getCause();
+			}
+			throw new ServletException(x);
+		}
+	}
+
+	public void pushDispatchingState() {
+		coyoteRequest.pushDispatchingState();
+	}
+
+	public void popDispatchingState() {
+		coyoteRequest.popDispatchingState();
+	}
+
+	public boolean hasStackedState() {
+		return coyoteRequest.hasStackedState();
 	}
 
 	@Override

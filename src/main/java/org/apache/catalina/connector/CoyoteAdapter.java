@@ -217,11 +217,19 @@ public class CoyoteAdapter implements Adapter {
 			}
 
 			if (request.isAsyncDispatching()) {
+				request.pushDispatchingState();
 				connector.getService().getContainer().getPipeline().getFirst().invoke(request, response);
-				Throwable t = (Throwable) request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
-				if (t != null) {
-					asyncConImpl.setErrorState(t, true);
+				if (!request.isAsync()) {
+					request.popDispatchingState();
+				} else {
+					Throwable throwable = (Throwable) request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
+					if (!request.isAsyncCompleting() && throwable != null) {
+						request.getAsyncContextInternal().setErrorState(throwable, true);
+					}
 				}
+				// if (t != null) {
+				// asyncConImpl.setErrorState(t, true);
+				// }
 			}
 
 			if (!request.isAsync()) {

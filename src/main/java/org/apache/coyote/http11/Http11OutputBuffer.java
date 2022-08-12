@@ -21,10 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 import org.apache.coyote.AbstractProcessor;
-import org.apache.coyote.ActionCode;
-import org.apache.coyote.AsyncState;
 import org.apache.coyote.CloseNowException;
-import org.apache.coyote.Response;
 import org.apache.coyote.ResponseData;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;

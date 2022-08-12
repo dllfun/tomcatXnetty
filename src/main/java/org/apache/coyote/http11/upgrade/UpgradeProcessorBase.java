@@ -23,7 +23,6 @@ import javax.servlet.http.WebConnection;
 
 import org.apache.coyote.AbstractProcessorLight;
 import org.apache.coyote.AbstractProtocol;
-import org.apache.coyote.AsyncState;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.ResponseData;
 import org.apache.coyote.UpgradeToken;

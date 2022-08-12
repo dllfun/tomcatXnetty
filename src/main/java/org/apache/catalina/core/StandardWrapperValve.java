@@ -164,8 +164,8 @@ final class StandardWrapperValve extends ValveBase {
 				if (context.getSwallowOutput()) {
 					try {
 						SystemLogHandler.startCapture();
-						if (request.isAsyncDispatching()) {
-							request.getAsyncContextInternal().doInternalDispatch();
+						if (request.hasDispatch()) {
+							request.doDispatch();
 						} else {
 							filterChain.doFilter(request.getRequest(), response.getResponse());
 						}
@@ -176,8 +176,8 @@ final class StandardWrapperValve extends ValveBase {
 						}
 					}
 				} else {
-					if (request.isAsyncDispatching()) {
-						request.getAsyncContextInternal().doInternalDispatch();
+					if (request.hasDispatch()) {
+						request.doDispatch();
 					} else {
 						filterChain.doFilter(request.getRequest(), response.getResponse());
 					}
