@@ -27,7 +27,7 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
-import org.apache.tomcat.util.net.Channel.BufWrapper;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**

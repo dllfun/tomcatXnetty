@@ -37,7 +37,6 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteBufferUtils;
 import org.apache.tomcat.util.compat.JreCompat;
 import org.apache.tomcat.util.net.NioEndpoint.NioSocketWrapper;
-import org.apache.tomcat.util.net.SocketWrapperBase.SocketBufferHandler;
 import org.apache.tomcat.util.net.TLSClientHelloExtractor.ExtractorResult;
 import org.apache.tomcat.util.net.openssl.ciphers.Cipher;
 import org.apache.tomcat.util.res.StringManager;
@@ -71,8 +70,8 @@ public class SecureNioChannel extends NioChannel {
 
 	protected NioSelectorPool pool;
 
-	public SecureNioChannel(SocketBufferHandler bufHandler, NioSelectorPool pool, NioEndpoint endpoint) {
-		super(bufHandler);
+	public SecureNioChannel(SocketProperties socketProperties, NioSelectorPool pool, NioEndpoint endpoint) {
+		super(socketProperties);
 
 		// Create the network buffers (these hold the encrypted data).
 		if (endpoint.getSocketProperties().getDirectSslBuffer()) {
@@ -174,12 +173,12 @@ public class SecureNioChannel extends NioChannel {
 	@Override
 	public int handshake(boolean read, boolean write) throws IOException {
 		if (handshakeComplete) {
-			return 0; // we have done our initial handshake
+			return HandShakeable.HANDSHAKE_COMPLETE; // we have done our initial handshake
 		}
 
 		if (!sniComplete) {
 			int sniResult = processSNI();
-			if (sniResult == 0) {
+			if (sniResult == HandShakeable.HANDSHAKE_COMPLETE) {
 				sniComplete = true;
 			} else {
 				return sniResult;
@@ -187,7 +186,7 @@ public class SecureNioChannel extends NioChannel {
 		}
 
 		if (!flush(netOutBuffer)) {
-			return SelectionKey.OP_WRITE; // we still have data to write
+			return HandShakeable.HANDSHAKE_NEEDWRITE; // we still have data to write
 		}
 
 		SSLEngineResult handshake = null;
@@ -209,7 +208,7 @@ public class SecureNioChannel extends NioChannel {
 				// we are complete if we have delivered the last package
 				handshakeComplete = !netOutBuffer.hasRemaining();
 				// return 0 if we are complete, otherwise we still have data to write
-				return handshakeComplete ? 0 : SelectionKey.OP_WRITE;
+				return handshakeComplete ? HandShakeable.HANDSHAKE_COMPLETE : HandShakeable.HANDSHAKE_NEEDWRITE;
 			case NEED_WRAP:
 				System.out.println(socketChannel.socket().getPort() + " need wrap");
 				// perform the wrap function
@@ -232,7 +231,7 @@ public class SecureNioChannel extends NioChannel {
 					}
 				} else if (handshake.getStatus() == Status.CLOSED) {
 					flush(netOutBuffer);
-					return -1;
+					return HandShakeable.HANDSHAKE_FAIL;
 				} else {
 					// wrap should always work with our buffers
 					throw new IOException(
@@ -245,7 +244,7 @@ public class SecureNioChannel extends NioChannel {
 							break;
 						}
 					}
-					return SelectionKey.OP_WRITE;
+					return HandShakeable.HANDSHAKE_NEEDWRITE;
 				}
 				// fall down to NEED_UNWRAP on the same call, will result in a
 				// BUFFER_UNDERFLOW if it needs data
@@ -266,7 +265,7 @@ public class SecureNioChannel extends NioChannel {
 				} else if (handshake.getStatus() == Status.BUFFER_UNDERFLOW) {
 					System.out.println(socketChannel.socket().getPort() + " need more data");
 					// read more data, reregister for OP_READ
-					return SelectionKey.OP_READ;
+					return HandShakeable.HANDSHAKE_NEEDREAD;
 				} else {
 					throw new IOException(
 							sm.getString("channel.nio.ssl.unexpectedStatusDuringWrap", handshake.getStatus()));
@@ -286,7 +285,7 @@ public class SecureNioChannel extends NioChannel {
 			}
 		}
 		// Handshake is complete if this point is reached
-		return 0;
+		return HandShakeable.HANDSHAKE_COMPLETE;
 	}
 
 	/*
@@ -307,7 +306,7 @@ public class SecureNioChannel extends NioChannel {
 		printInBuffer(pos);
 		if (bytesRead == -1) {
 			// Reached end of stream before SNI could be processed.
-			return -1;
+			return HandShakeable.HANDSHAKE_FAIL;
 		}
 		TLSClientHelloExtractor extractor = new TLSClientHelloExtractor(netInBuffer);
 		// byte[] b = netInBuffer.array();
@@ -338,7 +337,7 @@ public class SecureNioChannel extends NioChannel {
 			clientRequestedCiphers = extractor.getClientRequestedCiphers();
 			break;
 		case NEED_READ:
-			return SelectionKey.OP_READ;
+			return HandShakeable.HANDSHAKE_NEEDREAD;
 		case UNDERFLOW:
 			// Unable to buffer enough data to read SNI extension data
 			if (log.isDebugEnabled()) {
@@ -380,7 +379,7 @@ public class SecureNioChannel extends NioChannel {
 		sslEngine.beginHandshake();
 		handshakeStatus = sslEngine.getHandshakeStatus();
 		System.out.println(socketChannel.socket().getPort() + " processSNI end ");
-		return 0;
+		return HandShakeable.HANDSHAKE_COMPLETE;
 	}
 
 	/**
@@ -994,6 +993,8 @@ public class SecureNioChannel extends NioChannel {
 	}
 
 	private void printInBuffer(int pos) {
+		if ("1".equals("1"))
+			return;
 		synchronized (endpoint) {
 			System.out.print(socketChannel.socket().getPort() + " read:[");
 			for (int i = pos; i < netInBuffer.position(); i++) {

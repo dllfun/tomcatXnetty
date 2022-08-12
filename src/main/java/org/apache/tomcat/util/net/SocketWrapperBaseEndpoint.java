@@ -203,9 +203,9 @@ public abstract class SocketWrapperBaseEndpoint<S, U> extends AbstractJsseEndpoi
 	 * @param socket The newly accepted socket
 	 */
 	protected void closeSocket(U socket) {
-		Channel<S> socketWrapper = connections.get(socket);
-		if (socketWrapper != null) {
-			socketWrapper.close();
+		SocketChannel channel = connections.get(socket);
+		if (channel != null) {
+			channel.close();
 		}
 	}
 

@@ -28,6 +28,7 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SSLSupport;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 
 public class UpgradeProcessorInternal extends UpgradeProcessorBase {
@@ -36,7 +37,7 @@ public class UpgradeProcessorInternal extends UpgradeProcessorBase {
 
 	private final InternalHttpUpgradeHandler internalHttpUpgradeHandler;
 
-	public UpgradeProcessorInternal(AbstractProtocol<?> protocol, Channel<?> channel, UpgradeToken upgradeToken) {
+	public UpgradeProcessorInternal(AbstractProtocol<?> protocol, SocketChannel channel, UpgradeToken upgradeToken) {
 		super(protocol, upgradeToken);
 		this.internalHttpUpgradeHandler = (InternalHttpUpgradeHandler) upgradeToken.getHttpUpgradeHandler();
 		/*

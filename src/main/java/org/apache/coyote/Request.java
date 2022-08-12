@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.servlet.ReadListener;
 
+import org.apache.catalina.core.AsyncContextImpl;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.buf.UDecoder;
@@ -17,8 +18,8 @@ import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.Parameters;
 import org.apache.tomcat.util.http.ServerCookies;
 import org.apache.tomcat.util.net.DispatchType;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.net.SocketEvent;
-import org.apache.tomcat.util.net.Channel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 public final class Request implements InputReader {
@@ -61,9 +62,7 @@ public final class Request implements InputReader {
 	}
 
 	public boolean isTrailerFieldsReady() {
-		AtomicBoolean result = new AtomicBoolean(false);
-		processor.actionIS_TRAILER_FIELDS_READY(result);
-		return result.get();
+		return channelHandler.isTrailerFieldsReady();
 	}
 
 	public Map<String, String> getTrailerFields() {
@@ -263,27 +262,27 @@ public final class Request implements InputReader {
 	}
 
 	public void actionREQ_HOST_ADDR_ATTRIBUTE() {
-		processor.actionREQ_HOST_ADDR_ATTRIBUTE();
+		channelHandler.actionREQ_HOST_ADDR_ATTRIBUTE();
 	}
 
 	public void actionREQ_HOST_ATTRIBUTE() {
-		processor.actionREQ_HOST_ATTRIBUTE();
+		channelHandler.actionREQ_HOST_ATTRIBUTE();
 	}
 
 	public void actionREQ_REMOTEPORT_ATTRIBUTE() {
-		processor.actionREQ_REMOTEPORT_ATTRIBUTE();
+		channelHandler.actionREQ_REMOTEPORT_ATTRIBUTE();
 	}
 
 	public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
-		processor.actionREQ_LOCAL_NAME_ATTRIBUTE();
+		channelHandler.actionREQ_LOCAL_NAME_ATTRIBUTE();
 	}
 
 	public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
-		processor.actionREQ_LOCAL_ADDR_ATTRIBUTE();
+		channelHandler.actionREQ_LOCAL_ADDR_ATTRIBUTE();
 	}
 
 	public void actionREQ_LOCALPORT_ATTRIBUTE() {
-		processor.actionREQ_LOCALPORT_ATTRIBUTE();
+		channelHandler.actionREQ_LOCALPORT_ATTRIBUTE();
 	}
 
 	public void actionREQ_SSL_ATTRIBUTE() {
@@ -300,9 +299,9 @@ public final class Request implements InputReader {
 	}
 
 	// @Override
-	public void asyncDispatched() {
-		requestData.getAsyncStateMachine().asyncDispatched();
-	}
+	// public void asyncDispatched() {
+	// requestData.getAsyncStateMachine().asyncDispatched();
+	// }
 
 	// @Override
 	public void asyncRun(Runnable runnable) {
@@ -317,8 +316,12 @@ public final class Request implements InputReader {
 	}
 
 	// @Override
-	public void asyncStart(AsyncContextCallback param) {
+	public void asyncStart(AsyncContextImpl param) {
 		requestData.getAsyncStateMachine().asyncStart(param);
+	}
+
+	public AsyncContextImpl getAsyncContext() {
+		return requestData.getAsyncStateMachine().getAsyncCtxt();
 	}
 
 	// @Override
@@ -379,9 +382,16 @@ public final class Request implements InputReader {
 		result.set(requestData.getAsyncStateMachine().asyncTimeout());
 	}
 
-	public void actionREQUEST_BODY_FULLY_READ(AtomicBoolean param) {
-		AtomicBoolean result = param;
-		result.set(channelHandler.isRequestBodyFullyRead());
+	public void pushDispatchingState() {
+		requestData.getAsyncStateMachine().pushDispatchingState();
+	}
+
+	public void popDispatchingState() {
+		requestData.getAsyncStateMachine().popDispatchingState();
+	}
+
+	public boolean hasStackedState() {
+		return requestData.getAsyncStateMachine().hasStackedState();
 	}
 
 	public void actionNB_READ_INTEREST(AtomicBoolean param) {
@@ -489,9 +499,7 @@ public final class Request implements InputReader {
 	}
 
 	public boolean isFinished() {
-		AtomicBoolean result = new AtomicBoolean(false);
-		actionREQUEST_BODY_FULLY_READ(result);
-		return result.get();
+		return channelHandler.isRequestBodyFullyRead();
 	}
 
 	public boolean getSupportsRelativeRedirects() {

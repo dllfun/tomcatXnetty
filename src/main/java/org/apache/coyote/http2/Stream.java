@@ -43,12 +43,13 @@ import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.parser.Host;
 import org.apache.tomcat.util.net.Channel;
-import org.apache.tomcat.util.net.Channel.BufWrapper;
+import org.apache.tomcat.util.net.SocketChannel;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.net.WriteBuffer;
 import org.apache.tomcat.util.res.StringManager;
 
-class Stream extends AbstractStream implements HeaderEmitter {
+class Stream extends AbstractStream implements HeaderEmitter, Channel {
 
 	private static final Log log = LogFactory.getLog(Stream.class);
 	private static final StringManager sm = StringManager.getManager(Stream.class);
@@ -87,14 +88,15 @@ class Stream extends AbstractStream implements HeaderEmitter {
 	private final StreamOutputBuffer streamOutputBuffer = new StreamOutputBuffer();
 	private final Http2OutputBuffer http2OutputBuffer = new Http2OutputBuffer(this, responseData, streamOutputBuffer);
 	private volatile AbstractProcessor processor;
-	private Channel<?> channel;
+	private SocketChannel channel;
 
-	Stream(Integer identifier, Http2UpgradeHandler handler) {
-		this(identifier, handler, null);
+	Stream(SocketChannel channel, Integer identifier, Http2UpgradeHandler handler) {
+		this(channel, identifier, handler, null);
 	}
 
-	Stream(Integer identifier, Http2UpgradeHandler handler, RequestData requestData) {
+	Stream(SocketChannel channel, Integer identifier, Http2UpgradeHandler handler, RequestData requestData) {
 		super(identifier);
+		this.channel = channel;
 		this.handler = handler;
 		handler.addChild(this);
 		setWindowSize(handler.getRemoteSettings().getInitialWindowSize());
@@ -143,12 +145,8 @@ class Stream extends AbstractStream implements HeaderEmitter {
 		this.processor = processor;
 	}
 
-	public Channel<?> getChannel() {
+	public SocketChannel getChannel() {
 		return channel;
-	}
-
-	public void setChannel(Channel<?> channel) {
-		this.channel = channel;
 	}
 
 	private void prepareRequest() {
@@ -627,11 +625,11 @@ class Stream extends AbstractStream implements HeaderEmitter {
 		state.sentEndOfStream();
 	}
 
-	final boolean isReadyForWrite() {
+	public final boolean isReadyForWrite() {
 		return streamOutputBuffer.isReady();
 	}
 
-	final boolean flush(boolean block) throws IOException {
+	public final boolean flush(boolean block) throws IOException {
 		return streamOutputBuffer.flush(block);
 	}
 
@@ -651,7 +649,7 @@ class Stream extends AbstractStream implements HeaderEmitter {
 		return state.isActive();
 	}
 
-	final boolean canWrite() {
+	public final boolean canWrite() {
 		return state.canWrite();
 	}
 
@@ -1166,6 +1164,72 @@ class Stream extends AbstractStream implements HeaderEmitter {
 			// Should never be called for StreamProcessor as isReadyForRead() is
 			// overridden
 			throw new UnsupportedOperationException();
+		}
+
+		@Override
+		public boolean isTrailerFieldsReady() {
+			return Stream.this.isTrailerFieldsReady();
+		}
+
+		/**
+		 * Processors that populate request attributes directly (e.g. AJP) should
+		 * over-ride this method and return {@code false}.
+		 *
+		 * @return {@code true} if the SocketWrapper should be used to populate the
+		 *         request attributes, otherwise {@code false}.
+		 */
+		protected boolean getPopulateRequestAttributesFromSocket() {
+			return true;
+		}
+
+		/**
+		 * Populate the remote host request attribute. Processors (e.g. AJP) that
+		 * populate this from an alternative source should override this method.
+		 */
+		protected void populateRequestAttributeRemoteHost() {
+			if (getPopulateRequestAttributesFromSocket() && channel != null) {
+				requestData.remoteHost().setString(channel.getRemoteHost());
+			}
+		}
+
+		// @Override
+		public void actionREQ_HOST_ADDR_ATTRIBUTE() {
+			if (getPopulateRequestAttributesFromSocket() && channel != null) {
+				requestData.remoteAddr().setString(channel.getRemoteAddr());
+			}
+		}
+
+		// @Override
+		public void actionREQ_HOST_ATTRIBUTE() {
+			populateRequestAttributeRemoteHost();
+		}
+
+		// @Override
+		public void actionREQ_LOCALPORT_ATTRIBUTE() {
+			if (getPopulateRequestAttributesFromSocket() && channel != null) {
+				requestData.setLocalPort(channel.getLocalPort());
+			}
+		}
+
+		// @Override
+		public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
+			if (getPopulateRequestAttributesFromSocket() && channel != null) {
+				requestData.localAddr().setString(channel.getLocalAddr());
+			}
+		}
+
+		// @Override
+		public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
+			if (getPopulateRequestAttributesFromSocket() && channel != null) {
+				requestData.localName().setString(channel.getLocalName());
+			}
+		}
+
+		// @Override
+		public void actionREQ_REMOTEPORT_ATTRIBUTE() {
+			if (getPopulateRequestAttributesFromSocket() && channel != null) {
+				requestData.setRemotePort(channel.getRemotePort());
+			}
 		}
 
 		@Override

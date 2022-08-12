@@ -23,7 +23,7 @@ import java.nio.ByteBuffer;
 import org.apache.coyote.InputReader;
 import org.apache.coyote.http11.InputFilter;
 import org.apache.tomcat.util.buf.ByteChunk;
-import org.apache.tomcat.util.net.Channel.BufWrapper;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 
 /**
  * Input filter responsible for replaying the request body when restoring the

@@ -21,6 +21,7 @@ import javax.servlet.http.HttpUpgradeHandler;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SSLSupport;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 
 /**
@@ -33,7 +34,7 @@ public interface InternalHttpUpgradeHandler extends HttpUpgradeHandler {
 
 	void timeoutAsync(long now);
 
-	void setSocketWrapper(Channel<?> channel);
+	void setSocketWrapper(SocketChannel channel);
 
 	void setSslSupport(SSLSupport sslSupport);
 

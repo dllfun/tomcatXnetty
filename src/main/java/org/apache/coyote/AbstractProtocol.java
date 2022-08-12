@@ -51,6 +51,7 @@ import org.apache.tomcat.util.modeler.Registry;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint;
 import org.apache.tomcat.util.net.Endpoint.Handler;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 import org.apache.tomcat.util.threads.ResizableExecutor;
@@ -698,7 +699,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	 */
 	protected abstract Processor createProcessor();
 
-	protected abstract Processor createUpgradeProcessor(Channel<?> socket, UpgradeToken upgradeToken);
+	protected abstract Processor createUpgradeProcessor(SocketChannel channel, UpgradeToken upgradeToken);
 
 	// ----------------------------------------------------- JMX related methods
 
@@ -871,7 +872,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		 * Note that even if the endpoint is resumed, there is (currently) no API to
 		 * inform the Processors of this.
 		 */
-		for (Channel<S> channel : endpoint.getConnections()) {
+		for (SocketChannel channel : endpoint.getConnections()) {
 			Processor processor = (Processor) channel.getCurrentProcessor();
 			if (processor != null) {
 				processor.pause();
@@ -962,7 +963,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 
 	// ---------------------------------------------- Request processing methods
 
-	// protected abstract void processSocket(Channel<S> channel, SocketEvent event);
+	// protected abstract void processSocket(Channel channel, SocketEvent event);
 
 	// @Override
 	// public AbstractProtocol<S> getProtocol() {
@@ -995,7 +996,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 //		executor.execute(runnable);
 //	}
 
-	protected void longPoll(Channel<?> channel, Processor processor) {
+	protected void longPoll(SocketChannel channel, Processor processor) {
 		if (!processor.isAsync()) {
 			// This is currently only used with HTTP
 			// Either:
@@ -1008,9 +1009,9 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 
 //	@Override
 //	public Set<S> getOpenSockets() {
-//		Set<Channel<S>> set = endpoint.getConnections();
+//		Set<Channel> set = endpoint.getConnections();
 //		Set<S> result = new HashSet<>();
-//		for (Channel<S> socketWrapper : set) {
+//		for (Channel socketWrapper : set) {
 //			S socket = socketWrapper.getSocket();
 //			if (socket != null) {
 //				result.add(socket);
@@ -1057,7 +1058,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	 * errors etc.
 	 */
 	// @Override
-	public void release(Channel<S> channel) {
+	public void release(SocketChannel channel) {
 		Processor processor = (Processor) channel.getCurrentProcessor();
 		channel.setCurrentProcessor(null);
 		release(processor);
@@ -1173,21 +1174,23 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 
 		@Override
-		public void processSocket(Channel<S> channel, SocketEvent event, boolean dispatch) {
+		public void processSocket(Channel channel, SocketEvent event, boolean dispatch) {
+
+			SocketChannel socketChannel = (SocketChannel) channel;
 
 			if (getLog().isDebugEnabled()) {
-				getLog().debug(sm.getString("abstractConnectionHandler.process", channel.getSocket(), event));
+				getLog().debug(sm.getString("abstractConnectionHandler.process", channel, event));// .getSocket()
 			}
 			if (channel == null) {
 				// Nothing to do. Socket has been closed.
 				return;
 			}
 
-			S socket = channel.getSocket();
+			// S socket = channel.getSocket();
 
-			Processor processor = (Processor) channel.getCurrentProcessor();
+			Processor processor = (Processor) socketChannel.getCurrentProcessor();
 			if (getLog().isDebugEnabled()) {
-				getLog().debug(sm.getString("abstractConnectionHandler.connectionsGet", processor, socket));
+				getLog().debug(sm.getString("abstractConnectionHandler.connectionsGet", processor, channel));// socket
 			}
 
 			// Timeouts are calculated on a dedicated thread and then
@@ -1214,7 +1217,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 			boolean dispatched = false;
 			try {
 				if (processor == null) {
-					String negotiatedProtocol = channel.getNegotiatedProtocol();
+					String negotiatedProtocol = socketChannel.getNegotiatedProtocol();
 					// OpenSSL typically returns null whereas JSSE typically
 					// returns "" when no protocol is negotiated
 					if (negotiatedProtocol != null && negotiatedProtocol.length() > 0) {
@@ -1237,12 +1240,12 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 					}
 				}
 
-				processor.setSslSupport(channel.getSslSupport(getClientCertProvider()));
+				processor.setSslSupport(socketChannel.getSslSupport(getClientCertProvider()));
 
 				// Associate the processor with the connection
-				channel.setCurrentProcessor(processor);
+				socketChannel.setCurrentProcessor(processor);
 
-				if (processor.processInIoThread(channel, event)) {
+				if (processor.processInIoThread(socketChannel, event)) {
 					dispatched = true;
 					next.processSocket(channel, event, dispatch);
 				}
@@ -1300,7 +1303,9 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 
 		@Override
-		public void processSocket(Channel<S> channel, SocketEvent event, boolean dispatch) {
+		public void processSocket(Channel channel, SocketEvent event, boolean dispatch) {
+
+			SocketChannel socketChannel = (SocketChannel) channel;
 
 			try {
 				if (channel == null) {
@@ -1325,7 +1330,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 								// does not occur in parallel. The test below ensures that if the
 								// first event to be processed results in the socket being closed,
 								// the subsequent events are not processed.
-								if (channel.isClosed()) {
+								if (socketChannel.isClosed()) {
 									return;
 								}
 								next.processSocket(channel, event, false);
@@ -1340,7 +1345,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 						// does not occur in parallel. The test below ensures that if the
 						// first event to be processed results in the socket being closed,
 						// the subsequent events are not processed.
-						if (channel.isClosed()) {
+						if (socketChannel.isClosed()) {
 							return;
 						}
 						next.processSocket(channel, event, dispatch);
@@ -1348,13 +1353,13 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 				}
 			} catch (RejectedExecutionException ree) {
 				getLog().warn(sm.getString("endpoint.executor.fail", channel), ree);
-				channel.close();
+				socketChannel.close();
 			} catch (Throwable t) {
 				ExceptionUtils.handleThrowable(t);
 				// This means we got an OOM or similar creating a thread, or that
 				// the pool and its queue are full
 				getLog().error(sm.getString("endpoint.process.fail"), t);
-				channel.close();
+				socketChannel.close();
 			}
 
 		}
@@ -1369,30 +1374,31 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 
 		@Override
-		public void processSocket(Channel<S> channel, SocketEvent event, boolean dispatch) {
-			SocketState state = process(channel, event);
+		public void processSocket(Channel channel, SocketEvent event, boolean dispatch) {
+			SocketChannel socketChannel = (SocketChannel) channel;
+			SocketState state = process(socketChannel, event);
 			if (state == SocketState.CLOSED) {
 				// poller.cancelledKey(socket.getIOChannel().keyFor(poller.getSelector()),
 				// socketWrapper);
-				channel.close();
+				socketChannel.close();
 			}
 		}
 
 		// @Override
-		private SocketState process(Channel<S> channel, SocketEvent event) {
+		private SocketState process(SocketChannel channel, SocketEvent event) {
 			if (getLog().isDebugEnabled()) {
-				getLog().debug(sm.getString("abstractConnectionHandler.process", channel.getSocket(), event));
+				getLog().debug(sm.getString("abstractConnectionHandler.process", channel, event));// .getSocket()
 			}
 			if (channel == null) {
 				// Nothing to do. Socket has been closed.
 				return SocketState.CLOSED;
 			}
 
-			S socket = channel.getSocket();
+			// S socket = channel.getSocket();
 
 			Processor processor = (Processor) channel.getCurrentProcessor();
 			if (getLog().isDebugEnabled()) {
-				getLog().debug(sm.getString("abstractConnectionHandler.connectionsGet", processor, socket));
+				getLog().debug(sm.getString("abstractConnectionHandler.connectionsGet", processor, channel));// socket
 			}
 
 			// Timeouts are calculated on a dedicated thread and then

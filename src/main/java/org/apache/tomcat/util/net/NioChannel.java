@@ -17,6 +17,7 @@
 package org.apache.tomcat.util.net;
 
 import java.io.IOException;
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ByteChannel;
 import java.nio.channels.GatheringByteChannel;
@@ -24,8 +25,8 @@ import java.nio.channels.ScatteringByteChannel;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 
+import org.apache.tomcat.util.buf.ByteBufferUtils;
 import org.apache.tomcat.util.net.NioEndpoint.NioSocketWrapper;
-import org.apache.tomcat.util.net.SocketWrapperBase.SocketBufferHandler;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -45,8 +46,14 @@ public class NioChannel implements ByteChannel, ScatteringByteChannel, Gathering
 	protected SocketChannel socketChannel = null;
 	protected NioSocketWrapper socketWrapper = null;
 
-	public NioChannel(SocketBufferHandler socketBufferHandler) {
-		this.socketBufferHandler = socketBufferHandler;
+	public NioChannel(SocketProperties socketProperties) {
+		if (socketProperties != null) {
+			SocketBufferHandler socketBufferHandler = new SocketBufferHandler(socketProperties.getAppReadBufSize(),
+					socketProperties.getAppWriteBufSize(), socketProperties.getDirectBuffer());
+			this.socketBufferHandler = socketBufferHandler;
+		} else {
+			this.socketBufferHandler = SocketBufferHandler.EMPTY;
+		}
 	}
 
 	/**
@@ -164,7 +171,7 @@ public class NioChannel implements ByteChannel, ScatteringByteChannel, Gathering
 		return socketChannel.read(dsts, offset, length);
 	}
 
-	public SocketBufferHandler getBufHandler() {
+	protected SocketBufferHandler getBufHandler() {
 		return socketBufferHandler;
 	}
 
@@ -240,7 +247,7 @@ public class NioChannel implements ByteChannel, ScatteringByteChannel, Gathering
 		return appReadBufHandler;
 	}
 
-	static final NioChannel CLOSED_NIO_CHANNEL = new NioChannel(SocketBufferHandler.EMPTY) {
+	static final NioChannel CLOSED_NIO_CHANNEL = new NioChannel(null) {
 		@Override
 		public void close() throws IOException {
 		}

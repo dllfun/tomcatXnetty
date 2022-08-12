@@ -27,6 +27,7 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.res.StringManager;
 
 public class UpgradeServletInputStream extends ServletInputStream {
@@ -35,7 +36,7 @@ public class UpgradeServletInputStream extends ServletInputStream {
 	private static final StringManager sm = StringManager.getManager(UpgradeServletInputStream.class);
 
 	private final UpgradeProcessorBase processor;
-	private final Channel<?> socketWrapper;
+	private final SocketChannel socketWrapper;
 
 	private volatile boolean closed = false;
 	private volatile boolean eof = false;
@@ -43,7 +44,7 @@ public class UpgradeServletInputStream extends ServletInputStream {
 	private volatile Boolean ready = Boolean.TRUE;
 	private volatile ReadListener listener = null;
 
-	public UpgradeServletInputStream(UpgradeProcessorBase processor, Channel<?> socketWrapper) {
+	public UpgradeServletInputStream(UpgradeProcessorBase processor, SocketChannel socketWrapper) {
 		this.processor = processor;
 		this.socketWrapper = socketWrapper;
 	}

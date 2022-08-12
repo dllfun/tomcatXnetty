@@ -42,8 +42,8 @@ public class Http11Nio2Protocol extends AbstractHttp11JsseProtocol<Nio2Channel> 
 		super(new Nio2Endpoint());
 
 		Handler tailHandler = new TailHandler();
-		Handler nio2Handler = new Nio2Handler(tailHandler, this);
-		Handler headHandler = new HeadHandler<>(nio2Handler);
+		Handler handShakeHandler = new HandShakeHandler(tailHandler);
+		Handler headHandler = new HeadHandler<>(handShakeHandler);
 		setHandler(headHandler);
 
 		endpoint.setHandler(headHandler);

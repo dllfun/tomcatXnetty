@@ -32,7 +32,7 @@ public interface Endpoint<S> {
 		 *
 		 * @return if processing was triggered successfully
 		 */
-		public void processSocket(Channel<S> channel, SocketEvent event, boolean dispatch);
+		public void processSocket(Channel channel, SocketEvent event, boolean dispatch);
 
 		// public void processSocket(Channel<S> channel, SocketEvent event);
 
@@ -189,7 +189,7 @@ public interface Endpoint<S> {
 
 	public void start() throws Exception;
 
-	public Set<Channel<S>> getConnections();
+	public Set<SocketChannel> getConnections();
 
 	public boolean isRunning();
 

@@ -16,7 +16,6 @@
  */
 package org.apache.catalina.core;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -67,7 +66,7 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 	private volatile ServletResponse servletResponse = null;
 	private final List<AsyncListenerWrapper> listeners = new ArrayList<>();
 	private boolean hasOriginalRequestAndResponse = true;
-	private volatile Runnable dispatch = null;
+
 	private Context context = null;
 	// Default of 30000 (30s) is set by the connector
 	private long timeout = -1;
@@ -180,7 +179,7 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 				logDebug("dispatch   ");
 			}
 			check();
-			if (dispatch != null) {
+			if (request.hasDispatch()) {
 				throw new IllegalStateException(sm.getString("asyncContextImpl.dispatchingStarted"));
 			}
 			if (request.getAttribute(ASYNC_REQUEST_URI) == null) {
@@ -202,7 +201,8 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 			// request/response and that in turn may trigger recycling of this
 			// object before the in-progress count can be decremented
 			final Context context = this.context;
-			this.dispatch = new AsyncRunnable(request, applicationDispatcher, servletRequest, servletResponse);
+			Runnable dispatch = new AsyncRunnable(applicationDispatcher, servletRequest, servletResponse);// request,
+			this.request.setDispatch(dispatch);
 			this.request.getCoyoteRequest().asyncDispatch();
 			clearServletRequestResponse();
 			context.decrementInProgressAsyncCount();
@@ -278,7 +278,7 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 			logDebug("recycle    ");
 		}
 		context = null;
-		dispatch = null;
+		// dispatch = null;
 		event = null;
 		hasOriginalRequestAndResponse = true;
 		listeners.clear();
@@ -333,28 +333,28 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 		return hasOriginalRequestAndResponse;
 	}
 
-	protected void doInternalDispatch() throws ServletException, IOException {
-		if (log.isDebugEnabled()) {
-			logDebug("intDispatch");
-		}
-		try {
-			Runnable runnable = dispatch;
-			dispatch = null;
-			runnable.run();
-			if (!request.isAsync()) {
-				fireOnComplete();
-			}
-		} catch (RuntimeException x) {
-			// doInternalComplete(true);
-			if (x.getCause() instanceof ServletException) {
-				throw (ServletException) x.getCause();
-			}
-			if (x.getCause() instanceof IOException) {
-				throw (IOException) x.getCause();
-			}
-			throw new ServletException(x);
-		}
-	}
+//	protected void doInternalDispatch() throws ServletException, IOException {
+//		if (log.isDebugEnabled()) {
+//			logDebug("intDispatch");
+//		}
+//		try {
+//			Runnable runnable = dispatch;
+//			dispatch = null;
+//			runnable.run();
+//			// if (!request.isAsync()) {
+//			// fireOnComplete();
+//			// }
+//		} catch (RuntimeException x) {
+//			// doInternalComplete(true);
+//			if (x.getCause() instanceof ServletException) {
+//				throw (ServletException) x.getCause();
+//			}
+//			if (x.getCause() instanceof IOException) {
+//				throw (IOException) x.getCause();
+//			}
+//			throw new ServletException(x);
+//		}
+//	}
 
 	@Override
 	public long getTimeout() {
@@ -529,13 +529,13 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 	private static class AsyncRunnable implements Runnable {
 
 		private final AsyncDispatcher applicationDispatcher;
-		private final Request request;
+		// private final Request request;
 		private final ServletRequest servletRequest;
 		private final ServletResponse servletResponse;
 
-		public AsyncRunnable(Request request, AsyncDispatcher applicationDispatcher, ServletRequest servletRequest,
-				ServletResponse servletResponse) {
-			this.request = request;
+		public AsyncRunnable(AsyncDispatcher applicationDispatcher, ServletRequest servletRequest,
+				ServletResponse servletResponse) {// Request request,
+			// this.request = request;
 			this.applicationDispatcher = applicationDispatcher;
 			this.servletRequest = servletRequest;
 			this.servletResponse = servletResponse;
@@ -543,7 +543,7 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 
 		@Override
 		public void run() {
-			request.getCoyoteRequest().asyncDispatched();
+			// request.getCoyoteRequest().asyncDispatched();
 			try {
 				applicationDispatcher.dispatch(servletRequest, servletResponse);
 			} catch (Exception e) {

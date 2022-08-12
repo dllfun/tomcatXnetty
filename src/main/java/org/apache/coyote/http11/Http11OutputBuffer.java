@@ -21,15 +21,13 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 import org.apache.coyote.AbstractProcessor;
-import org.apache.coyote.ActionCode;
-import org.apache.coyote.AsyncState;
 import org.apache.coyote.CloseNowException;
-import org.apache.coyote.Response;
 import org.apache.coyote.ResponseData;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.net.Channel;
-import org.apache.tomcat.util.net.Channel.BufWrapper;
+import org.apache.tomcat.util.net.SocketChannel;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -86,7 +84,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 	/**
 	 * Wrapper for socket where data will be written to.
 	 */
-	protected Channel<?> channel;
+	protected SocketChannel channel;
 
 	/**
 	 * Underlying output buffer.
@@ -291,7 +289,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 		byteCount = 0;
 	}
 
-	public void init(Channel<?> channel) {
+	public void init(SocketChannel channel) {
 		this.channel = channel;
 		if (headerBuffer == null) {
 			headerBuffer = channel.allocate(headerBufferSize);
@@ -335,7 +333,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 			// Sending the response header buffer
 			headerBuffer.switchToReadMode();
 			try {
-				Channel<?> channel = this.channel;
+				SocketChannel channel = this.channel;
 				if (channel != null) {
 					channel.write(isBlocking(), headerBuffer);
 				} else {
@@ -572,7 +570,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 		public int doWrite(ByteBuffer chunk) throws IOException {
 			try {
 				int len = chunk.remaining();
-				Channel<?> channel = Http11OutputBuffer.this.channel;
+				SocketChannel channel = Http11OutputBuffer.this.channel;
 				if (channel != null) {
 					channel.write(isBlocking(), chunk);
 				} else {

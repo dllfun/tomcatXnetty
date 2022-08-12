@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SSLSupport;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 
 /**
@@ -29,7 +30,7 @@ import org.apache.tomcat.util.net.SocketEvent;
  */
 public interface Processor {
 
-	boolean processInIoThread(Channel<?> channel, SocketEvent event) throws IOException;
+	boolean processInIoThread(SocketChannel channel, SocketEvent event) throws IOException;
 
 	/**
 	 * Process a connection. This is called whenever an event occurs (e.g. more data
@@ -46,7 +47,7 @@ public interface Processor {
 	 * @throws IOException If an I/O error occurs during the processing of the
 	 *                     request
 	 */
-	SocketState process(Channel<?> channel, SocketEvent event) throws IOException;
+	SocketState process(SocketChannel channel, SocketEvent event) throws IOException;
 
 	/**
 	 * Generate an upgrade token.

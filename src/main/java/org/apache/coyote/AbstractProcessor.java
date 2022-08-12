@@ -35,6 +35,7 @@ import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SSLSupport;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -65,7 +66,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	protected final RequestData requestData;
 	protected final ResponseData responseData;
 	// protected InputHandler inputHandler;
-	protected volatile Channel<?> channel = null;
+	protected volatile SocketChannel channel = null;
 	protected volatile SSLSupport sslSupport;
 
 	/**
@@ -151,14 +152,14 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	 * 
 	 * @param channel The socket wrapper
 	 */
-	protected void setChannel(Channel<?> channel) {
+	protected void setChannel(SocketChannel channel) {
 		this.channel = channel;
 	}
 
 	/**
 	 * @return the socket wrapper being used.
 	 */
-	protected final Channel<?> getChannel() {
+	protected final Channel getChannel() {
 		return channel;
 	}
 
@@ -174,7 +175,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	 *                 on a container thread
 	 */
 //	protected void execute(Runnable runnable) {
-//		Channel<?> channel = this.channel;
+//		Channel channel = this.channel;
 //		if (channel == null) {
 //			throw new RejectedExecutionException(sm.getString("abstractProcessor.noExecute"));
 //		} else {
@@ -190,6 +191,13 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 
 	@Override
 	public final SocketState dispatch(SocketEvent event) throws IOException {
+
+		if (!requestData.getAsyncStateMachine().isAsync()) {
+			if (requestData.getAsyncStateMachine().hasStackedState()) {
+				requestData.getAsyncStateMachine().popDispatchingState();
+				requestData.getAsyncStateMachine().asyncPostProcess();
+			}
+		}
 
 		if (event == SocketEvent.OPEN_WRITE && requestData.getAsyncStateMachine().getWriteListener() != null) {
 			requestData.getAsyncStateMachine().asyncOperation();
@@ -706,46 +714,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	// }
 
 	// @Override
-	public void actionREQ_HOST_ADDR_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.remoteAddr().setString(channel.getRemoteAddr());
-		}
-	}
-
-	// @Override
-	public void actionREQ_HOST_ATTRIBUTE() {
-		populateRequestAttributeRemoteHost();
-	}
-
-	// @Override
-	public void actionREQ_LOCALPORT_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.setLocalPort(channel.getLocalPort());
-		}
-	}
-
-	// @Override
-	public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.localAddr().setString(channel.getLocalAddr());
-		}
-	}
-
-	// @Override
-	public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.localName().setString(channel.getLocalName());
-		}
-	}
-
-	// @Override
-	public void actionREQ_REMOTEPORT_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.setRemotePort(channel.getRemotePort());
-		}
-	}
-
-	// @Override
 	public void actionREQ_SSL_ATTRIBUTE() {
 		populateSslRequestAttributes();
 	}
@@ -804,12 +772,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	// @Override
 	public void actionPUSH_REQUEST(RequestData param) {
 		doPush(param);
-	}
-
-	// @Override
-	public void actionIS_TRAILER_FIELDS_READY(AtomicBoolean param) {
-		AtomicBoolean result = param;
-		result.set(isTrailerFieldsReady());
 	}
 
 	// @Override
@@ -909,27 +871,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	protected abstract void setSwallowResponse();
 
 	// protected abstract void disableSwallowRequest();
-
-	/**
-	 * Processors that populate request attributes directly (e.g. AJP) should
-	 * over-ride this method and return {@code false}.
-	 *
-	 * @return {@code true} if the SocketWrapper should be used to populate the
-	 *         request attributes, otherwise {@code false}.
-	 */
-	protected boolean getPopulateRequestAttributesFromSocket() {
-		return true;
-	}
-
-	/**
-	 * Populate the remote host request attribute. Processors (e.g. AJP) that
-	 * populate this from an alternative source should override this method.
-	 */
-	protected void populateRequestAttributeRemoteHost() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.remoteHost().setString(channel.getRemoteHost());
-		}
-	}
 
 	/**
 	 * Populate the TLS related request attributes from the {@link SSLSupport}
@@ -1088,7 +1029,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		throw new UnsupportedOperationException(sm.getString("abstractProcessor.pushrequest.notsupported"));
 	}
 
-	protected abstract boolean isTrailerFieldsReady();
+	// protected abstract boolean isTrailerFieldsReady();
 
 	/**
 	 * Protocols that support trailer fields should override this method and return
@@ -1146,7 +1087,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	protected abstract SocketState dispatchEndRequest() throws IOException;
 
 	@Override
-	protected final void logAccess(Channel<?> channel) throws IOException {
+	protected final void logAccess(SocketChannel channel) throws IOException {
 		// Set the socket wrapper so the access log can read the socket related
 		// information (e.g. client IP)
 		setChannel(channel);

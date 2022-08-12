@@ -28,6 +28,7 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SSLSupport;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -39,7 +40,7 @@ public class UpgradeProcessorExternal extends UpgradeProcessorBase {
 	private final UpgradeServletInputStream upgradeServletInputStream;
 	private final UpgradeServletOutputStream upgradeServletOutputStream;
 
-	public UpgradeProcessorExternal(AbstractProtocol<?> protocol, Channel<?> wrapper, UpgradeToken upgradeToken) {
+	public UpgradeProcessorExternal(AbstractProtocol<?> protocol, SocketChannel wrapper, UpgradeToken upgradeToken) {
 		super(protocol, upgradeToken);
 		this.upgradeServletInputStream = new UpgradeServletInputStream(this, wrapper);
 		this.upgradeServletOutputStream = new UpgradeServletOutputStream(this, wrapper);

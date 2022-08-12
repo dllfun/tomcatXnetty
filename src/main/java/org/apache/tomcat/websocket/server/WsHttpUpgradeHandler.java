@@ -36,6 +36,7 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SSLSupport;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 import org.apache.tomcat.websocket.Transformation;
@@ -53,7 +54,7 @@ public class WsHttpUpgradeHandler implements InternalHttpUpgradeHandler {
 	private final ClassLoader applicationClassLoader;
 
 	private AbstractProtocol<?> protocol;
-	private Channel<?> channel;
+	private SocketChannel channel;
 
 	private Endpoint endpoint;
 	private ServerEndpointConfig serverEndpointConfig;
@@ -75,7 +76,7 @@ public class WsHttpUpgradeHandler implements InternalHttpUpgradeHandler {
 	}
 
 	@Override
-	public void setSocketWrapper(Channel<?> channel) {
+	public void setSocketWrapper(SocketChannel channel) {
 		this.channel = channel;
 	}
 

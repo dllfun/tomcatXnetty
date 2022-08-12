@@ -29,7 +29,7 @@ import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.InputFilter;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.HexUtils;
-import org.apache.tomcat.util.net.Channel.BufWrapper;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**

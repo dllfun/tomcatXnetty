@@ -27,6 +27,7 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.res.StringManager;
 
 public class UpgradeServletOutputStream extends ServletOutputStream {
@@ -35,7 +36,7 @@ public class UpgradeServletOutputStream extends ServletOutputStream {
 	private static final StringManager sm = StringManager.getManager(UpgradeServletOutputStream.class);
 
 	private final UpgradeProcessorBase processor;
-	private final Channel<?> socketWrapper;
+	private final SocketChannel socketWrapper;
 
 	// Used to ensure that isReady() and onWritePossible() have a consistent
 	// view of buffer and registered.
@@ -58,7 +59,7 @@ public class UpgradeServletOutputStream extends ServletOutputStream {
 	// Guarded by registeredLock
 	private boolean registered = false;
 
-	public UpgradeServletOutputStream(UpgradeProcessorBase processor, Channel<?> socketWrapper) {
+	public UpgradeServletOutputStream(UpgradeProcessorBase processor, SocketChannel socketWrapper) {
 		this.processor = processor;
 		this.socketWrapper = socketWrapper;
 	}

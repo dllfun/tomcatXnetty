@@ -48,10 +48,11 @@ import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.net.Channel;
-import org.apache.tomcat.util.net.Channel.BufWrapper;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.net.SSLSupport;
+import org.apache.tomcat.util.net.SocketChannel;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -332,7 +333,7 @@ public class AjpProcessor extends AbstractProcessor {
 	}
 
 	@Override
-	public SocketState service(Channel<?> channel) throws IOException {
+	public SocketState service(SocketChannel channel) throws IOException {
 
 		RequestInfo rp = requestData.getRequestProcessor();
 		rp.setStage(org.apache.coyote.Constants.STAGE_PARSE);
@@ -1048,26 +1049,6 @@ public class AjpProcessor extends AbstractProcessor {
 	}
 
 	@Override
-	protected final boolean getPopulateRequestAttributesFromSocket() {
-		// NO-OPs the attribute requests since they are pre-populated when
-		// parsing the first AJP message.
-		return false;
-	}
-
-	@Override
-	protected final void populateRequestAttributeRemoteHost() {
-		// Get remote host name using a DNS resolution
-		if (requestData.remoteHost().isNull()) {
-			try {
-				requestData.remoteHost()
-						.setString(InetAddress.getByName(requestData.remoteAddr().toString()).getHostName());
-			} catch (IOException iex) {
-				// Ignore
-			}
-		}
-	}
-
-	@Override
 	protected final void populateSslRequestAttributes() {
 		if (!certificates.isNull()) {
 			ByteChunk certData = certificates.getByteChunk();
@@ -1109,13 +1090,6 @@ public class AjpProcessor extends AbstractProcessor {
 	@Override
 	protected final boolean isReadyForWrite() {
 		return responseMsgPos == -1 && channel.isReadyForWrite();
-	}
-
-	@Override
-	protected boolean isTrailerFieldsReady() {
-		// AJP does not support trailers so return true so app can request the
-		// trailers and find out that there are none.
-		return true;
 	}
 
 	/**
@@ -1270,6 +1244,81 @@ public class AjpProcessor extends AbstractProcessor {
 		@Override
 		public final void registerReadInterest() {
 			channel.registerReadInterest();
+		}
+
+		@Override
+		public boolean isTrailerFieldsReady() {
+			// AJP does not support trailers so return true so app can request the
+			// trailers and find out that there are none.
+			return true;
+		}
+
+		/**
+		 * Processors that populate request attributes directly (e.g. AJP) should
+		 * over-ride this method and return {@code false}.
+		 *
+		 * @return {@code true} if the SocketWrapper should be used to populate the
+		 *         request attributes, otherwise {@code false}.
+		 */
+		protected final boolean getPopulateRequestAttributesFromSocket() {
+			// NO-OPs the attribute requests since they are pre-populated when
+			// parsing the first AJP message.
+			return false;
+		}
+
+		/**
+		 * Populate the remote host request attribute. Processors (e.g. AJP) that
+		 * populate this from an alternative source should override this method.
+		 */
+		protected final void populateRequestAttributeRemoteHost() {
+			// Get remote host name using a DNS resolution
+			if (requestData.remoteHost().isNull()) {
+				try {
+					requestData.remoteHost()
+							.setString(InetAddress.getByName(requestData.remoteAddr().toString()).getHostName());
+				} catch (IOException iex) {
+					// Ignore
+				}
+			}
+		}
+
+		public void actionREQ_HOST_ADDR_ATTRIBUTE() {
+			if (getPopulateRequestAttributesFromSocket() && channel != null) {
+				requestData.remoteAddr().setString(channel.getRemoteAddr());
+			}
+		}
+
+		// @Override
+		public void actionREQ_HOST_ATTRIBUTE() {
+			populateRequestAttributeRemoteHost();
+		}
+
+		// @Override
+		public void actionREQ_LOCALPORT_ATTRIBUTE() {
+			if (getPopulateRequestAttributesFromSocket() && channel != null) {
+				requestData.setLocalPort(channel.getLocalPort());
+			}
+		}
+
+		// @Override
+		public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
+			if (getPopulateRequestAttributesFromSocket() && channel != null) {
+				requestData.localAddr().setString(channel.getLocalAddr());
+			}
+		}
+
+		// @Override
+		public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
+			if (getPopulateRequestAttributesFromSocket() && channel != null) {
+				requestData.localName().setString(channel.getLocalName());
+			}
+		}
+
+		// @Override
+		public void actionREQ_REMOTEPORT_ATTRIBUTE() {
+			if (getPopulateRequestAttributesFromSocket() && channel != null) {
+				requestData.setRemotePort(channel.getRemotePort());
+			}
 		}
 
 		@Override

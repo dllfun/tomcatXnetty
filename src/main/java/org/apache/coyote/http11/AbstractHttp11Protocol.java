@@ -43,6 +43,7 @@ import org.apache.tomcat.util.buf.StringUtils;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint;
 import org.apache.tomcat.util.net.SSLHostConfig;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.res.StringManager;
 
 public abstract class AbstractHttp11Protocol<S> extends AbstractProtocol<S> {
@@ -1056,7 +1057,7 @@ public abstract class AbstractHttp11Protocol<S> extends AbstractProtocol<S> {
 	}
 
 	@Override
-	protected Processor createUpgradeProcessor(Channel<?> channel, UpgradeToken upgradeToken) {
+	protected Processor createUpgradeProcessor(SocketChannel channel, UpgradeToken upgradeToken) {
 		HttpUpgradeHandler httpUpgradeHandler = upgradeToken.getHttpUpgradeHandler();
 		if (httpUpgradeHandler instanceof InternalHttpUpgradeHandler) {
 			return new UpgradeProcessorInternal(this, channel, upgradeToken);

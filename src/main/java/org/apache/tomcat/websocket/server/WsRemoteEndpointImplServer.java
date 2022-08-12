@@ -30,7 +30,8 @@ import javax.websocket.SendResult;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.Channel;
-import org.apache.tomcat.util.net.Channel.BlockingMode;
+import org.apache.tomcat.util.net.SocketChannel;
+import org.apache.tomcat.util.net.SocketChannel.BlockingMode;
 import org.apache.tomcat.util.res.StringManager;
 import org.apache.tomcat.websocket.Transformation;
 import org.apache.tomcat.websocket.WsRemoteEndpointImplBase;
@@ -44,14 +45,14 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 	private static final StringManager sm = StringManager.getManager(WsRemoteEndpointImplServer.class);
 	private final Log log = LogFactory.getLog(WsRemoteEndpointImplServer.class); // must not be static
 
-	private final Channel<?> socketWrapper;
+	private final SocketChannel socketWrapper;
 	private final WsWriteTimeout wsWriteTimeout;
 	private volatile SendHandler handler = null;
 	private volatile ByteBuffer[] buffers = null;
 
 	private volatile long timeoutExpiry = -1;
 
-	public WsRemoteEndpointImplServer(Channel<?> socketWrapper, WsServerContainer serverContainer) {
+	public WsRemoteEndpointImplServer(SocketChannel socketWrapper, WsServerContainer serverContainer) {
 		this.socketWrapper = socketWrapper;
 		this.wsWriteTimeout = serverContainer.getTimeout();
 	}
@@ -83,7 +84,7 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 				}
 			}
 			socketWrapper.write(block ? BlockingMode.BLOCK : BlockingMode.SEMI_BLOCK, timeout, TimeUnit.MILLISECONDS,
-					null, Channel.COMPLETE_WRITE_WITH_COMPLETION, new CompletionHandler<Long, Void>() {
+					null, SocketChannel.COMPLETE_WRITE_WITH_COMPLETION, new CompletionHandler<Long, Void>() {
 						@Override
 						public void completed(Long result, Void attachment) {
 							if (block) {

@@ -22,13 +22,13 @@ public class AprHandler implements Handler<Long> {
 	}
 
 	@Override
-	public void processSocket(Channel<Long> channel, SocketEvent event, boolean dispatch) {
+	public void processSocket(Channel channel, SocketEvent event, boolean dispatch) {
 		try {
 			// Process the request from this socket
 			next.processSocket(channel, event, dispatch);// SocketState state =
 			// if (state == Handler.SocketState.CLOSED) {
 			// Close socket and pool
-			channel.close();
+			// channel.close();
 			// }
 		} finally {
 			channel = null;

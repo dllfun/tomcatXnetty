@@ -23,12 +23,12 @@ import javax.servlet.http.WebConnection;
 
 import org.apache.coyote.AbstractProcessorLight;
 import org.apache.coyote.AbstractProtocol;
-import org.apache.coyote.AsyncState;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.ResponseData;
 import org.apache.coyote.UpgradeToken;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
+import org.apache.tomcat.util.net.SocketChannel;
 
 public abstract class UpgradeProcessorBase extends AbstractProcessorLight implements WebConnection {
 
@@ -63,7 +63,7 @@ public abstract class UpgradeProcessorBase extends AbstractProcessorLight implem
 	// ---------------------------- Processor methods that are NO-OP for upgrade
 
 	@Override
-	public final SocketState service(Channel<?> socketWrapper) throws IOException {
+	public final SocketState service(SocketChannel socketWrapper) throws IOException {
 		return null;
 	}
 

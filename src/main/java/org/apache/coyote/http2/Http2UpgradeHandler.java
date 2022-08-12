@@ -52,6 +52,7 @@ import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SendfileState;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -94,7 +95,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 
 	protected final Http2Protocol protocol;
 	private final Adapter adapter;
-	protected volatile Channel channel;
+	protected volatile SocketChannel channel;
 	private volatile SSLSupport sslSupport;
 
 	private volatile Http2Parser parser;
@@ -163,7 +164,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 				log.debug(sm.getString("upgradeHandler.upgrade", connectionId));
 			}
 			Integer key = Integer.valueOf(1);
-			Stream stream = new Stream(key, this, coyoteRequest);
+			Stream stream = new Stream(channel, key, this, coyoteRequest);
 			streams.put(key, stream);
 			maxActiveRemoteStreamId = 1;
 			activeRemoteStreamCount.set(1);
@@ -260,7 +261,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	}
 
 	protected void processStreamOnContainerThread(Stream stream) {
-		StreamProcessor streamProcessor = new StreamProcessor(this, stream, adapter, channel);
+		StreamProcessor streamProcessor = new StreamProcessor(this, stream, adapter);
 		streamProcessor.setSslSupport(sslSupport);
 		processStreamOnContainerThread(streamProcessor, SocketEvent.OPEN_READ);
 	}
@@ -280,7 +281,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	}
 
 	@Override
-	public void setSocketWrapper(Channel<?> channel) {
+	public void setSocketWrapper(SocketChannel channel) {
 		this.channel = channel;
 	}
 
@@ -608,7 +609,14 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 			throws IOException {
 		// This ensures the Stream processing thread has control of the socket.
 		synchronized (channel) {
+			System.out.println("==========================print h2 header start==========================");
+			int size = mimeHeaders.size();
+			for (int i = 0; i < size; i++) {
+				System.out
+						.println(" " + mimeHeaders.getName(i).toString() + " : " + mimeHeaders.getValue(i).toString());
+			}
 			doWriteHeaders(stream, pushedStreamId, mimeHeaders, endOfStream, payloadSize);
+			System.out.println("==========================print h2 header end============================");
 		}
 		stream.sentHeaders();
 		if (endOfStream) {
@@ -1034,7 +1042,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 
 		pruneClosedStreams(streamId);
 
-		Stream result = new Stream(key, this);
+		Stream result = new Stream(channel, key, this);
 		streams.put(key, result);
 		return result;
 	}
@@ -1044,7 +1052,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 
 		Integer key = Integer.valueOf(streamId);
 
-		Stream result = new Stream(key, this, request);
+		Stream result = new Stream(channel, key, this, request);
 		streams.put(key, result);
 		return result;
 	}

@@ -97,7 +97,7 @@ public final class RequestData {
 	 */
 	private final Object notes[] = new Object[Constants.MAX_NOTES];
 
-	protected final AsyncState asyncStateMachine;
+	protected final AsyncStateMachineWrapper asyncStateMachine;
 
 	/**
 	 * Associated input buffer.
@@ -151,7 +151,7 @@ public final class RequestData {
 	// ----------------------------------------------------------- Constructors
 
 	public RequestData() {
-		this.asyncStateMachine = new AsyncState();
+		this.asyncStateMachine = new AsyncStateMachineWrapper();
 		this.parameters.setQuery(queryMB);
 		this.parameters.setURLDecoder(urlDecoder);
 	}
@@ -508,7 +508,7 @@ public final class RequestData {
 		return notes[pos];
 	}
 
-	public AsyncState getAsyncStateMachine() {
+	public AsyncStateMachineWrapper getAsyncStateMachine() {
 		return asyncStateMachine;
 	}
 

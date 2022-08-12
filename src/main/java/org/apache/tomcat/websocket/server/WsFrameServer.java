@@ -24,6 +24,7 @@ import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 import org.apache.tomcat.websocket.Transformation;
@@ -36,10 +37,10 @@ public class WsFrameServer extends WsFrameBase {
 	private final Log log = LogFactory.getLog(WsFrameServer.class); // must not be static
 	private static final StringManager sm = StringManager.getManager(WsFrameServer.class);
 
-	private final Channel<?> channel;
+	private final SocketChannel channel;
 	private final ClassLoader applicationClassLoader;
 
-	public WsFrameServer(Channel<?> channel, WsSession wsSession, Transformation transformation,
+	public WsFrameServer(SocketChannel channel, WsSession wsSession, Transformation transformation,
 			ClassLoader applicationClassLoader) {
 		super(wsSession, transformation);
 		this.channel = channel;

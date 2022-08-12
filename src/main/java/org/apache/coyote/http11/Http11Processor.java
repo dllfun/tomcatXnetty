@@ -61,6 +61,7 @@ import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SendfileDataBase;
 import org.apache.tomcat.util.net.SendfileKeepAliveState;
 import org.apache.tomcat.util.net.SendfileState;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -228,7 +229,7 @@ public class Http11Processor extends AbstractProcessor {
 	}
 
 	@Override
-	public boolean processInIoThread(Channel<?> channel, SocketEvent event) throws IOException {
+	public boolean processInIoThread(SocketChannel channel, SocketEvent event) throws IOException {
 
 		if (event == SocketEvent.OPEN_READ) {
 
@@ -305,7 +306,7 @@ public class Http11Processor extends AbstractProcessor {
 	}
 
 	@Override
-	public SocketState service(Channel<?> channel) throws IOException {
+	public SocketState service(SocketChannel channel) throws IOException {
 		RequestInfo rp = requestData.getRequestProcessor();
 		rp.setStage(org.apache.coyote.Constants.STAGE_PARSE);
 
@@ -359,7 +360,6 @@ public class Http11Processor extends AbstractProcessor {
 					}
 				}
 			} catch (IOException e) {
-				e.printStackTrace();
 				System.err.println(e.getMessage());
 				if (log.isDebugEnabled()) {
 					log.debug(sm.getString("http11processor.header.parse"), e);
@@ -557,7 +557,7 @@ public class Http11Processor extends AbstractProcessor {
 	}
 
 	@Override
-	protected final void setChannel(Channel<?> channel) {
+	protected final void setChannel(SocketChannel channel) {
 		super.setChannel(channel);
 		inputBuffer.init(channel);
 		outputBuffer.init(channel);
@@ -1114,7 +1114,7 @@ public class Http11Processor extends AbstractProcessor {
 	@Override
 	protected void populatePort() {
 		// Ensure the local port field is populated before using it.
-		actionREQ_LOCALPORT_ATTRIBUTE();
+		inputBuffer.actionREQ_LOCALPORT_ATTRIBUTE();
 		requestData.setServerPort(requestData.getLocalPort());
 	}
 
@@ -1299,15 +1299,6 @@ public class Http11Processor extends AbstractProcessor {
 	}
 
 	@Override
-	protected boolean isTrailerFieldsReady() {
-		if (inputBuffer.isChunking()) {
-			return inputBuffer.isFinished();
-		} else {
-			return true;
-		}
-	}
-
-	@Override
 	protected boolean isTrailerFieldsSupported() {
 		// Request must be HTTP/1.1 to support trailer fields
 		if (!http11) {
@@ -1329,7 +1320,7 @@ public class Http11Processor extends AbstractProcessor {
 	 *
 	 * @return The state of send file processing
 	 */
-	private SendfileState processSendfile(Channel<?> socketWrapper) {
+	private SendfileState processSendfile(SocketChannel socketWrapper) {
 		openSocket = keepAlive;
 		// Done is equivalent to sendfile not being used
 		SendfileState result = SendfileState.DONE;

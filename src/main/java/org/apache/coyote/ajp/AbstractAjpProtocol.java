@@ -26,6 +26,7 @@ import org.apache.coyote.UpgradeToken;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint;
 import org.apache.tomcat.util.net.SSLHostConfig;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -261,7 +262,7 @@ public abstract class AbstractAjpProtocol<S> extends AbstractProtocol<S> {
 	}
 
 	@Override
-	protected Processor createUpgradeProcessor(Channel<?> socket, UpgradeToken upgradeToken) {
+	protected Processor createUpgradeProcessor(SocketChannel socket, UpgradeToken upgradeToken) {
 		throw new IllegalStateException(sm.getString("ajpprotocol.noUpgradeHandler",
 				upgradeToken.getHttpUpgradeHandler().getClass().getName()));
 	}

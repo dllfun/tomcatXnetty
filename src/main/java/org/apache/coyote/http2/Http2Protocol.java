@@ -39,6 +39,7 @@ import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.coyote.http11.upgrade.UpgradeProcessorInternal;
 import org.apache.tomcat.util.buf.StringUtils;
 import org.apache.tomcat.util.net.Channel;
+import org.apache.tomcat.util.net.SocketChannel;
 
 public class Http2Protocol implements UpgradeProtocol {
 
@@ -118,14 +119,14 @@ public class Http2Protocol implements UpgradeProtocol {
 	}
 
 	@Override
-	public Processor getProcessor(Channel<?> channel, Adapter adapter) {
+	public Processor getProcessor(SocketChannel channel, Adapter adapter) {
 		UpgradeProcessorInternal processor = new UpgradeProcessorInternal(http11Protocol, channel,
 				new UpgradeToken(getInternalUpgradeHandler(channel, adapter, null), null, null));
 		return processor;
 	}
 
 	@Override
-	public InternalHttpUpgradeHandler getInternalUpgradeHandler(Channel<?> channel, Adapter adapter,
+	public InternalHttpUpgradeHandler getInternalUpgradeHandler(SocketChannel channel, Adapter adapter,
 			RequestData coyoteRequest) {
 		return channel.hasAsyncIO() ? new Http2AsyncUpgradeHandler(this, adapter, coyoteRequest)
 				: new Http2UpgradeHandler(this, adapter, coyoteRequest);

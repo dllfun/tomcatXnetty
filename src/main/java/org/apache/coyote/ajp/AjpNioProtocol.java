@@ -23,7 +23,7 @@ import java.nio.channels.SelectionKey;
 import org.apache.coyote.AbstractProtocol.HeadHandler;
 import org.apache.coyote.AbstractProtocol.TailHandler;
 import org.apache.coyote.http11.AprHandler;
-import org.apache.coyote.http11.NioHandler;
+import org.apache.coyote.http11.HandShakeHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
@@ -52,8 +52,8 @@ public class AjpNioProtocol extends AbstractAjpProtocol<NioChannel> {
 		super(new NioEndpoint());
 
 		Handler tailHandler = new TailHandler();
-		Handler nioHandler = new NioHandler(tailHandler);
-		Handler headHandler = new HeadHandler<>(nioHandler);
+		Handler handShakeHandler = new HandShakeHandler(tailHandler);
+		Handler headHandler = new HeadHandler<>(handShakeHandler);
 		setHandler(headHandler);
 
 		endpoint.setHandler(headHandler);

@@ -18,6 +18,7 @@ package org.apache.coyote;
 
 import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.tomcat.util.net.Channel;
+import org.apache.tomcat.util.net.SocketChannel;
 
 public interface UpgradeProtocol {
 
@@ -63,7 +64,7 @@ public interface UpgradeProtocol {
 	 *
 	 * @return A processor instance for processing a connection using this protocol.
 	 */
-	public Processor getProcessor(Channel<?> socketWrapper, Adapter adapter);
+	public Processor getProcessor(SocketChannel socketWrapper, Adapter adapter);
 
 	/**
 	 * @param socketWrapper The socket
@@ -73,7 +74,7 @@ public interface UpgradeProtocol {
 	 *
 	 * @return An instance of the HTTP upgrade handler for this protocol
 	 */
-	public InternalHttpUpgradeHandler getInternalUpgradeHandler(Channel<?> socketWrapper, Adapter adapter,
+	public InternalHttpUpgradeHandler getInternalUpgradeHandler(SocketChannel channel, Adapter adapter,
 			RequestData request);
 
 	/**

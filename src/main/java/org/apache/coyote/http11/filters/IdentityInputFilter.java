@@ -24,7 +24,7 @@ import org.apache.coyote.InputReader;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.http11.InputFilter;
 import org.apache.tomcat.util.buf.ByteChunk;
-import org.apache.tomcat.util.net.Channel.BufWrapper;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**

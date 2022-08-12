@@ -34,7 +34,8 @@ import org.apache.tomcat.util.http.HeaderUtil;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.parser.HttpParser;
 import org.apache.tomcat.util.net.Channel;
-import org.apache.tomcat.util.net.Channel.BufWrapper;
+import org.apache.tomcat.util.net.SocketChannel;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -91,7 +92,7 @@ public class Http11InputBuffer implements ChannelHandler {
 	/**
 	 * Wrapper that provides access to the underlying socket.
 	 */
-	private Channel<?> channel;
+	private SocketChannel channel;
 
 	/**
 	 * Underlying input buffer.
@@ -803,6 +804,76 @@ public class Http11InputBuffer implements ChannelHandler {
 	}
 
 	@Override
+	public boolean isTrailerFieldsReady() {
+		if (this.isChunking()) {
+			return this.isFinished();
+		} else {
+			return true;
+		}
+	}
+
+	/**
+	 * Processors that populate request attributes directly (e.g. AJP) should
+	 * over-ride this method and return {@code false}.
+	 *
+	 * @return {@code true} if the SocketWrapper should be used to populate the
+	 *         request attributes, otherwise {@code false}.
+	 */
+	protected boolean getPopulateRequestAttributesFromSocket() {
+		return true;
+	}
+
+	/**
+	 * Populate the remote host request attribute. Processors (e.g. AJP) that
+	 * populate this from an alternative source should override this method.
+	 */
+	protected void populateRequestAttributeRemoteHost() {
+		if (getPopulateRequestAttributesFromSocket() && channel != null) {
+			requestData.remoteHost().setString(channel.getRemoteHost());
+		}
+	}
+
+	// @Override
+	public void actionREQ_HOST_ADDR_ATTRIBUTE() {
+		if (getPopulateRequestAttributesFromSocket() && channel != null) {
+			requestData.remoteAddr().setString(channel.getRemoteAddr());
+		}
+	}
+
+	// @Override
+	public void actionREQ_HOST_ATTRIBUTE() {
+		populateRequestAttributeRemoteHost();
+	}
+
+	// @Override
+	public void actionREQ_LOCALPORT_ATTRIBUTE() {
+		if (getPopulateRequestAttributesFromSocket() && channel != null) {
+			requestData.setLocalPort(channel.getLocalPort());
+		}
+	}
+
+	// @Override
+	public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
+		if (getPopulateRequestAttributesFromSocket() && channel != null) {
+			requestData.localAddr().setString(channel.getLocalAddr());
+		}
+	}
+
+	// @Override
+	public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
+		if (getPopulateRequestAttributesFromSocket() && channel != null) {
+			requestData.localName().setString(channel.getLocalName());
+		}
+	}
+
+	// @Override
+	public void actionREQ_REMOTEPORT_ATTRIBUTE() {
+		if (getPopulateRequestAttributesFromSocket() && channel != null) {
+			requestData.setRemotePort(channel.getRemotePort());
+		}
+	}
+
+	@Override
 	public final void setRequestBody(ByteChunk body) {
 		InputFilter savedBody = new SavedRequestInputFilter(body);
 		// Http11InputBuffer internalBuffer = (Http11InputBuffer)
@@ -834,7 +905,7 @@ public class Http11InputBuffer implements ChannelHandler {
 		return false;
 	}
 
-	void init(Channel<?> socketWrapper) {
+	void init(SocketChannel socketWrapper) {
 
 		channel = socketWrapper;
 

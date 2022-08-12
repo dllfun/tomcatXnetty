@@ -41,6 +41,7 @@ import org.apache.tomcat.util.net.NettyEndpoint;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.net.Endpoint.Handler;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
+import org.apache.tomcat.util.net.NettyEndpoint.NettyChannel;
 
 import io.netty.channel.Channel;
 
@@ -125,36 +126,42 @@ public class Http11NettyProtocol extends AbstractHttp11JsseProtocol<Channel> {
 		}
 
 		@Override
-		public void processSocket(org.apache.tomcat.util.net.Channel<Channel> nettyChannel, SocketEvent event,
-				boolean dispatch) {
-			io.netty.channel.Channel channel = nettyChannel.getSocket();
-			if (channel == null) {
-				nettyChannel.close();
-				return;
-			}
+		public void processSocket(org.apache.tomcat.util.net.Channel channel, SocketEvent event, boolean dispatch) {
+			if (channel instanceof NettyChannel) {
 
-			try {
+				NettyChannel nettyChannel = (NettyChannel) channel;
 
-				// SocketState state = SocketState.OPEN;
-				// Process the request from this socket
-				if (event == null) {
-					next.processSocket(nettyChannel, SocketEvent.OPEN_READ, dispatch);
-				} else {
-					next.processSocket(nettyChannel, event, dispatch);
+				io.netty.channel.Channel rawChannel = nettyChannel.getSocket();
+				if (rawChannel == null) {
+					nettyChannel.close();
+					return;
 				}
-				// if (state == SocketState.CLOSED) {
-				// System.out.println("close netty channel");
-				// nettyChannel.close();
-				// }
 
-			} catch (CancelledKeyException cx) {
-				nettyChannel.close();
-			} catch (VirtualMachineError vme) {
-				ExceptionUtils.handleThrowable(vme);
-				nettyChannel.close();
-			} catch (Throwable t) {
-				// log.error(sm.getString("endpoint.processing.fail"), t);
-				nettyChannel.close();
+				try {
+
+					// SocketState state = SocketState.OPEN;
+					// Process the request from this socket
+					if (event == null) {
+						next.processSocket(nettyChannel, SocketEvent.OPEN_READ, dispatch);
+					} else {
+						next.processSocket(nettyChannel, event, dispatch);
+					}
+					// if (state == SocketState.CLOSED) {
+					// System.out.println("close netty channel");
+					// nettyChannel.close();
+					// }
+
+				} catch (CancelledKeyException cx) {
+					nettyChannel.close();
+				} catch (VirtualMachineError vme) {
+					ExceptionUtils.handleThrowable(vme);
+					nettyChannel.close();
+				} catch (Throwable t) {
+					// log.error(sm.getString("endpoint.processing.fail"), t);
+					nettyChannel.close();
+				}
+			} else {
+				next.processSocket(channel, event, dispatch);
 			}
 		}
 

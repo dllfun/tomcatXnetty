@@ -35,11 +35,11 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.res.StringManager;
 
-public abstract class AbstractChannel<E> implements Channel<E> {
+public abstract class AbstractSocketChannel<E> implements SocketChannel {
 
-	private static final Log log = LogFactory.getLog(AbstractChannel.class);
+	private static final Log log = LogFactory.getLog(AbstractSocketChannel.class);
 
-	protected static final StringManager sm = StringManager.getManager(AbstractChannel.class);
+	protected static final StringManager sm = StringManager.getManager(AbstractSocketChannel.class);
 
 	private E socket;
 
@@ -88,7 +88,7 @@ public abstract class AbstractChannel<E> implements Channel<E> {
 	 */
 	protected Object currentProcessor = null;
 
-	public AbstractChannel(E socket, AbstractEndpoint<E, ?> endpoint) {
+	public AbstractSocketChannel(E socket, AbstractEndpoint<E, ?> endpoint) {
 		this.socket = socket;
 		this.endpoint = endpoint;
 		if (endpoint.getUseAsyncIO() || needSemaphores()) {
@@ -100,7 +100,7 @@ public abstract class AbstractChannel<E> implements Channel<E> {
 		}
 	}
 
-	@Override
+	// @Override
 	public E getSocket() {
 		return socket;
 	}
@@ -600,7 +600,7 @@ public abstract class AbstractChannel<E> implements Channel<E> {
 				getEndpoint().getHandler().getProtocol().getExecutor().execute(this);
 				return true;
 			} catch (RejectedExecutionException ree) {
-				log.warn(sm.getString("endpoint.executor.fail", AbstractChannel.this), ree);
+				log.warn(sm.getString("endpoint.executor.fail", AbstractSocketChannel.this), ree);
 			} catch (Throwable t) {
 				ExceptionUtils.handleThrowable(t);
 				// This means we got an OOM or similar creating a thread, or that

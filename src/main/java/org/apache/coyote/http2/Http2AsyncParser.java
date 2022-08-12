@@ -25,20 +25,21 @@ import javax.servlet.http.WebConnection;
 
 import org.apache.coyote.ProtocolException;
 import org.apache.tomcat.util.net.Channel;
-import org.apache.tomcat.util.net.Channel.BlockingMode;
-import org.apache.tomcat.util.net.Channel.CompletionCheck;
-import org.apache.tomcat.util.net.Channel.CompletionHandlerCall;
-import org.apache.tomcat.util.net.Channel.CompletionState;
+import org.apache.tomcat.util.net.SocketChannel;
+import org.apache.tomcat.util.net.SocketChannel.BlockingMode;
+import org.apache.tomcat.util.net.SocketChannel.CompletionCheck;
+import org.apache.tomcat.util.net.SocketChannel.CompletionHandlerCall;
+import org.apache.tomcat.util.net.SocketChannel.CompletionState;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.net.SocketWrapperBase;
 
 class Http2AsyncParser extends Http2Parser {
 
-	private final Channel<?> socketWrapper;
+	private final SocketChannel socketWrapper;
 	private final Http2AsyncUpgradeHandler upgradeHandler;
 	private Throwable error = null;
 
-	Http2AsyncParser(String connectionId, Input input, Output output, Channel<?> socketWrapper,
+	Http2AsyncParser(String connectionId, Input input, Output output, SocketChannel socketWrapper,
 			Http2AsyncUpgradeHandler upgradeHandler) {
 		super(connectionId, input, output);
 		this.socketWrapper = socketWrapper;

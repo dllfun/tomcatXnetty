@@ -56,9 +56,7 @@ import org.apache.tomcat.jni.Socket;
 import org.apache.tomcat.jni.Status;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.ByteBufferUtils;
-import org.apache.tomcat.util.collections.SynchronizedStack;
 import org.apache.tomcat.util.net.Acceptor.AcceptorState;
-import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.openssl.OpenSSLContext;
 import org.apache.tomcat.util.net.openssl.OpenSSLUtil;
 
@@ -477,8 +475,8 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 	public void stopInternal() {
 
 		poller.stop();
-		for (Channel<Long> socketWrapper : connections.values()) {
-			socketWrapper.close();
+		for (SocketChannel channel : connections.values()) {
+			channel.close();
 		}
 		long waitLeft = 10000;
 		while (waitLeft > 0 && acceptor.getState() != AcceptorState.ENDED && serverSock != 0) {
@@ -1914,6 +1912,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 		private volatile boolean blockingStatus = true;
 		private final Lock blockingStatusReadLock;
 		private final WriteLock blockingStatusWriteLock;
+		private SocketBufferHandler socketBufferHandler;
 
 		public AprSocketWrapper(Long socket, AprEndpoint endpoint) {
 			super(socket, endpoint);
@@ -1931,7 +1930,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 				sslOutputBuffer = null;
 			}
 
-			setSocketBufferHandler(new SocketBufferHandler(6 * 1500, 6 * 1500, true));
+			this.socketBufferHandler = new SocketBufferHandler(6 * 1500, 6 * 1500, true);
 		}
 
 		public boolean getBlockingStatus() {
@@ -1948,6 +1947,11 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 
 		public WriteLock getBlockingStatusWriteLock() {
 			return blockingStatusWriteLock;
+		}
+
+		@Override
+		protected SocketBufferHandler getSocketBufferHandler() {
+			return this.socketBufferHandler;
 		}
 
 		@Override
@@ -2120,7 +2124,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 				log.debug("Calling [" + getEndpoint() + "].closeSocket([" + this + "])");
 			}
 			getEndpoint().connections.remove(getSocket());
-			setSocketBufferHandler(SocketBufferHandler.EMPTY);
+			this.socketBufferHandler = SocketBufferHandler.EMPTY;
 			nonBlockingWriteBuffer.clear();
 			if (sslOutputBuffer != null) {
 				ByteBufferUtils.cleanDirectBuffer(sslOutputBuffer);
@@ -2574,4 +2578,5 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 		}
 
 	}
+
 }

@@ -25,6 +25,7 @@ import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 
 /**
@@ -37,12 +38,12 @@ public abstract class AbstractProcessorLight implements Processor {
 	private Set<DispatchType> dispatches = new CopyOnWriteArraySet<>();
 
 	@Override
-	public boolean processInIoThread(Channel<?> channel, SocketEvent event) throws IOException {
+	public boolean processInIoThread(SocketChannel channel, SocketEvent event) throws IOException {
 		return true;
 	}
 
 	@Override
-	public final SocketState process(Channel<?> channel, SocketEvent event) throws IOException {
+	public final SocketState process(SocketChannel channel, SocketEvent event) throws IOException {
 
 		SocketState state = SocketState.CLOSED;
 		Iterator<DispatchType> dispatches = null;
@@ -95,7 +96,7 @@ public abstract class AbstractProcessorLight implements Processor {
 		return state;
 	}
 
-	private SocketState checkForPipelinedData(SocketState inState, Channel<?> channel) throws IOException {
+	private SocketState checkForPipelinedData(SocketState inState, SocketChannel channel) throws IOException {
 		if (inState == SocketState.OPEN) {
 			// There may be pipe-lined data to read. If the data isn't
 			// processed now, execution will exit this loop and call
@@ -146,7 +147,7 @@ public abstract class AbstractProcessorLight implements Processor {
 	 * @throws IOException If an I/O error occurs during the processing of the
 	 *                     request
 	 */
-	protected void logAccess(Channel<?> socketWrapper) throws IOException {
+	protected void logAccess(SocketChannel socketWrapper) throws IOException {
 		// NO-OP by default
 	}
 
@@ -166,7 +167,7 @@ public abstract class AbstractProcessorLight implements Processor {
 	 * @throws IOException If an I/O error occurs during the processing of the
 	 *                     request
 	 */
-	protected abstract SocketState service(Channel<?> channel) throws IOException;
+	protected abstract SocketState service(SocketChannel channel) throws IOException;
 
 	/**
 	 * Process an in-progress request that is not longer in standard HTTP mode. Uses

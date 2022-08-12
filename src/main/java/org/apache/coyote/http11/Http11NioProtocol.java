@@ -48,8 +48,8 @@ public class Http11NioProtocol extends AbstractHttp11JsseProtocol<NioChannel> {
 		super(new NioEndpoint());
 
 		Handler tailHandler = new TailHandler();
-		Handler nioHandler = new NioHandler(tailHandler);
-		Handler headHandler = new HeadHandler<>(nioHandler);
+		Handler handShakeHandler = new HandShakeHandler(tailHandler);
+		Handler headHandler = new HeadHandler<>(handShakeHandler);
 		setHandler(headHandler);
 
 		endpoint.setHandler(headHandler);

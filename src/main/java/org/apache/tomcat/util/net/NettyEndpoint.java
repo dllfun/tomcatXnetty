@@ -255,7 +255,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		return ret;
 	}
 
-	protected static class NettyChannel extends AbstractChannel<io.netty.channel.Channel> {
+	public static class NettyChannel extends AbstractSocketChannel<io.netty.channel.Channel> {
 
 		private static final Cumulator cumulator = ByteToMessageDecoder.MERGE_CUMULATOR;
 
@@ -681,10 +681,10 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		}
 
 		@Override
-		protected <A> AbstractChannel<Channel>.OperationState<A> newOperationState(boolean read, ByteBuffer[] buffers,
-				int offset, int length, BlockingMode block, long timeout, TimeUnit unit, A attachment,
-				CompletionCheck check, CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
-				AbstractChannel<Channel>.VectoredIOCompletionHandler<A> completion) {
+		protected <A> AbstractSocketChannel<Channel>.OperationState<A> newOperationState(boolean read,
+				ByteBuffer[] buffers, int offset, int length, BlockingMode block, long timeout, TimeUnit unit,
+				A attachment, CompletionCheck check, CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
+				AbstractSocketChannel<Channel>.VectoredIOCompletionHandler<A> completion) {
 			// TODO Auto-generated method stub
 			return null;
 		}

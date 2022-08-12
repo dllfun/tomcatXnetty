@@ -98,7 +98,7 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 	/**
 	 * Map holding all current connections keyed with the sockets.
 	 */
-	protected final Map<U, Channel<S>> connections = new ConcurrentHashMap<>();
+	protected final Map<U, SocketChannel> connections = new ConcurrentHashMap<>();
 
 	public AbstractEndpoint() {
 
@@ -575,7 +575,7 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 	 * @return A set with the open socket wrappers
 	 */
 	@Override
-	public final Set<Channel<S>> getConnections() {
+	public final Set<SocketChannel> getConnections() {
 		return new HashSet<>(connections.values());
 	}
 

@@ -17,6 +17,7 @@
 package org.apache.tomcat.util.net;
 
 import java.io.IOException;
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousByteChannel;
 import java.nio.channels.AsynchronousSocketChannel;
@@ -27,7 +28,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import org.apache.tomcat.util.net.SocketWrapperBase.SocketBufferHandler;
+import org.apache.tomcat.util.buf.ByteBufferUtils;
 
 /**
  * Base class for a SocketChannel wrapper used by the endpoint. This way, logic
@@ -42,8 +43,14 @@ public class Nio2Channel implements AsynchronousByteChannel {
 	protected AsynchronousSocketChannel sc = null;
 	protected SocketWrapperBase<Nio2Channel> socketWrapper = null;
 
-	public Nio2Channel(SocketBufferHandler socketBufferHandler) {
-		this.socketBufferHandler = socketBufferHandler;
+	public Nio2Channel(SocketProperties socketProperties) {
+		if (socketProperties != null) {
+			SocketBufferHandler socketBufferHandler = new SocketBufferHandler(socketProperties.getAppReadBufSize(),
+					socketProperties.getAppWriteBufSize(), socketProperties.getDirectBuffer());
+			this.socketBufferHandler = socketBufferHandler;
+		} else {
+			this.socketBufferHandler = SocketBufferHandler.EMPTY;
+		}
 	}
 
 	/**
@@ -106,7 +113,7 @@ public class Nio2Channel implements AsynchronousByteChannel {
 		return sc.isOpen();
 	}
 
-	public SocketBufferHandler getBufHandler() {
+	protected SocketBufferHandler getBufHandler() {
 		return socketBufferHandler;
 	}
 
@@ -248,7 +255,7 @@ public class Nio2Channel implements AsynchronousByteChannel {
 		}
 	};
 
-	static final Nio2Channel CLOSED_NIO2_CHANNEL = new Nio2Channel(SocketBufferHandler.EMPTY) {
+	static final Nio2Channel CLOSED_NIO2_CHANNEL = new Nio2Channel(null) {
 		@Override
 		public void close() throws IOException {
 		}
@@ -309,4 +316,5 @@ public class Nio2Channel implements AsynchronousByteChannel {
 			return "Closed Nio2Channel";
 		}
 	};
+
 }

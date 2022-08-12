@@ -18,7 +18,7 @@ package org.apache.coyote;
 
 import java.io.IOException;
 
-import org.apache.tomcat.util.net.Channel.BufWrapper;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 
 /**
  * This class is only for internal use in the protocol implementation. All
@@ -39,7 +39,7 @@ public interface InputReader {
 	 *
 	 * @throws IOException If an I/O error occurs reading from the input stream
 	 */
-	//public int doRead(PreInputBuffer handler) throws IOException;
+	// public int doRead(PreInputBuffer handler) throws IOException;
 
 	public BufWrapper doRead() throws IOException;
 

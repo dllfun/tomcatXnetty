@@ -37,6 +37,7 @@ import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SendfileState;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -50,15 +51,14 @@ class StreamProcessor extends AbstractProcessor {
 	private SendfileData sendfileData = null;
 	private SendfileState sendfileState = null;
 
-	StreamProcessor(Http2UpgradeHandler handler, Stream stream, Adapter adapter, Channel<?> channel) {
+	StreamProcessor(Http2UpgradeHandler handler, Stream stream, Adapter adapter) {
 		super(handler.getProtocol().getHttp11Protocol(), adapter, stream.getCoyoteRequest(),
 				stream.getCoyoteResponse());
 		this.handler = handler;
 		this.stream = stream;
 		this.stream.setProcessor(this);
-		this.stream.setChannel(channel);
 		// inputHandler = this.stream.getInputBuffer();
-		setChannel(channel);
+		setChannel(stream.getChannel());
 	}
 
 	@Override
@@ -280,11 +280,6 @@ class StreamProcessor extends AbstractProcessor {
 	}
 
 	@Override
-	protected boolean isTrailerFieldsReady() {
-		return stream.isTrailerFieldsReady();
-	}
-
-	@Override
 	protected boolean isTrailerFieldsSupported() {
 		return stream.isTrailerFieldsSupported();
 	}
@@ -318,7 +313,7 @@ class StreamProcessor extends AbstractProcessor {
 	}
 
 	@Override
-	public final SocketState service(Channel<?> socket) throws IOException {
+	public final SocketState service(SocketChannel channel) throws IOException {
 		try {
 			Request request = createRequest();
 			Response response = createResponse();
