@@ -16,21 +16,14 @@
  */
 package org.apache.coyote.http11;
 
-import java.io.IOException;
-import java.nio.channels.CancelledKeyException;
-import java.nio.channels.SelectionKey;
-
-import org.apache.coyote.AbstractProtocol;
-import org.apache.coyote.AbstractProtocol.HeadHandler;
-import org.apache.coyote.AbstractProtocol.TailHandler;
+import org.apache.coyote.DispatchHandler;
+import org.apache.coyote.HandShakeHandler;
+import org.apache.coyote.ProcessorHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.ExceptionUtils;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler;
 import org.apache.tomcat.util.net.NioChannel;
 import org.apache.tomcat.util.net.NioEndpoint;
-import org.apache.tomcat.util.net.SocketEvent;
 
 /**
  * Abstract the protocol implementation, including threading, etc. Processor is
@@ -47,12 +40,12 @@ public class Http11NioProtocol extends AbstractHttp11JsseProtocol<NioChannel> {
 	public Http11NioProtocol() {
 		super(new NioEndpoint());
 
-		Handler tailHandler = new TailHandler();
-		Handler handShakeHandler = new HandShakeHandler(tailHandler);
-		Handler headHandler = new HeadHandler<>(handShakeHandler);
-		setHandler(headHandler);
+		Handler processorHandler = new ProcessorHandler(this);
+		Handler handShakeHandler = new HandShakeHandler(processorHandler);
+		Handler dispatchHandler = new DispatchHandler(handShakeHandler, this);
+		setHandler(dispatchHandler);
 
-		endpoint.setHandler(headHandler);
+		endpoint.setHandler(dispatchHandler);
 	}
 
 	@Override

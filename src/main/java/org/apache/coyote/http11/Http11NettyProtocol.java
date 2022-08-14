@@ -16,31 +16,16 @@
  */
 package org.apache.coyote.http11;
 
-import java.nio.ByteBuffer;
 import java.nio.channels.CancelledKeyException;
-import java.util.concurrent.Executor;
-import java.util.concurrent.RejectedExecutionException;
-
-import javax.servlet.http.HttpUpgradeHandler;
-import javax.servlet.http.WebConnection;
-
 import org.apache.coyote.AbstractProtocol;
-import org.apache.coyote.ContainerThreadMarker;
-import org.apache.coyote.Processor;
-import org.apache.coyote.ProtocolException;
-import org.apache.coyote.UpgradeProtocol;
-import org.apache.coyote.UpgradeToken;
-import org.apache.coyote.AbstractProtocol.HeadHandler;
-import org.apache.coyote.AbstractProtocol.TailHandler;
-import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
+import org.apache.coyote.DispatchHandler;
+import org.apache.coyote.ProcessorHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.InstanceManager;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.NettyEndpoint;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.net.Endpoint.Handler;
-import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.NettyEndpoint.NettyChannel;
 
 import io.netty.channel.Channel;
@@ -60,10 +45,10 @@ public class Http11NettyProtocol extends AbstractHttp11JsseProtocol<Channel> {
 	public Http11NettyProtocol() {
 		super(new NettyEndpoint());
 
-		Handler tailHandler = new TailHandler();
-		Handler nettyHandler = new NettyHandler(tailHandler);
-		Handler headHandler = new HeadHandler<>(nettyHandler);
-		Handler parseInIoHandler = new ParseInIoHandler(headHandler);
+		Handler processorHandler = new ProcessorHandler(this);
+		Handler nettyHandler = new NettyHandler(processorHandler);
+		Handler dispatchHandler = new DispatchHandler(nettyHandler, this);
+		Handler parseInIoHandler = new ParseInIoHandler(dispatchHandler);
 		setHandler(parseInIoHandler);
 
 		endpoint.setHandler(parseInIoHandler);

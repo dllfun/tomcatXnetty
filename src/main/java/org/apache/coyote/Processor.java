@@ -32,6 +32,8 @@ public interface Processor {
 
 	boolean processInIoThread(SocketChannel channel, SocketEvent event) throws IOException;
 
+	void beforeProcess();
+
 	/**
 	 * Process a connection. This is called whenever an event occurs (e.g. more data
 	 * arrives) that allows processing to continue for a connection that is not
@@ -47,7 +49,9 @@ public interface Processor {
 	 * @throws IOException If an I/O error occurs during the processing of the
 	 *                     request
 	 */
-	SocketState process(SocketChannel channel, SocketEvent event) throws IOException;
+	SocketState process(Channel channel, SocketEvent event) throws IOException;
+
+	void afterProcess();
 
 	/**
 	 * Generate an upgrade token.
@@ -133,4 +137,7 @@ public interface Processor {
 	 *         timeout was triggered
 	 */
 	boolean checkAsyncTimeoutGeneration();
+
+	Exception collectCloseException();
+
 }

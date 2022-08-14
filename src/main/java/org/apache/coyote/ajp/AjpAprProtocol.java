@@ -16,6 +16,8 @@
  */
 package org.apache.coyote.ajp;
 
+import org.apache.coyote.DispatchHandler;
+import org.apache.coyote.ProcessorHandler;
 import org.apache.coyote.http11.AprHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -49,12 +51,12 @@ public class AjpAprProtocol extends AbstractAjpProtocol<Long> {
 	public AjpAprProtocol() {
 		super(new AprEndpoint());
 
-		Handler tailHandler = new TailHandler();
-		Handler aprHandler = new AprHandler(tailHandler);
-		Handler headHandler = new HeadHandler<>(aprHandler);
-		setHandler(headHandler);
+		Handler processorHandler = new ProcessorHandler(this);
+		Handler aprHandler = new AprHandler(processorHandler);
+		Handler dispatchHandler = new DispatchHandler(aprHandler, this);
+		setHandler(dispatchHandler);
 
-		endpoint.setHandler(headHandler);
+		endpoint.setHandler(dispatchHandler);
 	}
 
 	// --------------------------------------------------------- Public Methods

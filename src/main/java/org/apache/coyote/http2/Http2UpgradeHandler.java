@@ -263,18 +263,18 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	protected void processStreamOnContainerThread(Stream stream) {
 		StreamProcessor streamProcessor = new StreamProcessor(this, stream, adapter);
 		streamProcessor.setSslSupport(sslSupport);
-		processStreamOnContainerThread(streamProcessor, SocketEvent.OPEN_READ);
+		processStreamOnContainerThread(stream, streamProcessor, SocketEvent.OPEN_READ);
 	}
 
-	void processStreamOnContainerThread(StreamProcessor streamProcessor, SocketEvent event) {
-		StreamRunnable streamRunnable = new StreamRunnable(streamProcessor, event);
+	void processStreamOnContainerThread(Stream stream, StreamProcessor streamProcessor, SocketEvent event) {
 		if (streamConcurrency == null) {
-			protocol.getHttp11Protocol().getExecutor().execute(streamRunnable);
+			protocol.getHttp11Protocol().getHandler().processSocket(stream, event, true);// .execute(streamRunnable);
 		} else {
 			if (getStreamConcurrency() < protocol.getMaxConcurrentStreamExecution()) {
 				increaseStreamConcurrency();
-				protocol.getHttp11Protocol().getExecutor().execute(streamRunnable);
+				protocol.getHttp11Protocol().getHandler().processSocket(stream, event, true);// getExecutor().execute(streamRunnable)
 			} else {
+				StreamRunnable streamRunnable = new StreamRunnable(stream, streamProcessor, event);
 				queuedRunnable.offer(streamRunnable);
 			}
 		}
@@ -288,6 +288,11 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	@Override
 	public void setSslSupport(SSLSupport sslSupport) {
 		this.sslSupport = sslSupport;
+	}
+
+	@Override
+	public SSLSupport getSslSupport(String clientCertProvider) {
+		return this.sslSupport;
 	}
 
 	@Override
@@ -434,6 +439,11 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	}
 
 	@Override
+	public Object getLock() {
+		return this;
+	}
+
+	@Override
 	public void pause() {
 		if (log.isDebugEnabled()) {
 			log.debug(sm.getString("upgradeHandler.pause.entry", connectionId));
@@ -487,7 +497,8 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 			StreamRunnable streamRunnable = queuedRunnable.poll();
 			if (streamRunnable != null) {
 				increaseStreamConcurrency();
-				protocol.getHttp11Protocol().getExecutor().execute(streamRunnable);
+				protocol.getHttp11Protocol().getHandler().processSocket(streamRunnable.getStream(),
+						streamRunnable.getEvent(), true);// .getExecutor().execute(streamRunnable)
 			}
 		}
 	}
@@ -1057,7 +1068,19 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 		return result;
 	}
 
-	private void close() {
+	@Override
+	public boolean isClosed() {
+		return channel.isClosed();
+	}
+
+	@Override
+	public void close(Throwable e) {
+		this.close();
+	}
+
+	@Override
+	public void close() {
+		System.out.println(this + " closed");
 		ConnectionState previous = connectionState.getAndSet(ConnectionState.CLOSED);
 		if (previous == ConnectionState.CLOSED) {
 			// Already closed

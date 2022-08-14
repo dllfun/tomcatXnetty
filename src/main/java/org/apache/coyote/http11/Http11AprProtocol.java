@@ -16,8 +16,8 @@
  */
 package org.apache.coyote.http11;
 
-import org.apache.coyote.AbstractProtocol.HeadHandler;
-import org.apache.coyote.AbstractProtocol.TailHandler;
+import org.apache.coyote.DispatchHandler;
+import org.apache.coyote.ProcessorHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.AprEndpoint;
@@ -41,12 +41,12 @@ public class Http11AprProtocol extends AbstractHttp11Protocol<Long> {
 	public Http11AprProtocol() {
 		super(new AprEndpoint());
 
-		Handler tailHandler = new TailHandler();
-		Handler aprHandler = new AprHandler(tailHandler);
-		Handler headHandler = new HeadHandler<>(aprHandler);
-		setHandler(headHandler);
+		Handler processorHandler = new ProcessorHandler(this);
+		Handler aprHandler = new AprHandler(processorHandler);
+		Handler dispatchHandler = new DispatchHandler(aprHandler, this);
+		setHandler(dispatchHandler);
 
-		endpoint.setHandler(headHandler);
+		endpoint.setHandler(dispatchHandler);
 	}
 
 	@Override

@@ -43,8 +43,7 @@ public abstract class AbstractProcessorLight implements Processor {
 	}
 
 	@Override
-	public final SocketState process(SocketChannel channel, SocketEvent event) throws IOException {
-
+	public final SocketState process(Channel channel, SocketEvent event) throws IOException {
 		SocketState state = SocketState.CLOSED;
 		Iterator<DispatchType> dispatches = null;
 		do {
@@ -96,7 +95,7 @@ public abstract class AbstractProcessorLight implements Processor {
 		return state;
 	}
 
-	private SocketState checkForPipelinedData(SocketState inState, SocketChannel channel) throws IOException {
+	private SocketState checkForPipelinedData(SocketState inState, Channel channel) throws IOException {
 		if (inState == SocketState.OPEN) {
 			// There may be pipe-lined data to read. If the data isn't
 			// processed now, execution will exit this loop and call
@@ -147,7 +146,7 @@ public abstract class AbstractProcessorLight implements Processor {
 	 * @throws IOException If an I/O error occurs during the processing of the
 	 *                     request
 	 */
-	protected void logAccess(SocketChannel socketWrapper) throws IOException {
+	protected void logAccess(Channel socketWrapper) throws IOException {
 		// NO-OP by default
 	}
 
@@ -167,7 +166,7 @@ public abstract class AbstractProcessorLight implements Processor {
 	 * @throws IOException If an I/O error occurs during the processing of the
 	 *                     request
 	 */
-	protected abstract SocketState service(SocketChannel channel) throws IOException;
+	protected abstract SocketState service(Channel channel) throws IOException;
 
 	/**
 	 * Process an in-progress request that is not longer in standard HTTP mode. Uses

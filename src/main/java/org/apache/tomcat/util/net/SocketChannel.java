@@ -90,13 +90,7 @@ public interface SocketChannel extends Channel {
 
 	public BufWrapper allocate(int size);
 
-	public Object getCurrentProcessor();
-
-	public void setCurrentProcessor(Object currentProcessor);
-
 	// public void execute(Runnable runnable);
-
-	public IOException getError();
 
 	public void setUpgraded(boolean upgraded);
 
@@ -152,17 +146,11 @@ public interface SocketChannel extends Channel {
 
 	// public void processSocket(SocketEvent socketStatus, boolean dispatch);
 
-	public void registerReadInterest();
-
-	public void registerWriteInterest();
-
 	public SendfileDataBase createSendfileData(String filename, long pos, long length);
 
 	public SendfileState processSendfile(SendfileDataBase sendfileData);
 
 	public void doClientAuth(SSLSupport sslSupport) throws IOException;
-
-	public SSLSupport getSslSupport(String clientCertProvider);
 
 	public boolean hasAsyncIO();
 
@@ -306,9 +294,5 @@ public interface SocketChannel extends Channel {
 
 	public <A> CompletionState write(BlockingMode block, long timeout, TimeUnit unit, A attachment,
 			CompletionCheck check, CompletionHandler<Long, ? super A> handler, ByteBuffer... srcs);
-
-	public boolean isClosed();
-
-	public void close();
 
 }

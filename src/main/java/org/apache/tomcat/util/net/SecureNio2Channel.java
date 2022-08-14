@@ -715,6 +715,7 @@ public class SecureNio2Channel extends Nio2Channel {
 		@Override
 		public Integer get(long timeout, TimeUnit unit)
 				throws InterruptedException, ExecutionException, TimeoutException {
+			System.out.println("readfuture timeout " + timeout);
 			return (integer == null) ? unwrap(netInBuffer.position(), timeout, unit)
 					: unwrap(integer.get(timeout, unit).intValue(), timeout, unit);
 		}
@@ -866,6 +867,7 @@ public class SecureNio2Channel extends Nio2Channel {
 		@Override
 		public Integer get(long timeout, TimeUnit unit)
 				throws InterruptedException, ExecutionException, TimeoutException {
+			System.out.println("writefuture timeout " + timeout);
 			if (t != null) {
 				throw new ExecutionException(t);
 			}
@@ -915,6 +917,7 @@ public class SecureNio2Channel extends Nio2Channel {
 	@Override
 	public <A> void read(final ByteBuffer dst, final long timeout, final TimeUnit unit, final A attachment,
 			final CompletionHandler<Integer, ? super A> handler) {
+		System.out.println("read timeout " + timeout);
 		// Check state
 		if (closing || closed) {
 			handler.completed(Integer.valueOf(-1), attachment);
@@ -1016,6 +1019,7 @@ public class SecureNio2Channel extends Nio2Channel {
 	@Override
 	public <A> void read(final ByteBuffer[] dsts, final int offset, final int length, final long timeout,
 			final TimeUnit unit, final A attachment, final CompletionHandler<Long, ? super A> handler) {
+		System.out.println("read timeout " + timeout);
 		if (offset < 0 || dsts == null || (offset + length) > dsts.length) {
 			throw new IllegalArgumentException();
 		}
@@ -1162,6 +1166,7 @@ public class SecureNio2Channel extends Nio2Channel {
 	@Override
 	public <A> void write(final ByteBuffer src, final long timeout, final TimeUnit unit, final A attachment,
 			final CompletionHandler<Integer, ? super A> handler) {
+		System.out.println("write timeout " + timeout + src);
 		// Check state
 		if (closing || closed) {
 			handler.failed(new IOException(sm.getString("channel.nio.ssl.closing")), attachment);
@@ -1198,6 +1203,7 @@ public class SecureNio2Channel extends Nio2Channel {
 
 					@Override
 					public void failed(Throwable exc, A attach) {
+						System.out.println("write failed " + timeout + src);
 						handler.failed(exc, attach);
 					}
 				});
@@ -1212,6 +1218,7 @@ public class SecureNio2Channel extends Nio2Channel {
 	@Override
 	public <A> void write(final ByteBuffer[] srcs, final int offset, final int length, final long timeout,
 			final TimeUnit unit, final A attachment, final CompletionHandler<Long, ? super A> handler) {
+		System.out.println("write timeout " + timeout + srcs);
 		if ((offset < 0) || (length < 0) || (offset > srcs.length - length)) {
 			throw new IndexOutOfBoundsException();
 		}
@@ -1251,6 +1258,7 @@ public class SecureNio2Channel extends Nio2Channel {
 
 					@Override
 					public void failed(Throwable exc, A attach) {
+						System.out.println("write failed " + timeout + srcs);
 						handler.failed(exc, attach);
 					}
 				});

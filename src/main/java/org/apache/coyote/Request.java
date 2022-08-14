@@ -394,6 +394,11 @@ public final class Request implements InputReader {
 		return requestData.getAsyncStateMachine().hasStackedState();
 	}
 
+	public void actionREQUEST_BODY_FULLY_READ(AtomicBoolean param) {
+		AtomicBoolean result = param;
+		result.set(channelHandler.isRequestBodyFullyRead());
+	}
+
 	public void actionNB_READ_INTEREST(AtomicBoolean param) {
 		AtomicBoolean isReady = param;
 		isReady.set(channelHandler.isReadyForRead());

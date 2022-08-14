@@ -16,6 +16,7 @@
  */
 package org.apache.coyote.http2;
 
+import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.ActionCode;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -185,11 +186,11 @@ class WindowAllocationManager {
 						log.debug(sm.getString("windowAllocationManager.dispatched", stream.getConnectionId(),
 								stream.getIdentifier()));
 					}
-					stream.getProcessor().actionDISPATCH_WRITE();
+					((AbstractProcessor) stream.getCurrentProcessor()).actionDISPATCH_WRITE();
 					// Need to explicitly execute dispatches on the StreamProcessor
 					// as this thread is being processed by an UpgradeProcessor
 					// which won't see this dispatch
-					stream.getProcessor().actionDISPATCH_EXECUTE();
+					((AbstractProcessor) stream.getCurrentProcessor()).actionDISPATCH_EXECUTE();
 				}
 			}
 		}

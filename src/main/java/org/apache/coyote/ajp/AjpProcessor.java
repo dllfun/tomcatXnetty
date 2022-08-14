@@ -95,6 +95,8 @@ public class AjpProcessor extends AbstractProcessor {
 	 */
 	private final OutputBuffer outputBuffer;
 
+	private SocketChannel channel;
+
 	static {
 		// Allocate the end message array
 		AjpMessage endMessage = new AjpMessage(16);
@@ -333,8 +335,9 @@ public class AjpProcessor extends AbstractProcessor {
 	}
 
 	@Override
-	public SocketState service(SocketChannel channel) throws IOException {
-
+	public SocketState service(Channel channel) throws IOException {
+		SocketChannel socketChannel = (SocketChannel) channel;
+		this.channel = socketChannel;
 		RequestInfo rp = requestData.getRequestProcessor();
 		rp.setStage(org.apache.coyote.Constants.STAGE_PARSE);
 
@@ -357,7 +360,7 @@ public class AjpProcessor extends AbstractProcessor {
 
 				// Processing the request so make sure the connection rather
 				// than keep-alive timeout is used
-				channel.setReadTimeout(protocol.getConnectionTimeout());
+				socketChannel.setReadTimeout(protocol.getConnectionTimeout());
 
 				// Check message type, process right away and break if
 				// not regular request processing
@@ -369,8 +372,8 @@ public class AjpProcessor extends AbstractProcessor {
 					}
 					cping = true;
 					try {
-						channel.write(true, pongMessageArray, 0, pongMessageArray.length);
-						channel.flush(true);
+						socketChannel.write(true, pongMessageArray, 0, pongMessageArray.length);
+						socketChannel.flush(true);
 					} catch (IOException e) {
 						if (getLog().isDebugEnabled()) {
 							getLog().debug("Pong message failed", e);
@@ -471,7 +474,7 @@ public class AjpProcessor extends AbstractProcessor {
 			rp.setStage(org.apache.coyote.Constants.STAGE_KEEPALIVE);
 
 			// Set keep alive timeout for next request
-			channel.setReadTimeout(protocol.getKeepAliveTimeout());
+			socketChannel.setReadTimeout(protocol.getKeepAliveTimeout());
 
 			recycle();
 		}
@@ -503,6 +506,7 @@ public class AjpProcessor extends AbstractProcessor {
 		request.setResponse(response);
 		getAdapter().checkRecycled(request, response);
 		super.recycle();
+		channel = null;
 		first = true;
 		endOfStream = false;
 		waitingForBodyMessage = false;

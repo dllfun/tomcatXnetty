@@ -1,4 +1,4 @@
-package org.apache.coyote.http11;
+package org.apache.coyote;
 
 import java.io.IOException;
 import java.nio.channels.CancelledKeyException;
@@ -20,7 +20,7 @@ public class HandShakeHandler implements Handler<NioChannel> {
 
 	private static final Log log = LogFactory.getLog(HandShakeHandler.class);
 
-	protected static final StringManager sm = StringManager.getManager(AbstractHttp11Protocol.class);
+	protected static final StringManager sm = StringManager.getManager(AbstractProtocol.class);
 
 	private Handler next;
 
@@ -35,7 +35,6 @@ public class HandShakeHandler implements Handler<NioChannel> {
 
 	@Override
 	public void processSocket(Channel channel, SocketEvent event, boolean dispatch) {
-		SocketChannel socketChannel = (SocketChannel) channel;
 		if (channel instanceof HandShakeable) {
 
 			HandShakeable handShakeable = (HandShakeable) channel;
@@ -95,25 +94,25 @@ public class HandShakeHandler implements Handler<NioChannel> {
 					next.processSocket(channel, SocketEvent.CONNECT_FAIL, dispatch);
 					// poller.cancelledKey(socket.getIOChannel().keyFor(poller.getSelector()),
 					// socketWrapper);
-					socketChannel.close();
+					channel.close();
 				} else if (handshake == HandShakeable.HANDSHAKE_NEEDREAD) {
-					socketChannel.registerReadInterest();
+					channel.registerReadInterest();
 				} else if (handshake == HandShakeable.HANDSHAKE_NEEDWRITE) {
-					socketChannel.registerWriteInterest();
+					channel.registerWriteInterest();
 				} else if (handshake == HandShakeable.HANDSHAKE_IGNORE) {
 					// do nothing
 				}
 			} catch (CancelledKeyException cx) {
 				// poller.cancelledKey(socket.getIOChannel().keyFor(poller.getSelector()),
 				// socketWrapper);
-				socketChannel.close();
+				channel.close(cx);
 			} catch (VirtualMachineError vme) {
 				ExceptionUtils.handleThrowable(vme);
 			} catch (Throwable t) {
 				log.error(sm.getString("endpoint.processing.fail"), t);
 				// poller.cancelledKey(socket.getIOChannel().keyFor(poller.getSelector()),
 				// socketWrapper);
-				socketChannel.close();
+				channel.close(t);
 			} finally {
 				channel = null;
 				event = null;

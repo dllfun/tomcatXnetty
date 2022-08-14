@@ -43,6 +43,7 @@ import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.parser.Host;
 import org.apache.tomcat.util.net.Channel;
+import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
@@ -87,7 +88,7 @@ class Stream extends AbstractStream implements HeaderEmitter, Channel {
 	private final StreamInputBuffer inputBuffer;
 	private final StreamOutputBuffer streamOutputBuffer = new StreamOutputBuffer();
 	private final Http2OutputBuffer http2OutputBuffer = new Http2OutputBuffer(this, responseData, streamOutputBuffer);
-	private volatile AbstractProcessor processor;
+	// private volatile AbstractProcessor processor;
 	private SocketChannel channel;
 
 	Stream(SocketChannel channel, Integer identifier, Http2UpgradeHandler handler) {
@@ -137,16 +138,18 @@ class Stream extends AbstractStream implements HeaderEmitter, Channel {
 		}
 	}
 
-	public AbstractProcessor getProcessor() {
-		return processor;
-	}
-
-	public void setProcessor(AbstractProcessor processor) {
-		this.processor = processor;
-	}
-
 	public SocketChannel getChannel() {
 		return channel;
+	}
+
+	@Override
+	public Object getLock() {
+		return currentProcessor;
+	}
+
+	@Override
+	public SSLSupport getSslSupport(String clientCertProvider) {
+		return channel.getSslSupport(clientCertProvider);
 	}
 
 	private void prepareRequest() {
@@ -653,6 +656,11 @@ class Stream extends AbstractStream implements HeaderEmitter, Channel {
 		return state.canWrite();
 	}
 
+	@Override
+	public boolean isClosed() {
+		return this.isClosedFinal();
+	}
+
 	final boolean isClosedFinal() {
 		return state.isClosedFinal();
 	}
@@ -663,6 +671,20 @@ class Stream extends AbstractStream implements HeaderEmitter, Channel {
 
 	final boolean isInputFinished() {
 		return !state.isFrameTypePermitted(FrameType.DATA);
+	}
+
+	@Override
+	public void close() {
+		Throwable t = getCloseException();
+		if (t == null) {
+			t = new StreamException("force close", Http2Error.INTERNAL_ERROR, this.getIdentifier());
+		}
+		close(t);
+	}
+
+	@Override
+	public void close(Throwable e) {
+		this.close(new StreamException(e.getMessage(), Http2Error.INTERNAL_ERROR, this.getIdentifier()));
 	}
 
 	final void close(Http2Exception http2Exception) {
@@ -1258,11 +1280,11 @@ class Stream extends AbstractStream implements HeaderEmitter, Channel {
 					log.debug(sm.getString("stream.inputBuffer.dispatch"));
 				}
 				readInterest = false;
-				processor.actionDISPATCH_READ();
+				((AbstractProcessor) currentProcessor).actionDISPATCH_READ();
 				// Always need to dispatch since this thread is processing
 				// the incoming connection and streams are processed on their
 				// own.
-				processor.actionDISPATCH_EXECUTE();
+				((AbstractProcessor) currentProcessor).actionDISPATCH_EXECUTE();
 				return true;
 			} else {
 				if (log.isDebugEnabled()) {

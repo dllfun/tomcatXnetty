@@ -20,7 +20,6 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -35,7 +34,6 @@ import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SSLSupport;
-import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -66,7 +64,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	protected final RequestData requestData;
 	protected final ResponseData responseData;
 	// protected InputHandler inputHandler;
-	protected volatile SocketChannel channel = null;
+	protected volatile Channel channel = null;
 	protected volatile SSLSupport sslSupport;
 
 	/**
@@ -152,7 +150,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	 * 
 	 * @param channel The socket wrapper
 	 */
-	protected void setChannel(SocketChannel channel) {
+	protected void setChannel(Channel channel) {
 		this.channel = channel;
 	}
 
@@ -187,6 +185,18 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	@Override
 	public boolean isAsync() {
 		return requestData.getAsyncStateMachine().isAsync();
+	}
+
+	@Override
+	public void beforeProcess() {
+		// TODO Auto-generated method stub
+
+	}
+
+	@Override
+	public void afterProcess() {
+		// TODO Auto-generated method stub
+
 	}
 
 	@Override
@@ -850,10 +860,16 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 
 	@Override
 	public void recycle() {
+		channel = null;
 		errorState = ErrorState.NONE;
 		requestData.recycle();
 		responseData.recycle();
 
+	}
+
+	@Override
+	public Exception collectCloseException() {
+		return null;
 	}
 
 	protected abstract void prepareResponse() throws IOException;
@@ -1087,7 +1103,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	protected abstract SocketState dispatchEndRequest() throws IOException;
 
 	@Override
-	protected final void logAccess(SocketChannel channel) throws IOException {
+	protected final void logAccess(Channel channel) throws IOException {
 		// Set the socket wrapper so the access log can read the socket related
 		// information (e.g. client IP)
 		setChannel(channel);

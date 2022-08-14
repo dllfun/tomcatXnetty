@@ -249,8 +249,10 @@ public class Http11InputBuffer implements ChannelHandler {
 	 * Recycle the input buffer. This should be called when closing the connection.
 	 */
 	void recycle() {
-		channel.getAppReadBuffer().reset();
-		channel = null;
+		if (channel != null) {
+			channel.getAppReadBuffer().reset();
+			channel = null;
+		}
 		// requestData.recycle();
 
 		for (int i = 0; i <= lastActiveFilter; i++) {

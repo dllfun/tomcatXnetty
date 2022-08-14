@@ -137,6 +137,8 @@ public class Http11Processor extends AbstractProcessor {
 	 */
 	private SendfileDataBase sendfileData = null;
 
+	private SocketChannel channel;
+
 	public Http11Processor(AbstractHttp11Protocol<?> protocol, Adapter adapter) {
 		super(protocol, adapter);
 		this.protocol = protocol;
@@ -306,7 +308,8 @@ public class Http11Processor extends AbstractProcessor {
 	}
 
 	@Override
-	public SocketState service(SocketChannel channel) throws IOException {
+	public SocketState service(Channel channel) throws IOException {
+		SocketChannel socketChannel = (SocketChannel) channel;
 		RequestInfo rp = requestData.getRequestProcessor();
 		rp.setStage(org.apache.coyote.Constants.STAGE_PARSE);
 
@@ -356,7 +359,7 @@ public class Http11Processor extends AbstractProcessor {
 						break;
 					}
 					if (!protocol.getDisableUploadTimeout()) {
-						channel.setReadTimeout(protocol.getConnectionUploadTimeout());
+						socketChannel.setReadTimeout(protocol.getConnectionUploadTimeout());
 					}
 				}
 			} catch (IOException e) {
@@ -408,8 +411,8 @@ public class Http11Processor extends AbstractProcessor {
 						request.setResponse(response);
 						getAdapter().log(request, response, 0);
 
-						InternalHttpUpgradeHandler upgradeHandler = upgradeProtocol.getInternalUpgradeHandler(channel,
-								getAdapter(), cloneRequest(this.requestData));
+						InternalHttpUpgradeHandler upgradeHandler = upgradeProtocol
+								.getInternalUpgradeHandler(socketChannel, getAdapter(), cloneRequest(this.requestData));
 						UpgradeToken upgradeToken = new UpgradeToken(upgradeHandler, null, null);
 						actionUPGRADE(upgradeToken);
 						return SocketState.UPGRADING;
@@ -436,7 +439,7 @@ public class Http11Processor extends AbstractProcessor {
 			int maxKeepAliveRequests = protocol.getMaxKeepAliveRequests();
 			if (maxKeepAliveRequests == 1) {
 				keepAlive = false;
-			} else if (maxKeepAliveRequests > 0 && channel.decrementKeepAlive() <= 0) {
+			} else if (maxKeepAliveRequests > 0 && socketChannel.decrementKeepAlive() <= 0) {
 				keepAlive = false;
 			}
 
@@ -513,15 +516,15 @@ public class Http11Processor extends AbstractProcessor {
 			if (!protocol.getDisableUploadTimeout()) {
 				int connectionTimeout = protocol.getConnectionTimeout();
 				if (connectionTimeout > 0) {
-					channel.setReadTimeout(connectionTimeout);
+					socketChannel.setReadTimeout(connectionTimeout);
 				} else {
-					channel.setReadTimeout(0);
+					socketChannel.setReadTimeout(0);
 				}
 			}
 
 			rp.setStage(org.apache.coyote.Constants.STAGE_KEEPALIVE);
 
-			sendfileState = processSendfile(channel);
+			sendfileState = processSendfile(socketChannel);
 		}
 
 		rp.setStage(org.apache.coyote.Constants.STAGE_ENDED);
@@ -557,10 +560,12 @@ public class Http11Processor extends AbstractProcessor {
 	}
 
 	@Override
-	protected final void setChannel(SocketChannel channel) {
+	protected final void setChannel(Channel channel) {
+		SocketChannel socketChannel = (SocketChannel) channel;
 		super.setChannel(channel);
-		inputBuffer.init(channel);
-		outputBuffer.init(channel);
+		this.channel = socketChannel;
+		inputBuffer.init(socketChannel);
+		outputBuffer.init(socketChannel);
 	}
 
 	private RequestData cloneRequest(RequestData source) throws IOException {

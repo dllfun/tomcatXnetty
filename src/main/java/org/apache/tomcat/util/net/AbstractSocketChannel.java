@@ -35,7 +35,7 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.res.StringManager;
 
-public abstract class AbstractSocketChannel<E> implements SocketChannel {
+public abstract class AbstractSocketChannel<E> extends AbstractChannel implements SocketChannel {
 
 	private static final Log log = LogFactory.getLog(AbstractSocketChannel.class);
 
@@ -67,13 +67,6 @@ public abstract class AbstractSocketChannel<E> implements SocketChannel {
 	protected String remoteHost = null;
 	protected int remotePort = -1;
 
-	/**
-	 * Used to record the first IOException that occurs during non-blocking
-	 * read/writes that can't be usefully propagated up the stack since there is no
-	 * user code or appropriate container code in the stack to handle it.
-	 */
-	private volatile IOException error = null;
-
 	/*
 	 * Asynchronous operations.
 	 */
@@ -81,12 +74,6 @@ public abstract class AbstractSocketChannel<E> implements SocketChannel {
 	private volatile OperationState<?> readOperation = null;
 	private final Semaphore writePending;
 	private volatile OperationState<?> writeOperation = null;
-
-	/**
-	 * The org.apache.coyote.Processor instance currently associated with the
-	 * wrapper.
-	 */
-	protected Object currentProcessor = null;
 
 	public AbstractSocketChannel(E socket, AbstractEndpoint<E, ?> endpoint) {
 		this.socket = socket;
@@ -105,42 +92,17 @@ public abstract class AbstractSocketChannel<E> implements SocketChannel {
 		return socket;
 	}
 
+	@Override
+	public Object getLock() {
+		return this;
+	}
+
 	protected void reset(E closedSocket) {
 		socket = closedSocket;
 	}
 
 	protected AbstractEndpoint<E, ?> getEndpoint() {
 		return endpoint;
-	}
-
-	@Override
-	public Object getCurrentProcessor() {
-		return currentProcessor;
-	}
-
-	@Override
-	public void setCurrentProcessor(Object currentProcessor) {
-		this.currentProcessor = currentProcessor;
-	}
-
-	@Override
-	public IOException getError() {
-		return error;
-	}
-
-	public void setError(IOException error) {
-		// Not perfectly thread-safe but good enough. Just needs to ensure that
-		// once this.error is non-null, it can never be null.
-		if (this.error != null) {
-			return;
-		}
-		this.error = error;
-	}
-
-	public void checkError() throws IOException {
-		if (error != null) {
-			throw error;
-		}
 	}
 
 	public boolean isUpgraded() {
@@ -307,6 +269,11 @@ public abstract class AbstractSocketChannel<E> implements SocketChannel {
 				doClose();
 			}
 		}
+	}
+
+	@Override
+	public void close(Throwable e) {
+		this.close();
 	}
 
 	/**

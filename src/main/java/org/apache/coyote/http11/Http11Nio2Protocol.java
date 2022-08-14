@@ -18,8 +18,9 @@ package org.apache.coyote.http11;
 
 import java.io.IOException;
 
-import org.apache.coyote.AbstractProtocol.HeadHandler;
-import org.apache.coyote.AbstractProtocol.TailHandler;
+import org.apache.coyote.DispatchHandler;
+import org.apache.coyote.HandShakeHandler;
+import org.apache.coyote.ProcessorHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
@@ -41,12 +42,12 @@ public class Http11Nio2Protocol extends AbstractHttp11JsseProtocol<Nio2Channel> 
 	public Http11Nio2Protocol() {
 		super(new Nio2Endpoint());
 
-		Handler tailHandler = new TailHandler();
-		Handler handShakeHandler = new HandShakeHandler(tailHandler);
-		Handler headHandler = new HeadHandler<>(handShakeHandler);
-		setHandler(headHandler);
+		Handler processorHandler = new ProcessorHandler(this);
+		Handler handShakeHandler = new HandShakeHandler(processorHandler);
+		Handler dispatchHandler = new DispatchHandler(handShakeHandler, this);
+		setHandler(dispatchHandler);
 
-		endpoint.setHandler(headHandler);
+		endpoint.setHandler(dispatchHandler);
 	}
 
 	@Override

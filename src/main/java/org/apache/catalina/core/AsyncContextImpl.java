@@ -201,6 +201,7 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 			// request/response and that in turn may trigger recycling of this
 			// object before the in-progress count can be decremented
 			final Context context = this.context;
+
 			Runnable dispatch = new AsyncRunnable(applicationDispatcher, servletRequest, servletResponse);// request,
 			this.request.setDispatch(dispatch);
 			this.request.getCoyoteRequest().asyncDispatch();

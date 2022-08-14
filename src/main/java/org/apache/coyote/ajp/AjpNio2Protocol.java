@@ -16,7 +16,9 @@
  */
 package org.apache.coyote.ajp;
 
-import org.apache.coyote.http11.HandShakeHandler;
+import org.apache.coyote.DispatchHandler;
+import org.apache.coyote.HandShakeHandler;
+import org.apache.coyote.ProcessorHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.Nio2Channel;
@@ -40,12 +42,12 @@ public class AjpNio2Protocol extends AbstractAjpProtocol<Nio2Channel> {
 	public AjpNio2Protocol() {
 		super(new Nio2Endpoint());
 
-		Handler tailHandler = new TailHandler();
-		Handler handShakeHandler = new HandShakeHandler(tailHandler);
-		Handler headHandler = new HeadHandler<>(handShakeHandler);
-		setHandler(headHandler);
+		Handler processorHandler = new ProcessorHandler(this);
+		Handler handShakeHandler = new HandShakeHandler(processorHandler);
+		Handler dispatchHandler = new DispatchHandler(handShakeHandler, this);
+		setHandler(dispatchHandler);
 
-		endpoint.setHandler(headHandler);
+		endpoint.setHandler(dispatchHandler);
 	}
 
 	// ----------------------------------------------------- JMX related methods

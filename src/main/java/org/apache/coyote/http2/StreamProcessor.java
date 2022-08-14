@@ -37,7 +37,6 @@ import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SendfileState;
-import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -56,7 +55,7 @@ class StreamProcessor extends AbstractProcessor {
 				stream.getCoyoteResponse());
 		this.handler = handler;
 		this.stream = stream;
-		this.stream.setProcessor(this);
+		this.stream.setCurrentProcessor(this);
 		// inputHandler = this.stream.getInputBuffer();
 		setChannel(stream.getChannel());
 	}
@@ -69,6 +68,12 @@ class StreamProcessor extends AbstractProcessor {
 	@Override
 	protected Response createResponse() {
 		return new Response(this.responseData, this, stream.getOutputBuffer());
+	}
+
+	@Override
+	public void beforeProcess() {
+		// TODO Auto-generated method stub
+
 	}
 
 	final void process(SocketEvent event) {
@@ -119,6 +124,11 @@ class StreamProcessor extends AbstractProcessor {
 		} finally {
 			handler.executeQueuedStream();
 		}
+	}
+
+	@Override
+	public void afterProcess() {
+		handler.executeQueuedStream();
 	}
 
 	@Override
@@ -230,9 +240,10 @@ class StreamProcessor extends AbstractProcessor {
 	@Override
 	public void processSocketEvent(SocketEvent event, boolean dispatch) {
 		if (dispatch) {
-			handler.processStreamOnContainerThread(this, event);
+			handler.processStreamOnContainerThread(stream, this, event);
 		} else {
-			this.process(event);
+			handler.getProtocol().getHttp11Protocol().getHandler().processSocket(stream, event, dispatch);
+			// this.process(event);
 		}
 	}
 
@@ -295,6 +306,25 @@ class StreamProcessor extends AbstractProcessor {
 	}
 
 	@Override
+	public Exception collectCloseException() {
+		if (!getErrorState().isConnectionIoAllowed()) {
+			ConnectionException ce = new ConnectionException(
+					sm.getString("streamProcessor.error.connection", stream.getConnectionId(), stream.getIdentifier()),
+					Http2Error.INTERNAL_ERROR);
+			return ce;
+		} else if (!getErrorState().isIoAllowed()) {
+			StreamException se = stream.getResetException();
+			if (se == null) {
+				se = new StreamException(
+						sm.getString("streamProcessor.error.stream", stream.getConnectionId(), stream.getIdentifier()),
+						Http2Error.INTERNAL_ERROR, stream.getIdAsInt());
+			}
+			return se;
+		}
+		return null;
+	}
+
+	@Override
 	public final void recycle() {
 		// StreamProcessor instances are not re-used.
 		// Clear fields that can be cleared to aid GC and trigger NPEs if this
@@ -313,7 +343,7 @@ class StreamProcessor extends AbstractProcessor {
 	}
 
 	@Override
-	public final SocketState service(SocketChannel channel) throws IOException {
+	public final SocketState service(Channel channel) throws IOException {
 		try {
 			Request request = createRequest();
 			Response response = createResponse();
