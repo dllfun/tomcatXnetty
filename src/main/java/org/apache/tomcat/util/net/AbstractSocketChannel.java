@@ -258,7 +258,9 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	public final void close() {
 		if (closed.compareAndSet(false, true)) {
 			try {
-				getEndpoint().getHandler().getProtocol().release(this);
+				if (getCurrentProcessor() != null) {
+					getEndpoint().getHandler().getProtocol().release(this);
+				}
 			} catch (Throwable e) {
 				ExceptionUtils.handleThrowable(e);
 				if (log.isDebugEnabled()) {
