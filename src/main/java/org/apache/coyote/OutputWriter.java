@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
  *
  * @author Remy Maucherat
  */
-public interface OutputBuffer {
+public interface OutputWriter {
 
     /**
      * Write the given data to the response. The caller owns the chunks.

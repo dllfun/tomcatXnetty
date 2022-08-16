@@ -141,7 +141,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		}
 	}
 
-	protected ErrorState getErrorState() {
+	public ErrorState getErrorState() {
 		return errorState;
 	}
 
@@ -290,7 +290,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		return state;
 	}
 
-	protected void parseHost(MessageBytes valueMB) {
+	public void parseHost(MessageBytes valueMB) {
 		if (valueMB == null || valueMB.isNull()) {
 			populateHost();
 			populatePort();
@@ -655,44 +655,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	// }
 
 	// @Override
-	public void commit() {
-		if (!responseData.isCommitted()) {
-			try {
-				// Validate and write response headers
-				prepareResponse();
-			} catch (IOException e) {
-				handleIOException(e);
-			}
-		}
-	}
-
-	// @Override
-	public void close() {
-		commit();
-		try {
-			finishResponse();
-		} catch (IOException e) {
-			handleIOException(e);
-		}
-	}
-
-	// @Override
-	public void sendAck() {
-		ack();
-	}
-
-	// @Override
-	public void clientFlush() {
-		commit();
-		try {
-			flush();
-		} catch (IOException e) {
-			handleIOException(e);
-			responseData.setErrorException(e);
-		}
-	}
-
-	// @Override
 	// public void actionREQ_SET_BODY_REPLAY(ByteChunk param) {
 
 	// }
@@ -748,10 +710,10 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	// }
 
 	// @Override
-	public void actionNB_WRITE_INTEREST(AtomicBoolean param) {
-		AtomicBoolean isReady = param;
-		isReady.set(isReadyForWrite());
-	}
+//	public void actionNB_WRITE_INTEREST(AtomicBoolean param) {
+//		AtomicBoolean isReady = param;
+//		isReady.set(isReadyForWrite());
+//	}
 
 	// @Override
 	public void actionDISPATCH_READ() {
@@ -785,10 +747,10 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	}
 
 	// @Override
-	public void actionIS_TRAILER_FIELDS_SUPPORTED(AtomicBoolean param) {
-		AtomicBoolean result = param;
-		result.set(isTrailerFieldsSupported());
-	}
+//	public void actionIS_TRAILER_FIELDS_SUPPORTED(AtomicBoolean param) {
+//		AtomicBoolean result = param;
+//		result.set(isTrailerFieldsSupported());
+//	}
 
 	// @Override
 	public void actionCONNECTION_ID(AtomicReference<Object> param) {
@@ -802,7 +764,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		result.set(getStreamID());
 	}
 
-	private void handleIOException(IOException ioe) {
+	public void handleIOException(IOException ioe) {
 		if (ioe instanceof CloseNowException) {
 			// Close the channel but keep the connection open
 			setErrorState(ErrorState.CLOSE_NOW, ioe);
@@ -872,13 +834,9 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		return null;
 	}
 
-	protected abstract void prepareResponse() throws IOException;
+//	protected abstract void ack();
 
-	protected abstract void finishResponse() throws IOException;
-
-	protected abstract void ack();
-
-	protected abstract void flush() throws IOException;
+	// protected abstract void flush() throws IOException;
 
 	// protected abstract int available(boolean doRead);
 
@@ -946,7 +904,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		}
 	}
 
-	protected abstract boolean isReadyForWrite();
+//	protected abstract boolean isReadyForWrite();
 
 	protected void executeDispatches() {
 		Channel channel = getChannel();
@@ -1054,9 +1012,9 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	 * @return {@code true} if trailer fields are supported by this processor,
 	 *         otherwise {@code false}.
 	 */
-	protected boolean isTrailerFieldsSupported() {
-		return false;
-	}
+//	protected boolean isTrailerFieldsSupported() {
+//		return false;
+//	}
 
 	/**
 	 * Protocols that support multiplexing (e.g. HTTP/2) should override this method

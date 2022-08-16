@@ -48,7 +48,6 @@ import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.codec.binary.Base64;
 import org.apache.tomcat.util.http.MimeHeaders;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SendfileState;
@@ -281,7 +280,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	}
 
 	@Override
-	public void setSocketWrapper(SocketChannel channel) {
+	public void setChannel(SocketChannel channel) {
 		this.channel = channel;
 	}
 

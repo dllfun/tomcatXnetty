@@ -21,10 +21,7 @@ import org.apache.coyote.ProcessorHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.AprEndpoint;
-import org.apache.tomcat.util.net.Channel;
-import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.net.Endpoint.Handler;
-import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 
 /**
  * Abstract the protocol implementation, including threading, etc. Processor is

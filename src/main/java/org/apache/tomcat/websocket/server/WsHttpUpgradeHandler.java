@@ -76,7 +76,7 @@ public class WsHttpUpgradeHandler implements InternalHttpUpgradeHandler {
 	}
 
 	@Override
-	public void setSocketWrapper(SocketChannel channel) {
+	public void setChannel(SocketChannel channel) {
 		this.channel = channel;
 	}
 

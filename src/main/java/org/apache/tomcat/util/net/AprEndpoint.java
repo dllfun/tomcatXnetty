@@ -660,8 +660,10 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			wrapper.setSecure(isSSLEnabled());
 			wrapper.setReadTimeout(getConnectionTimeout());
 			wrapper.setWriteTimeout(getConnectionTimeout());
-			getHandler().getProtocol().getExecutor().execute(new SocketWithOptionsProcessor(wrapper));
-			return true;
+			if (getHandler().getProtocol() != null) {
+				getHandler().getProtocol().getExecutor().execute(new SocketWithOptionsProcessor(wrapper));
+				return true;
+			}
 		} catch (RejectedExecutionException x) {
 			log.warn(sm.getString("endpoint.rejectedExecution", socket), x);
 		} catch (Throwable t) {
@@ -1007,7 +1009,9 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 
 		protected void start() {
 			pollerThread = new Thread(poller, getName() + "-Poller");
-			pollerThread.setPriority(getHandler().getProtocol().getThreadPriority());
+			if (getHandler().getProtocol() != null) {
+				pollerThread.setPriority(getHandler().getProtocol().getThreadPriority());
+			}
 			pollerThread.setDaemon(true);
 			pollerThread.start();
 		}
@@ -1563,7 +1567,9 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 
 		protected void start() {
 			sendfileThread = new Thread(sendfile, getName() + "-Sendfile");
-			sendfileThread.setPriority(getHandler().getProtocol().getThreadPriority());
+			if (getHandler().getProtocol() != null) {
+				sendfileThread.setPriority(getHandler().getProtocol().getThreadPriority());
+			}
 			sendfileThread.setDaemon(true);
 			sendfileThread.start();
 		}

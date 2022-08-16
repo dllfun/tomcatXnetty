@@ -16,7 +16,6 @@
  */
 package org.apache.coyote.http2;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.Iterator;
 
@@ -28,6 +27,7 @@ import org.apache.coyote.Request;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.Response;
 import org.apache.coyote.ResponseData;
+import org.apache.coyote.http11.OutputFilter;
 import org.apache.coyote.http11.filters.GzipOutputFilter;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -47,8 +47,7 @@ class StreamProcessor extends AbstractProcessor {
 
 	private final Http2UpgradeHandler handler;
 	private final Stream stream;
-	private SendfileData sendfileData = null;
-	private SendfileState sendfileState = null;
+	private final Http2OutputBuffer http2OutputBuffer;
 
 	StreamProcessor(Http2UpgradeHandler handler, Stream stream, Adapter adapter) {
 		super(handler.getProtocol().getHttp11Protocol(), adapter, stream.getCoyoteRequest(),
@@ -56,8 +55,13 @@ class StreamProcessor extends AbstractProcessor {
 		this.handler = handler;
 		this.stream = stream;
 		this.stream.setCurrentProcessor(this);
+		this.http2OutputBuffer = new Http2OutputBuffer(this, stream, responseData, stream.getOutputBuffer());
 		// inputHandler = this.stream.getInputBuffer();
 		setChannel(stream.getChannel());
+	}
+
+	public Http2UpgradeHandler getHandler() {
+		return handler;
 	}
 
 	@Override
@@ -67,7 +71,7 @@ class StreamProcessor extends AbstractProcessor {
 
 	@Override
 	protected Response createResponse() {
-		return new Response(this.responseData, this, stream.getOutputBuffer());
+		return new Response(this.responseData, this, http2OutputBuffer);
 	}
 
 	@Override
@@ -131,29 +135,8 @@ class StreamProcessor extends AbstractProcessor {
 		handler.executeQueuedStream();
 	}
 
-	@Override
-	protected final void prepareResponse() throws IOException {
-		responseData.setCommitted(true);
-		if (handler.hasAsyncIO() && handler.getProtocol().getUseSendfile()) {
-			prepareSendfile();
-		}
-		prepareHeaders(requestData, responseData, sendfileData == null, handler.getProtocol(), stream);
-		stream.writeHeaders();
-	}
-
-	private void prepareSendfile() {
-		String fileName = (String) stream.getCoyoteRequest()
-				.getAttribute(org.apache.coyote.Constants.SENDFILE_FILENAME_ATTR);
-		if (fileName != null) {
-			sendfileData = new SendfileData();
-			sendfileData.path = new File(fileName).toPath();
-			sendfileData.pos = ((Long) stream.getCoyoteRequest()
-					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_START_ATTR)).longValue();
-			sendfileData.end = ((Long) stream.getCoyoteRequest()
-					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_END_ATTR)).longValue();
-			sendfileData.left = sendfileData.end - sendfileData.pos;
-			sendfileData.stream = stream;
-		}
+	final void addOutputFilter(OutputFilter filter) {
+		http2OutputBuffer.addFilter(filter);
 	}
 
 	// Static so it can be used by Stream to build the MimeHeaders required for
@@ -172,7 +155,9 @@ class StreamProcessor extends AbstractProcessor {
 		if (noSendfile && protocol != null && protocol.useCompression(coyoteRequest, coyoteResponse)) {
 			// Enable compression. Headers will have been set. Need to configure
 			// output filter at this point.
-			stream.addOutputFilter(new GzipOutputFilter());
+			if (stream.getCurrentProcessor() != null) {
+				((StreamProcessor) stream.getCurrentProcessor()).addOutputFilter(new GzipOutputFilter());
+			}
 		}
 
 		// Check to see if a response body is present
@@ -209,30 +194,6 @@ class StreamProcessor extends AbstractProcessor {
 	}
 
 	@Override
-	protected final void finishResponse() throws IOException {
-		sendfileState = handler.processSendfile(sendfileData);
-		if (!(sendfileState == SendfileState.PENDING)) {
-			stream.getOutputBuffer().end();
-		}
-	}
-
-	@Override
-	protected final void ack() {
-		if (!responseData.isCommitted() && requestData.hasExpectation()) {
-			try {
-				stream.writeAck();
-			} catch (IOException ioe) {
-				setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
-			}
-		}
-	}
-
-	@Override
-	protected final void flush() throws IOException {
-		stream.getOutputBuffer().flush();
-	}
-
-	@Override
 	protected final void setSwallowResponse() {
 		// NO-OP
 	}
@@ -247,10 +208,10 @@ class StreamProcessor extends AbstractProcessor {
 		}
 	}
 
-	@Override
-	protected final boolean isReadyForWrite() {
-		return stream.isReadyForWrite();
-	}
+//	@Override
+//	protected final boolean isReadyForWrite() {
+//		return stream.isReadyForWrite();
+//	}
 
 	@Override
 	protected final void executeDispatches() {
@@ -290,10 +251,10 @@ class StreamProcessor extends AbstractProcessor {
 		}
 	}
 
-	@Override
-	protected boolean isTrailerFieldsSupported() {
-		return stream.isTrailerFieldsSupported();
-	}
+//	@Override
+//	protected boolean isTrailerFieldsSupported() {
+//		return stream.isTrailerFieldsSupported();
+//	}
 
 	@Override
 	protected Object getConnectionID() {
@@ -364,10 +325,10 @@ class StreamProcessor extends AbstractProcessor {
 			endRequest();
 		}
 
-		if (sendfileState == SendfileState.PENDING) {
+		if (http2OutputBuffer.getSendfileState() == SendfileState.PENDING) {
 			return SocketState.SENDFILE;
 		} else if (getErrorState().isError()) {
-			close();
+			http2OutputBuffer.close();
 			requestData.updateCounters();
 			return SocketState.CLOSED;
 		} else if (isAsync()) {
@@ -380,7 +341,7 @@ class StreamProcessor extends AbstractProcessor {
 			}
 			return state;
 		} else {
-			close();
+			http2OutputBuffer.close();
 			requestData.updateCounters();
 			return SocketState.CLOSED;
 		}

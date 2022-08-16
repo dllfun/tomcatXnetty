@@ -16,7 +16,7 @@ import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
-public class HandShakeHandler implements Handler<NioChannel> {
+public class HandShakeHandler implements Handler {
 
 	private static final Log log = LogFactory.getLog(HandShakeHandler.class);
 
@@ -29,7 +29,7 @@ public class HandShakeHandler implements Handler<NioChannel> {
 	}
 
 	@Override
-	public AbstractProtocol<NioChannel> getProtocol() {
+	public AbstractProtocol getProtocol() {
 		return null;
 	}
 

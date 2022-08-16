@@ -273,7 +273,9 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		// Start poller thread
 		poller = new Poller();
 		Thread pollerThread = new Thread(poller, getName() + "-ClientPoller");
-		pollerThread.setPriority(getHandler().getProtocol().getThreadPriority());
+		if (getHandler().getProtocol() != null) {
+			pollerThread.setPriority(getHandler().getProtocol().getThreadPriority());
+		}
 		pollerThread.setDaemon(true);
 		pollerThread.start();
 

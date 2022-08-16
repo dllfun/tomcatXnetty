@@ -118,14 +118,15 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 	public void bind() throws Exception {
 
 		// Create worker collection
-
-		if (getHandler().getProtocol().getExecutor() instanceof ExecutorService) {
-			threadGroup = AsynchronousChannelGroup
-					.withThreadPool((ExecutorService) getHandler().getProtocol().getExecutor());
-		}
-		// AsynchronousChannelGroup needs exclusive access to its executor service
-		if (!getHandler().getProtocol().isInternalExecutor()) {
-			log.warn(sm.getString("endpoint.nio2.exclusiveExecutor"));
+		if (getHandler().getProtocol() != null) {
+			if (getHandler().getProtocol().getExecutor() instanceof ExecutorService) {
+				threadGroup = AsynchronousChannelGroup
+						.withThreadPool((ExecutorService) getHandler().getProtocol().getExecutor());
+			}
+			// AsynchronousChannelGroup needs exclusive access to its executor service
+			if (!getHandler().getProtocol().isInternalExecutor()) {
+				log.warn(sm.getString("endpoint.nio2.exclusiveExecutor"));
+			}
 		}
 
 		serverSock = AsynchronousServerSocketChannel.open(threadGroup);
@@ -163,7 +164,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 			acceptor.setThreadName(getName() + "-Acceptor");
 		}
 		acceptor.state = AcceptorState.RUNNING;
-		getHandler().getProtocol().getExecutor().execute(acceptor);
+		if (getHandler().getProtocol() != null) {
+			getHandler().getProtocol().getExecutor().execute(acceptor);
+		}
 	}
 
 	@Override
@@ -171,7 +174,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		super.resume();
 		if (isRunning()) {
 			acceptor.state = AcceptorState.RUNNING;
-			getHandler().getProtocol().getExecutor().execute(acceptor);
+			if (getHandler().getProtocol() != null) {
+				getHandler().getProtocol().getExecutor().execute(acceptor);
+			}
 		}
 	}
 
@@ -184,21 +189,23 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		acceptor.state = AcceptorState.ENDED;
 		// Use the executor to avoid binding the main thread if something bad
 		// occurs and unbind will also wait for a bit for it to complete
-		getHandler().getProtocol().getExecutor().execute(new Runnable() {
-			@Override
-			public void run() {
-				// Then close all active connections if any remain
-				try {
-					for (SocketChannel channel : getConnections()) {
-						channel.close();
+		if (getHandler().getProtocol() != null) {
+			getHandler().getProtocol().getExecutor().execute(new Runnable() {
+				@Override
+				public void run() {
+					// Then close all active connections if any remain
+					try {
+						for (SocketChannel channel : getConnections()) {
+							channel.close();
+						}
+					} catch (Throwable t) {
+						ExceptionUtils.handleThrowable(t);
+					} finally {
+						allClosed = true;
 					}
-				} catch (Throwable t) {
-					ExceptionUtils.handleThrowable(t);
-				} finally {
-					allClosed = true;
 				}
-			}
-		});
+			});
+		}
 		if (nioChannels != null) {
 			nioChannels.clear();
 			nioChannels = null;
@@ -218,7 +225,8 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		destroySsl();
 		super.unbind();
 		// Unlike other connectors, the thread pool is tied to the server socket
-		if (threadGroup != null && getHandler().getProtocol().isInternalExecutor()) {
+		if (threadGroup != null && getHandler().getProtocol() != null
+				&& getHandler().getProtocol().isInternalExecutor()) {
 			try {
 				long timeout = getHandler().getProtocol().getExecutorTerminationTimeoutMillis();
 				while (timeout > 0 && !allClosed) {
@@ -383,7 +391,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					serverSock.accept(null, this);
 				} else {
 					// Accept again on a new thread since countUpOrAwaitConnection may block
-					getHandler().getProtocol().getExecutor().execute(this);
+					if (getHandler().getProtocol() != null) {
+						getHandler().getProtocol().getExecutor().execute(this);
+					}
 				}
 				if (!setSocketOptions(socket)) {
 					closeSocket(socket);
@@ -404,7 +414,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 						serverSock.accept(null, this);
 					} else {
 						// Accept again on a new thread since countUpOrAwaitConnection may block
-						getHandler().getProtocol().getExecutor().execute(this);
+						if (getHandler().getProtocol() != null) {
+							getHandler().getProtocol().getExecutor().execute(this);
+						}
 					}
 				} else {
 					state = AcceptorState.PAUSED;

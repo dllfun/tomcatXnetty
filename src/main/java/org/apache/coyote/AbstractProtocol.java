@@ -17,9 +17,7 @@
 package org.apache.coyote;
 
 import java.net.InetAddress;
-import java.nio.ByteBuffer;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -38,14 +36,9 @@ import javax.management.MBeanRegistrationException;
 import javax.management.MBeanServer;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
-import javax.servlet.http.HttpUpgradeHandler;
-import javax.servlet.http.WebConnection;
-
 import org.apache.coyote.http11.Http11Processor;
-import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.coyote.http11.upgrade.UpgradeProcessorInternal;
 import org.apache.juli.logging.Log;
-import org.apache.tomcat.InstanceManager;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.collections.SynchronizedStack;
 import org.apache.tomcat.util.modeler.Registry;
@@ -121,7 +114,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	private final AtomicLong registerCount = new AtomicLong(0);
 	private final RecycledProcessors recycledProcessors = new RecycledProcessors();
 
-	private Handler<S> handler;
+	private Handler handler;
 
 	public AbstractProtocol(Endpoint<S> endpoint) {
 		this.endpoint = endpoint;
@@ -131,11 +124,11 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 
 	// ----------------------------------------------- Generic property handling
 
-	protected void setHandler(Handler<S> handler) {
+	protected void setHandler(Handler handler) {
 		this.handler = handler;
 	}
 
-	public Handler<S> getHandler() {
+	public Handler getHandler() {
 		return handler;
 	}
 
@@ -394,7 +387,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		taskqueue.setParent((ThreadPoolExecutor) executor);
 	}
 
-	public void shutdownExecutor() {// final
+	public final void shutdownExecutor() {// final
 		Executor executor = this.executor;
 		if (executor != null && internalExecutor) {
 			this.executor = null;
@@ -1169,7 +1162,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 	}
 
-	public class ParseInIoHandler implements Handler<S> {
+	public class ParseInIoHandler implements Handler {
 
 		private Handler next;
 
@@ -1179,7 +1172,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 
 		@Override
-		public AbstractProtocol<S> getProtocol() {
+		public AbstractProtocol getProtocol() {
 			// TODO Auto-generated method stub
 			return null;
 		}

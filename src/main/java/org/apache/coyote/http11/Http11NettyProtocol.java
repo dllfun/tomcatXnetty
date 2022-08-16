@@ -95,7 +95,7 @@ public class Http11NettyProtocol extends AbstractHttp11JsseProtocol<Channel> {
 		}
 	}
 
-	private class NettyHandler implements Handler<Channel> {
+	private class NettyHandler implements Handler {
 
 		private Handler next;
 
@@ -105,7 +105,7 @@ public class Http11NettyProtocol extends AbstractHttp11JsseProtocol<Channel> {
 		}
 
 		@Override
-		public AbstractProtocol<Channel> getProtocol() {
+		public AbstractProtocol getProtocol() {
 			// TODO Auto-generated method stub
 			return null;
 		}

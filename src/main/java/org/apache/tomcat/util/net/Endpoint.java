@@ -7,7 +7,7 @@ import org.apache.coyote.AbstractProtocol;
 
 public interface Endpoint<S> {
 
-	public static interface Handler<S> {
+	public static interface Handler {
 
 		/**
 		 * Different types of socket states to react upon.
@@ -18,7 +18,7 @@ public interface Endpoint<S> {
 			OPEN, CLOSED, LONG, ASYNC_END, SENDFILE, UPGRADING, UPGRADED, SUSPENDED
 		}
 
-		public AbstractProtocol<S> getProtocol();
+		public AbstractProtocol<?> getProtocol();
 
 		/**
 		 * Process the given SocketWrapper with the given status. Used to trigger
@@ -87,7 +87,7 @@ public interface Endpoint<S> {
 		// public void recycle();
 	}
 
-	public void setHandler(Handler<S> handler);
+	public void setHandler(Handler handler);
 
 	public SocketProperties getSocketProperties();
 

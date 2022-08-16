@@ -25,7 +25,6 @@ import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.UpgradeToken;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel;
@@ -46,7 +45,7 @@ public class UpgradeProcessorInternal extends UpgradeProcessorBase {
 		channel.setReadTimeout(INFINITE_TIMEOUT);
 		channel.setWriteTimeout(INFINITE_TIMEOUT);
 
-		internalHttpUpgradeHandler.setSocketWrapper(channel);
+		internalHttpUpgradeHandler.setChannel(channel);
 	}
 
 	@Override

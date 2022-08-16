@@ -6,7 +6,7 @@ import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.net.Endpoint.Handler;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 
-public class AprHandler implements Handler<Long> {
+public class AprHandler implements Handler {
 
 	private Handler next;
 
@@ -16,7 +16,7 @@ public class AprHandler implements Handler<Long> {
 	}
 
 	@Override
-	public AbstractProtocol<Long> getProtocol() {
+	public AbstractProtocol getProtocol() {
 		// TODO Auto-generated method stub
 		return null;
 	}

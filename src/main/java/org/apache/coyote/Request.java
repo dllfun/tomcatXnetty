@@ -29,14 +29,14 @@ public final class Request implements InputReader {
 	private RequestData requestData;
 	private Response response;
 	private volatile AbstractProcessor processor;
-	private ChannelHandler channelHandler;
+	private RequestAction requestAction;
 
 	// ----------------------------------------------------------- Constructors
 
-	public Request(RequestData requestData, AbstractProcessor processor, ChannelHandler channelHandler) {
+	public Request(RequestData requestData, AbstractProcessor processor, RequestAction requestAction) {
 		this.requestData = requestData;
 		this.processor = processor;
-		this.channelHandler = channelHandler;
+		this.requestAction = requestAction;
 	}
 
 	// private final RequestInfo reqProcessorMX = new RequestInfo(this);
@@ -62,7 +62,7 @@ public final class Request implements InputReader {
 	}
 
 	public boolean isTrailerFieldsReady() {
-		return channelHandler.isTrailerFieldsReady();
+		return requestAction.isTrailerFieldsReady();
 	}
 
 	public Map<String, String> getTrailerFields() {
@@ -241,12 +241,12 @@ public final class Request implements InputReader {
 	// }
 
 	public int actionAVAILABLE(Object param) {
-		return channelHandler.getAvailable(param);
+		return requestAction.getAvailable(param);
 	}
 
 	public void actionREQ_SET_BODY_REPLAY(ByteChunk param) {
 		ByteChunk body = param;
-		channelHandler.setRequestBody(body);
+		requestAction.setRequestBody(body);
 	}
 
 	public void actionIS_IO_ALLOWED(AtomicBoolean param) {
@@ -256,33 +256,33 @@ public final class Request implements InputReader {
 	public void actionDISABLE_SWALLOW_INPUT() {
 		// Aborted upload or similar.
 		// No point reading the remainder of the request.
-		channelHandler.disableSwallowRequest();
+		requestAction.disableSwallowRequest();
 		// This is an error state. Make sure it is marked as such.
 		processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
 	}
 
 	public void actionREQ_HOST_ADDR_ATTRIBUTE() {
-		channelHandler.actionREQ_HOST_ADDR_ATTRIBUTE();
+		requestAction.actionREQ_HOST_ADDR_ATTRIBUTE();
 	}
 
 	public void actionREQ_HOST_ATTRIBUTE() {
-		channelHandler.actionREQ_HOST_ATTRIBUTE();
+		requestAction.actionREQ_HOST_ATTRIBUTE();
 	}
 
 	public void actionREQ_REMOTEPORT_ATTRIBUTE() {
-		channelHandler.actionREQ_REMOTEPORT_ATTRIBUTE();
+		requestAction.actionREQ_REMOTEPORT_ATTRIBUTE();
 	}
 
 	public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
-		channelHandler.actionREQ_LOCAL_NAME_ATTRIBUTE();
+		requestAction.actionREQ_LOCAL_NAME_ATTRIBUTE();
 	}
 
 	public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
-		channelHandler.actionREQ_LOCAL_ADDR_ATTRIBUTE();
+		requestAction.actionREQ_LOCAL_ADDR_ATTRIBUTE();
 	}
 
 	public void actionREQ_LOCALPORT_ATTRIBUTE() {
-		channelHandler.actionREQ_LOCALPORT_ATTRIBUTE();
+		requestAction.actionREQ_LOCALPORT_ATTRIBUTE();
 	}
 
 	public void actionREQ_SSL_ATTRIBUTE() {
@@ -396,16 +396,12 @@ public final class Request implements InputReader {
 
 	public void actionREQUEST_BODY_FULLY_READ(AtomicBoolean param) {
 		AtomicBoolean result = param;
-		result.set(channelHandler.isRequestBodyFullyRead());
+		result.set(requestAction.isRequestBodyFullyRead());
 	}
 
 	public void actionNB_READ_INTEREST(AtomicBoolean param) {
 		AtomicBoolean isReady = param;
-		isReady.set(channelHandler.isReadyForRead());
-	}
-
-	public void actionNB_WRITE_INTEREST(AtomicBoolean param) {
-		processor.actionNB_WRITE_INTEREST(param);
+		isReady.set(requestAction.isReadyForRead());
 	}
 
 	public void actionDISPATCH_READ() {
@@ -504,7 +500,7 @@ public final class Request implements InputReader {
 	}
 
 	public boolean isFinished() {
-		return channelHandler.isRequestBodyFullyRead();
+		return requestAction.isRequestBodyFullyRead();
 	}
 
 	public boolean getSupportsRelativeRedirects() {
@@ -553,7 +549,7 @@ public final class Request implements InputReader {
 	public BufWrapper doRead() throws IOException {
 		long bytesRead = this.requestData.getBytesRead();
 		int n = -1;// inputBuffer.doRead(handler);
-		BufWrapper bufWrapper = channelHandler.doRead();
+		BufWrapper bufWrapper = requestAction.doRead();
 		if (bufWrapper != null) {
 			n = bufWrapper.getRemaining();
 		}

@@ -30,11 +30,10 @@ import java.util.function.Supplier;
 
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.CloseNowException;
-import org.apache.coyote.ChannelHandler;
+import org.apache.coyote.RequestAction;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.ResponseData;
 import org.apache.coyote.http11.HttpOutputBuffer;
-import org.apache.coyote.http11.OutputFilter;
 import org.apache.coyote.http2.HpackDecoder.HeaderEmitter;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -42,7 +41,7 @@ import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.parser.Host;
-import org.apache.tomcat.util.net.Channel;
+import org.apache.tomcat.util.net.AbstractLogicChannel;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
@@ -50,7 +49,7 @@ import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.net.WriteBuffer;
 import org.apache.tomcat.util.res.StringManager;
 
-class Stream extends AbstractStream implements HeaderEmitter, Channel {
+class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChannel {
 
 	private static final Log log = LogFactory.getLog(Stream.class);
 	private static final StringManager sm = StringManager.getManager(Stream.class);
@@ -87,7 +86,6 @@ class Stream extends AbstractStream implements HeaderEmitter, Channel {
 	private final ResponseData responseData = new ResponseData();
 	private final StreamInputBuffer inputBuffer;
 	private final StreamOutputBuffer streamOutputBuffer = new StreamOutputBuffer();
-	private final Http2OutputBuffer http2OutputBuffer = new Http2OutputBuffer(this, responseData, streamOutputBuffer);
 	// private volatile AbstractProcessor processor;
 	private SocketChannel channel;
 
@@ -507,10 +505,6 @@ class Stream extends AbstractStream implements HeaderEmitter, Channel {
 		handler.writeHeaders(this, 0, responseData.getMimeHeaders(), endOfStream, Constants.DEFAULT_HEADERS_FRAME_SIZE);
 	}
 
-	final void addOutputFilter(OutputFilter filter) {
-		http2OutputBuffer.addFilter(filter);
-	}
-
 	final void writeTrailers() throws IOException {
 		Supplier<Map<String, String>> supplier = responseData.getTrailerFields();
 		if (supplier == null) {
@@ -640,8 +634,8 @@ class Stream extends AbstractStream implements HeaderEmitter, Channel {
 		return inputBuffer;
 	}
 
-	final HttpOutputBuffer getOutputBuffer() {
-		return http2OutputBuffer;
+	final StreamOutputBuffer getOutputBuffer() {
+		return streamOutputBuffer;
 	}
 
 	final void sentPushPromise() {
@@ -987,7 +981,7 @@ class Stream extends AbstractStream implements HeaderEmitter, Channel {
 		}
 	}
 
-	class StreamInputBuffer implements ChannelHandler {
+	class StreamInputBuffer implements RequestAction {
 
 		/*
 		 * Two buffers are required to avoid various multi-threading issues. These

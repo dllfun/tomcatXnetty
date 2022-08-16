@@ -20,12 +20,20 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
+import javax.servlet.http.HttpServletResponse;
+
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.CloseNowException;
+import org.apache.coyote.ErrorState;
+import org.apache.coyote.ResponseAction;
 import org.apache.coyote.ResponseData;
+import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
+import org.apache.tomcat.util.http.FastHttpDateFormat;
+import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.net.Channel;
+import org.apache.tomcat.util.net.SendfileDataBase;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
@@ -36,7 +44,7 @@ import org.apache.tomcat.util.res.StringManager;
  * headers (once committed) and the response body. Note that buffering of the
  * response body happens at a higher level.
  */
-public class Http11OutputBuffer implements HttpOutputBuffer {
+public class Http11OutputBuffer implements ResponseAction {
 
 	// -------------------------------------------------------------- Variables
 
@@ -47,9 +55,11 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 
 	// ----------------------------------------------------- Instance Variables
 
-	private AbstractProcessor processor;
+	private Http11Processor processor;
 
 	// private AsyncState asyncState;
+
+	private Http11InputBuffer inputBuffer;
 
 	/**
 	 * Associated Coyote response.
@@ -98,7 +108,12 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 
 	private int headerBufferSize;
 
-	protected Http11OutputBuffer(AbstractProcessor processor, int headerBufferSize) {
+	/**
+	 * Sendfile data.
+	 */
+	private SendfileDataBase sendfileData = null;
+
+	protected Http11OutputBuffer(Http11Processor processor, int headerBufferSize) {
 
 		this.processor = processor;
 
@@ -115,6 +130,18 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 		responseFinished = false;
 
 		channelOutputBuffer = new SocketOutputBuffer();
+	}
+
+	public void setInputBuffer(Http11InputBuffer inputBuffer) {
+		this.inputBuffer = inputBuffer;
+	}
+
+	public SendfileDataBase getSendfileData() {
+		return sendfileData;
+	}
+
+	public void setSendfileData(SendfileDataBase sendfileData) {
+		this.sendfileData = sendfileData;
 	}
 
 	// ------------------------------------------------------------- Properties
@@ -198,6 +225,302 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 		}
 	}
 
+	@Override
+	public boolean isTrailerFieldsSupported() {
+		// Request must be HTTP/1.1 to support trailer fields
+		if (!inputBuffer.http11) {
+			return false;
+		}
+
+		// If the response is not yet committed, chunked encoding can be used
+		// and the trailer fields sent
+		if (!responseData.isCommitted()) {
+			return true;
+		}
+
+		// Response has been committed - need to see if chunked is being used
+		return this.isChunking();
+	}
+
+	@Override
+	public final boolean isReadyForWrite() {
+		return this.isReady();
+	}
+
+	/**
+	 * When committing the response, we have to validate the set of headers, as well
+	 * as setup the response filters.
+	 */
+	@Override
+	public final void prepareResponse() throws IOException {
+
+		AbstractHttp11Protocol protocol = (AbstractHttp11Protocol) processor.getProtocol();
+
+		boolean entityBody = true;
+		processor.contentDelimitation = false;
+
+		OutputFilter[] outputFilters = this.getFilters();
+
+		if (inputBuffer.http09 == true) {
+			// HTTP/0.9
+			this.addActiveFilter(outputFilters[Constants.IDENTITY_FILTER]);
+			this.localCommit();
+			return;
+		}
+
+		int statusCode = responseData.getStatus();
+		if (statusCode < 200 || statusCode == 204 || statusCode == 205 || statusCode == 304) {
+			// No entity body
+			this.addActiveFilter(outputFilters[Constants.VOID_FILTER]);
+			entityBody = false;
+			processor.contentDelimitation = true;
+			if (statusCode == 205) {
+				// RFC 7231 requires the server to explicitly signal an empty
+				// response in this case
+				responseData.setContentLength(0);
+			} else {
+				responseData.setContentLength(-1);
+			}
+		}
+
+		MessageBytes methodMB = responseData.getRequestData().method();
+		if (methodMB.equals("HEAD")) {
+			// No entity body
+			this.addActiveFilter(outputFilters[Constants.VOID_FILTER]);
+			processor.contentDelimitation = true;
+		}
+
+		// Sendfile support
+		if (protocol.getUseSendfile()) {
+			prepareSendfile(outputFilters);
+		}
+
+		// Check for compression
+		boolean useCompression = false;
+		if (entityBody && sendfileData == null) {
+			useCompression = protocol.useCompression(responseData.getRequestData(), responseData);
+		}
+
+		MimeHeaders headers = responseData.getMimeHeaders();
+		// A SC_NO_CONTENT response may include entity headers
+		if (entityBody || statusCode == HttpServletResponse.SC_NO_CONTENT) {
+			String contentType = responseData.getContentType();
+			if (contentType != null) {
+				headers.setValue("Content-Type").setString(contentType);
+			}
+			String contentLanguage = responseData.getContentLanguage();
+			if (contentLanguage != null) {
+				headers.setValue("Content-Language").setString(contentLanguage);
+			}
+		}
+
+		long contentLength = responseData.getContentLengthLong();
+		boolean connectionClosePresent = processor.isConnectionToken(headers, Constants.CLOSE);
+		// System.out.println("http11:" + http11);
+		// System.out.println("contentLength:" + contentLength);
+		if (inputBuffer.http11 && responseData.getTrailerFields() != null) {
+			// If trailer fields are set, always use chunking
+			this.addActiveFilter(outputFilters[Constants.CHUNKED_FILTER]);
+			processor.contentDelimitation = true;
+			headers.addValue(Constants.TRANSFERENCODING).setString(Constants.CHUNKED);
+		} else if (contentLength != -1) {
+			headers.setValue("Content-Length").setLong(contentLength);
+			this.addActiveFilter(outputFilters[Constants.IDENTITY_FILTER]);
+			processor.contentDelimitation = true;
+		} else {
+			// If the response code supports an entity body and we're on
+			// HTTP 1.1 then we chunk unless we have a Connection: close header
+			// System.out.println("entityBody:" + entityBody);
+			// System.out.println("connectionClosePresent:" + connectionClosePresent);
+			if (inputBuffer.http11 && entityBody && !connectionClosePresent) {
+				this.addActiveFilter(outputFilters[Constants.CHUNKED_FILTER]);
+				processor.contentDelimitation = true;
+				headers.addValue(Constants.TRANSFERENCODING).setString(Constants.CHUNKED);
+			} else {
+				this.addActiveFilter(outputFilters[Constants.IDENTITY_FILTER]);
+			}
+		}
+
+		if (useCompression) {
+			this.addActiveFilter(outputFilters[Constants.GZIP_FILTER]);
+		}
+
+		// Add date header unless application has already set one (e.g. in a
+		// Caching Filter)
+		if (headers.getValue("Date") == null) {
+			headers.addValue("Date").setString(FastHttpDateFormat.getCurrentDate());
+		}
+
+		// FIXME: Add transfer encoding header
+
+		// System.out.println("contentDelimitation:" + contentDelimitation);
+		if ((entityBody) && (!processor.contentDelimitation)) {
+			// Mark as close the connection after the request, and add the
+			// connection: close header
+			inputBuffer.keepAlive = false;
+		}
+
+		// This may disabled keep-alive to check before working out the
+		// Connection header.
+		processor.checkExpectationAndResponseStatus();
+
+		// If we know that the request is bad this early, add the
+		// Connection: close header.
+		if (inputBuffer.keepAlive && processor.statusDropsConnection(statusCode)) {
+			inputBuffer.keepAlive = false;
+		}
+		// System.out.println("keepAlive:" + keepAlive);
+		if (!inputBuffer.keepAlive) {
+			// Avoid adding the close header twice
+			if (!connectionClosePresent) {
+				headers.addValue(Constants.CONNECTION).setString(Constants.CLOSE);
+			}
+		} else if (!processor.getErrorState().isError()) {
+			if (!inputBuffer.http11) {
+				headers.addValue(Constants.CONNECTION).setString(Constants.KEEP_ALIVE_HEADER_VALUE_TOKEN);
+			}
+
+			if (protocol.getUseKeepAliveResponseHeader()) {
+				boolean connectionKeepAlivePresent = processor.isConnectionToken(
+						responseData.getRequestData().getMimeHeaders(), Constants.KEEP_ALIVE_HEADER_VALUE_TOKEN);
+
+				if (connectionKeepAlivePresent) {
+					int keepAliveTimeout = protocol.getKeepAliveTimeout();
+
+					if (keepAliveTimeout > 0) {
+						String value = "timeout=" + keepAliveTimeout / 1000L;
+						headers.setValue(Constants.KEEP_ALIVE_HEADER_NAME).setString(value);
+
+						if (inputBuffer.http11) {
+							// Append if there is already a Connection header,
+							// else create the header
+							MessageBytes connectionHeaderValue = headers.getValue(Constants.CONNECTION);
+							if (connectionHeaderValue == null) {
+								headers.addValue(Constants.CONNECTION)
+										.setString(Constants.KEEP_ALIVE_HEADER_VALUE_TOKEN);
+							} else {
+								connectionHeaderValue.setString(connectionHeaderValue.getString() + ", "
+										+ Constants.KEEP_ALIVE_HEADER_VALUE_TOKEN);
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Add server header
+		String server = protocol.getServer();
+		if (server == null) {
+			if (protocol.getServerRemoveAppProvidedValues()) {
+				headers.removeHeader("server");
+			}
+		} else {
+			// server always overrides anything the app might set
+			headers.setValue("Server").setString(server);
+		}
+
+		// Build the response header
+		try {
+			this.sendStatus();
+			System.out.println("==========================print header start==========================");
+			int size = headers.size();
+			for (int i = 0; i < size; i++) {
+				System.out.println(" " + headers.getName(i).toString() + " : " + headers.getValue(i).toString());
+				this.sendHeader(headers.getName(i), headers.getValue(i));
+			}
+			System.out.println("==========================print header end============================");
+			this.endHeaders();
+		} catch (Throwable t) {
+			ExceptionUtils.handleThrowable(t);
+			// If something goes wrong, reset the header buffer so the error
+			// response can be written instead.
+			this.resetHeaderBuffer();
+			throw t;
+		}
+
+		this.localCommit();
+	}
+
+	private void prepareSendfile(OutputFilter[] outputFilters) {
+		String fileName = (String) responseData.getRequestData()
+				.getAttribute(org.apache.coyote.Constants.SENDFILE_FILENAME_ATTR);
+		if (fileName == null) {
+			sendfileData = null;
+		} else {
+			// No entity body sent here
+			this.addActiveFilter(outputFilters[Constants.VOID_FILTER]);
+			processor.contentDelimitation = true;
+			long pos = ((Long) responseData.getRequestData()
+					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_START_ATTR)).longValue();
+			long end = ((Long) responseData.getRequestData()
+					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_END_ATTR)).longValue();
+			sendfileData = channel.createSendfileData(fileName, pos, end - pos);
+		}
+	}
+
+	@Override
+	public final void finishResponse() throws IOException {
+		this.end();
+	}
+
+	// @Override
+	public void commit() {
+		if (!responseData.isCommitted()) {
+			try {
+				// Validate and write response headers
+				prepareResponse();
+			} catch (IOException e) {
+				processor.handleIOException(e);
+			}
+		}
+	}
+
+	// @Override
+	public void close() {
+		commit();
+		try {
+			finishResponse();
+		} catch (IOException e) {
+			processor.handleIOException(e);
+		}
+	}
+
+	// @Override
+	public void sendAck() {
+		ack();
+	}
+
+	// @Override
+	protected final void ack() {
+		// Acknowledge request
+		// Send a 100 status back if it makes sense (response not committed
+		// yet, and client specified an expectation for 100-continue)
+		if (!responseData.isCommitted() && responseData.getRequestData().hasExpectation()) {
+			inputBuffer.setSwallowInput(true);
+			try {
+				this.localSendAck();
+			} catch (IOException e) {
+				processor.setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
+			}
+		}
+	}
+
+	// @Override
+	public void clientFlush() {
+		commit();
+		try {
+			flush();
+		} catch (IOException e) {
+			processor.handleIOException(e);
+			responseData.setErrorException(e);
+		}
+	}
+
+	// @Override
+	// protected final void flush() throws IOException {
+	// this.flush();
+	// }
+
 	// ----------------------------------------------- HttpOutputBuffer Methods
 
 	/**
@@ -205,7 +528,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 	 *
 	 * @throws IOException an underlying I/O error occurred
 	 */
-	@Override
+	// @Override
 	public void flush() throws IOException {
 		if (lastActiveFilter == -1) {
 			channelOutputBuffer.flush();
@@ -214,7 +537,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 		}
 	}
 
-	@Override
+	// @Override
 	public void end() throws IOException {
 		if (responseFinished) {
 			return;
@@ -256,6 +579,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 	public void recycle() {
 		nextRequest();
 		channel = null;
+		sendfileData = null;
 	}
 
 	/**
@@ -312,7 +636,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 		headerBuffer.setLimit(headerBuffer.getCapacity());
 	}
 
-	public void sendAck() throws IOException {
+	private void localSendAck() throws IOException {
 		if (!responseData.isCommitted()) {
 			channel.write(isBlocking(), Constants.ACK_BYTES, 0, Constants.ACK_BYTES.length);
 			if (flushBuffer(true)) {
@@ -326,7 +650,7 @@ public class Http11OutputBuffer implements HttpOutputBuffer {
 	 *
 	 * @throws IOException an underlying I/O error occurred
 	 */
-	protected void commit() throws IOException {
+	protected void localCommit() throws IOException {
 		responseData.setCommitted(true);
 		checkHeadBufferIfNull();
 		if (headerBuffer.getPosition() > 0) {

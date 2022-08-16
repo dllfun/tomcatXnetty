@@ -65,7 +65,9 @@ public abstract class SocketWrapperBaseEndpoint<S, U> extends AbstractJsseEndpoi
 		acceptor.setThreadName(threadName);
 		Thread t = new Thread(acceptor, threadName);
 		t.setPriority(getAcceptorThreadPriority());
-		t.setDaemon(getHandler().getProtocol().getDaemon());
+		if (getHandler().getProtocol() != null) {
+			t.setDaemon(getHandler().getProtocol().getDaemon());
+		}
 		t.start();
 	}
 

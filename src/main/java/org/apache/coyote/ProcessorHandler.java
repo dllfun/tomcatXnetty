@@ -65,24 +65,38 @@ public class ProcessorHandler implements Handler {
 			log.debug(sm.getString("abstractConnectionHandler.connectionsGet", processor, channel));// socket
 		}
 
-		// Timeouts are calculated on a dedicated thread and then
-		// dispatched. Because of delays in the dispatch process, the
-		// timeout may no longer be required. Check here and avoid
-		// unnecessary processing.
-		if (SocketEvent.TIMEOUT == event && (processor == null || !processor.isAsync() && !processor.isUpgrade()
-				|| processor.isAsync() && !processor.checkAsyncTimeoutGeneration())) {
-			// This is effectively a NO-OP
-			return SocketState.OPEN;
-		}
+		if (processor == null) {
 
-		if (processor != null) {
+			// Timeouts are calculated on a dedicated thread and then
+			// dispatched. Because of delays in the dispatch process, the
+			// timeout may no longer be required. Check here and avoid
+			// unnecessary processing.
+			if (SocketEvent.TIMEOUT == event) {
+				// This is effectively a NO-OP
+				return SocketState.OPEN;
+			}
+
+			if (event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
+				// Nothing to do. Endpoint requested a close and there is no
+				// longer a processor associated with this socket.
+				channel.close();
+				return SocketState.CLOSED;
+			}
+		} else {
+
+			// Timeouts are calculated on a dedicated thread and then
+			// dispatched. Because of delays in the dispatch process, the
+			// timeout may no longer be required. Check here and avoid
+			// unnecessary processing.
+			if (SocketEvent.TIMEOUT == event && (!processor.isAsync() && !processor.isUpgrade()
+					|| processor.isAsync() && !processor.checkAsyncTimeoutGeneration())) {
+				// This is effectively a NO-OP
+				return SocketState.OPEN;
+			}
+
 			// Make sure an async timeout doesn't fire
 			protocol.removeWaitingProcessor(processor);
-		} else if (event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
-			// Nothing to do. Endpoint requested a close and there is no
-			// longer a processor associated with this socket.
-			channel.close();
-			return SocketState.CLOSED;
+
 		}
 
 		ContainerThreadMarker.set();
@@ -166,6 +180,7 @@ public class ProcessorHandler implements Handler {
 						// Assume direct HTTP/2 connection
 						UpgradeProtocol upgradeProtocol = protocol.getUpgradeProtocol("h2c");
 						if (upgradeProtocol != null) {
+							protocol.release(processor);
 							processor = upgradeProtocol.getProcessor(socketChannel, protocol.getAdapter());
 							socketChannel.unRead(leftOverInput);
 							// Associate with the processor with the connection

@@ -27,25 +27,17 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
+import org.apache.coyote.AbstractProtocol;
+import org.apache.coyote.http11.Http11NioProtocol;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.IntrospectionUtils;
-import org.apache.tomcat.util.collections.SynchronizedStack;
 import org.apache.tomcat.util.modeler.Registry;
 import org.apache.tomcat.util.res.StringManager;
 import org.apache.tomcat.util.threads.LimitLatch;
-import org.apache.tomcat.util.threads.ResizableExecutor;
-import org.apache.tomcat.util.threads.TaskQueue;
-import org.apache.tomcat.util.threads.TaskThreadFactory;
-import org.apache.tomcat.util.threads.ThreadPoolExecutor;
 
 /**
  * @param <S> The type used by the socket wrapper associated with this endpoint.
@@ -109,14 +101,27 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 	/**
 	 * Handling of accepted sockets.
 	 */
-	private Handler<S> handler = null;
+	private Handler handler = new Handler() {
+
+		@Override
+		public void processSocket(Channel channel, SocketEvent event, boolean dispatch) {
+			channel.close();
+		}
+
+		@Override
+		public AbstractProtocol<?> getProtocol() {
+			return null;
+		}
+	};
 
 	@Override
-	public final void setHandler(Handler<S> handler) {
-		this.handler = handler;
+	public final void setHandler(Handler handler) {
+		if (handler != null) {
+			this.handler = handler;
+		}
 	}
 
-	protected final Handler<S> getHandler() {
+	protected final Handler getHandler() {
 		return handler;
 	}
 

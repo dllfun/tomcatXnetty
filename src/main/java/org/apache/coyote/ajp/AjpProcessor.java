@@ -36,11 +36,11 @@ import javax.servlet.http.HttpServletResponse;
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.Adapter;
 import org.apache.coyote.ErrorState;
-import org.apache.coyote.ChannelHandler;
-import org.apache.coyote.OutputBuffer;
+import org.apache.coyote.RequestAction;
 import org.apache.coyote.Request;
 import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
+import org.apache.coyote.ResponseAction;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
@@ -93,7 +93,7 @@ public class AjpProcessor extends AbstractProcessor {
 	/**
 	 * Associated output buffer.
 	 */
-	private final OutputBuffer outputBuffer;
+	private final SocketOutputBuffer outputBuffer;
 
 	private SocketChannel channel;
 
@@ -305,7 +305,8 @@ public class AjpProcessor extends AbstractProcessor {
 				AtomicBoolean ready = new AtomicBoolean(false);
 				synchronized (responseData.getNonBlockingStateLock()) {
 					if (!responseData.isRegisteredForWrite()) {
-						actionNB_WRITE_INTEREST(ready);
+						// actionNB_WRITE_INTEREST(ready);
+						ready.set(outputBuffer.isReadyForWrite());
 						responseData.setRegisteredForWrite(!ready.get());
 					}
 				}
@@ -454,8 +455,8 @@ public class AjpProcessor extends AbstractProcessor {
 			// Finish the response if not done yet
 			if (!responseFinished && getErrorState().isIoAllowed()) {
 				try {
-					commit();
-					finishResponse();
+					outputBuffer.commit();
+					outputBuffer.finishResponse();
 				} catch (IOException ioe) {
 					setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
 				} catch (Throwable t) {
@@ -928,125 +929,6 @@ public class AjpProcessor extends AbstractProcessor {
 		requestData.setServerPort(requestData.getLocalPort());
 	}
 
-	/**
-	 * When committing the response, we have to validate the set of headers, as well
-	 * as setup the response filters.
-	 */
-	@Override
-	protected final void prepareResponse() throws IOException {
-
-		responseData.setCommitted(true);
-
-		tmpMB.recycle();
-		responseMsgPos = -1;
-		responseMessage.reset();
-		responseMessage.appendByte(Constants.JK_AJP13_SEND_HEADERS);
-
-		// Responses with certain status codes are not permitted to include a
-		// response body.
-		int statusCode = responseData.getStatus();
-		if (statusCode < 200 || statusCode == 204 || statusCode == 205 || statusCode == 304) {
-			// No entity body
-			swallowResponse = true;
-		}
-
-		// Responses to HEAD requests are not permitted to include a response
-		// body.
-		MessageBytes methodMB = requestData.method();
-		if (methodMB.equals("HEAD")) {
-			// No entity body
-			swallowResponse = true;
-		}
-
-		// HTTP header contents
-		responseMessage.appendInt(statusCode);
-		// Reason phrase is optional but mod_jk + httpd 2.x fails with a null
-		// reason phrase - bug 45026
-		tmpMB.setString(Integer.toString(responseData.getStatus()));
-		responseMessage.appendBytes(tmpMB);
-
-		// Special headers
-		MimeHeaders headers = responseData.getMimeHeaders();
-		String contentType = responseData.getContentType();
-		if (contentType != null) {
-			headers.setValue("Content-Type").setString(contentType);
-		}
-		String contentLanguage = responseData.getContentLanguage();
-		if (contentLanguage != null) {
-			headers.setValue("Content-Language").setString(contentLanguage);
-		}
-		long contentLength = responseData.getContentLengthLong();
-		if (contentLength >= 0) {
-			headers.setValue("Content-Length").setLong(contentLength);
-		}
-
-		// Other headers
-		int numHeaders = headers.size();
-		responseMessage.appendInt(numHeaders);
-		for (int i = 0; i < numHeaders; i++) {
-			MessageBytes hN = headers.getName(i);
-			int hC = Constants.getResponseAjpIndex(hN.toString());
-			if (hC > 0) {
-				responseMessage.appendInt(hC);
-			} else {
-				responseMessage.appendBytes(hN);
-			}
-			MessageBytes hV = headers.getValue(i);
-			responseMessage.appendBytes(hV);
-		}
-
-		// Write to buffer
-		responseMessage.end();
-		channel.write(true, responseMessage.getBuffer(), 0, responseMessage.getLen());
-		channel.flush(true);
-	}
-
-	/**
-	 * Callback to write data from the buffer.
-	 */
-	@Override
-	protected final void flush() throws IOException {
-		// Calling code should ensure that there is no data in the buffers for
-		// non-blocking writes.
-		// TODO Validate the assertion above
-		if (!responseFinished) {
-			if (protocol.getAjpFlush()) {
-				// Send the flush message
-				channel.write(true, flushMessageArray, 0, flushMessageArray.length);
-			}
-			channel.flush(true);
-		}
-	}
-
-	/**
-	 * Finish AJP response.
-	 */
-	@Override
-	protected final void finishResponse() throws IOException {
-		if (responseFinished)
-			return;
-
-		responseFinished = true;
-
-		// Swallow the unread body packet if present
-		if (waitingForBodyMessage || first && requestData.getContentLengthLong() > 0) {
-			refillReadBuffer(true);
-		}
-
-		// Add the end message
-		if (getErrorState().isError()) {
-			channel.write(true, endAndCloseMessageArray, 0, endAndCloseMessageArray.length);
-		} else {
-			channel.write(true, endMessageArray, 0, endMessageArray.length);
-		}
-		channel.flush(true);
-	}
-
-	@Override
-	protected final void ack() {
-		// NO-OP for AJP
-	}
-
 	@Override
 	protected final void setSwallowResponse() {
 		swallowResponse = true;
@@ -1091,10 +973,10 @@ public class AjpProcessor extends AbstractProcessor {
 		}
 	}
 
-	@Override
-	protected final boolean isReadyForWrite() {
-		return responseMsgPos == -1 && channel.isReadyForWrite();
-	}
+//	@Override
+//	protected final boolean isReadyForWrite() {
+//		return responseMsgPos == -1 && channel.isReadyForWrite();
+//	}
 
 	/**
 	 * Read at least the specified amount of bytes, and place them in the input
@@ -1169,7 +1051,7 @@ public class AjpProcessor extends AbstractProcessor {
 	/**
 	 * This class is an input buffer which will read its data from an input stream.
 	 */
-	protected class SocketInputReader implements ChannelHandler {
+	protected class SocketInputReader implements RequestAction {
 
 		// @Override
 		/*
@@ -1352,7 +1234,7 @@ public class AjpProcessor extends AbstractProcessor {
 	/**
 	 * This class is an output buffer which will write data to an output stream.
 	 */
-	protected class SocketOutputBuffer implements OutputBuffer {
+	protected class SocketOutputBuffer implements ResponseAction {
 
 		@Override
 		public int doWrite(ByteBuffer chunk) throws IOException {
@@ -1385,5 +1267,179 @@ public class AjpProcessor extends AbstractProcessor {
 		public long getBytesWritten() {
 			return bytesWritten;
 		}
+
+		/**
+		 * Protocols that support trailer fields should override this method and return
+		 * {@code true}.
+		 *
+		 * @return {@code true} if trailer fields are supported by this processor,
+		 *         otherwise {@code false}.
+		 */
+		public boolean isTrailerFieldsSupported() {
+			return false;
+		}
+
+		@Override
+		public final boolean isReadyForWrite() {
+			return responseMsgPos == -1 && channel.isReadyForWrite();
+		}
+
+		/**
+		 * When committing the response, we have to validate the set of headers, as well
+		 * as setup the response filters.
+		 */
+		@Override
+		public final void prepareResponse() throws IOException {
+
+			responseData.setCommitted(true);
+
+			tmpMB.recycle();
+			responseMsgPos = -1;
+			responseMessage.reset();
+			responseMessage.appendByte(Constants.JK_AJP13_SEND_HEADERS);
+
+			// Responses with certain status codes are not permitted to include a
+			// response body.
+			int statusCode = responseData.getStatus();
+			if (statusCode < 200 || statusCode == 204 || statusCode == 205 || statusCode == 304) {
+				// No entity body
+				swallowResponse = true;
+			}
+
+			// Responses to HEAD requests are not permitted to include a response
+			// body.
+			MessageBytes methodMB = requestData.method();
+			if (methodMB.equals("HEAD")) {
+				// No entity body
+				swallowResponse = true;
+			}
+
+			// HTTP header contents
+			responseMessage.appendInt(statusCode);
+			// Reason phrase is optional but mod_jk + httpd 2.x fails with a null
+			// reason phrase - bug 45026
+			tmpMB.setString(Integer.toString(responseData.getStatus()));
+			responseMessage.appendBytes(tmpMB);
+
+			// Special headers
+			MimeHeaders headers = responseData.getMimeHeaders();
+			String contentType = responseData.getContentType();
+			if (contentType != null) {
+				headers.setValue("Content-Type").setString(contentType);
+			}
+			String contentLanguage = responseData.getContentLanguage();
+			if (contentLanguage != null) {
+				headers.setValue("Content-Language").setString(contentLanguage);
+			}
+			long contentLength = responseData.getContentLengthLong();
+			if (contentLength >= 0) {
+				headers.setValue("Content-Length").setLong(contentLength);
+			}
+
+			// Other headers
+			int numHeaders = headers.size();
+			responseMessage.appendInt(numHeaders);
+			for (int i = 0; i < numHeaders; i++) {
+				MessageBytes hN = headers.getName(i);
+				int hC = Constants.getResponseAjpIndex(hN.toString());
+				if (hC > 0) {
+					responseMessage.appendInt(hC);
+				} else {
+					responseMessage.appendBytes(hN);
+				}
+				MessageBytes hV = headers.getValue(i);
+				responseMessage.appendBytes(hV);
+			}
+
+			// Write to buffer
+			responseMessage.end();
+			channel.write(true, responseMessage.getBuffer(), 0, responseMessage.getLen());
+			channel.flush(true);
+		}
+
+		/**
+		 * Finish AJP response.
+		 */
+		@Override
+		public final void finishResponse() throws IOException {
+			if (responseFinished)
+				return;
+
+			responseFinished = true;
+
+			// Swallow the unread body packet if present
+			if (waitingForBodyMessage || first && requestData.getContentLengthLong() > 0) {
+				refillReadBuffer(true);
+			}
+
+			// Add the end message
+			if (getErrorState().isError()) {
+				channel.write(true, endAndCloseMessageArray, 0, endAndCloseMessageArray.length);
+			} else {
+				channel.write(true, endMessageArray, 0, endMessageArray.length);
+			}
+			channel.flush(true);
+		}
+
+		// @Override
+		public void commit() {
+			if (!responseData.isCommitted()) {
+				try {
+					// Validate and write response headers
+					prepareResponse();
+				} catch (IOException e) {
+					handleIOException(e);
+				}
+			}
+		}
+
+		// @Override
+		public void close() {
+			commit();
+			try {
+				finishResponse();
+			} catch (IOException e) {
+				handleIOException(e);
+			}
+		}
+
+		// @Override
+		public void sendAck() {
+			ack();
+		}
+
+		// @Override
+		protected final void ack() {
+			// NO-OP for AJP
+		}
+
+		// @Override
+		public void clientFlush() {
+			commit();
+			try {
+				flush();
+			} catch (IOException e) {
+				handleIOException(e);
+				responseData.setErrorException(e);
+			}
+		}
+
+		/**
+		 * Callback to write data from the buffer.
+		 */
+		// @Override
+		protected final void flush() throws IOException {
+			// Calling code should ensure that there is no data in the buffers for
+			// non-blocking writes.
+			// TODO Validate the assertion above
+			if (!responseFinished) {
+				if (protocol.getAjpFlush()) {
+					// Send the flush message
+					channel.write(true, flushMessageArray, 0, flushMessageArray.length);
+				}
+				channel.flush(true);
+			}
+		}
 	}
+
 }

@@ -17,7 +17,6 @@
 package org.apache.coyote.http2;
 
 import org.apache.coyote.AbstractProcessor;
-import org.apache.coyote.ActionCode;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.res.StringManager;

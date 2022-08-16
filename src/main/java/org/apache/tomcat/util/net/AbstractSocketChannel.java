@@ -24,7 +24,6 @@ import java.nio.channels.CompletionHandler;
 import java.nio.channels.InterruptedByTimeoutException;
 import java.nio.channels.ReadPendingException;
 import java.nio.channels.WritePendingException;
-import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -259,7 +258,9 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 		if (closed.compareAndSet(false, true)) {
 			try {
 				if (getCurrentProcessor() != null) {
-					getEndpoint().getHandler().getProtocol().release(this);
+					if (getEndpoint().getHandler().getProtocol() != null) {
+						getEndpoint().getHandler().getProtocol().release(this);
+					}
 				}
 			} catch (Throwable e) {
 				ExceptionUtils.handleThrowable(e);
@@ -566,8 +567,10 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 		 */
 		protected boolean process() {
 			try {
-				getEndpoint().getHandler().getProtocol().getExecutor().execute(this);
-				return true;
+				if (getEndpoint().getHandler().getProtocol() != null) {
+					getEndpoint().getHandler().getProtocol().getExecutor().execute(this);
+					return true;
+				}
 			} catch (RejectedExecutionException ree) {
 				log.warn(sm.getString("endpoint.executor.fail", AbstractSocketChannel.this), ree);
 			} catch (Throwable t) {

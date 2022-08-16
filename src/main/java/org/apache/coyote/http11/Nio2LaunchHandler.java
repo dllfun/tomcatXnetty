@@ -15,7 +15,7 @@ import org.apache.tomcat.util.net.Nio2Endpoint.Nio2SocketWrapper;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.res.StringManager;
 
-public class Nio2LaunchHandler implements Handler<Nio2Channel> {
+public class Nio2LaunchHandler implements Handler {
 
 	private static final Log log = LogFactory.getLog(Http11Nio2Protocol.class);
 
@@ -31,7 +31,7 @@ public class Nio2LaunchHandler implements Handler<Nio2Channel> {
 	}
 
 	@Override
-	public AbstractProtocol<Nio2Channel> getProtocol() {
+	public AbstractProtocol getProtocol() {
 		return protocol;
 	}
 

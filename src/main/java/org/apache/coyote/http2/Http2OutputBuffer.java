@@ -16,21 +16,38 @@
  */
 package org.apache.coyote.http2;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.apache.coyote.ActionCode;
-import org.apache.coyote.Response;
+import org.apache.coyote.ErrorState;
+import org.apache.coyote.ResponseAction;
 import org.apache.coyote.ResponseData;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
 import org.apache.coyote.http2.Stream.StreamOutputBuffer;
+import org.apache.tomcat.util.net.SendfileState;
 
-public class Http2OutputBuffer implements HttpOutputBuffer {
+public class Http2OutputBuffer implements ResponseAction {
 
 	private Stream stream;
-	private final ResponseData coyoteResponse;
+	private final ResponseData responseData;
 	private HttpOutputBuffer next;
+	private StreamProcessor processor;
+	private SendfileData sendfileData = null;
+	private SendfileState sendfileState = null;
+
+	public Http2OutputBuffer(StreamProcessor processor, Stream stream, ResponseData responseData,
+			StreamOutputBuffer streamOutputBuffer) {
+		this.processor = processor;
+		this.stream = stream;
+		this.responseData = responseData;
+		this.next = streamOutputBuffer;
+	}
+
+	public SendfileState getSendfileState() {
+		return sendfileState;
+	}
 
 	/**
 	 * Add a filter at the start of the existing processing chain. Subsequent calls
@@ -43,12 +60,6 @@ public class Http2OutputBuffer implements HttpOutputBuffer {
 	public void addFilter(OutputFilter filter) {
 		filter.setBuffer(next);
 		next = filter;
-	}
-
-	public Http2OutputBuffer(Stream stream, ResponseData coyoteResponse, StreamOutputBuffer streamOutputBuffer) {
-		this.stream = stream;
-		this.coyoteResponse = coyoteResponse;
-		this.next = streamOutputBuffer;
 	}
 
 	@Override
@@ -66,11 +77,110 @@ public class Http2OutputBuffer implements HttpOutputBuffer {
 	}
 
 	@Override
+	public boolean isTrailerFieldsSupported() {
+		return stream.isTrailerFieldsSupported();
+	}
+
+	@Override
+	public final boolean isReadyForWrite() {
+		return stream.isReadyForWrite();
+	}
+
+	@Override
+	public final void prepareResponse() throws IOException {
+		responseData.setCommitted(true);
+		if (processor.getHandler().hasAsyncIO() && processor.getHandler().getProtocol().getUseSendfile()) {
+			prepareSendfile();
+		}
+		StreamProcessor.prepareHeaders(responseData.getRequestData(), responseData, sendfileData == null,
+				processor.getHandler().getProtocol(), stream);
+		stream.writeHeaders();
+	}
+
+	@Override
+	public final void finishResponse() throws IOException {
+		sendfileState = processor.getHandler().processSendfile(sendfileData);
+		if (!(sendfileState == SendfileState.PENDING)) {
+			this.end();
+		}
+	}
+
+	// @Override
+	public void commit() {
+		if (!responseData.isCommitted()) {
+			try {
+				// Validate and write response headers
+				prepareResponse();
+			} catch (IOException e) {
+				processor.handleIOException(e);
+			}
+		}
+	}
+
+	// @Override
+	public void close() {
+		commit();
+		try {
+			finishResponse();
+		} catch (IOException e) {
+			processor.handleIOException(e);
+		}
+	}
+
+	// @Override
+	public void sendAck() {
+		ack();
+	}
+
+	// @Override
+	protected final void ack() {
+		if (!responseData.isCommitted() && responseData.getRequestData().hasExpectation()) {
+			try {
+				stream.writeAck();
+			} catch (IOException ioe) {
+				processor.setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
+			}
+		}
+	}
+
+	// @Override
+	public void clientFlush() {
+		commit();
+		try {
+			flush();
+		} catch (IOException e) {
+			processor.handleIOException(e);
+			responseData.setErrorException(e);
+		}
+	}
+
+	protected void prepareSendfile() {
+		String fileName = (String) stream.getCoyoteRequest()
+				.getAttribute(org.apache.coyote.Constants.SENDFILE_FILENAME_ATTR);
+		if (fileName != null) {
+			sendfileData = new SendfileData();
+			sendfileData.path = new File(fileName).toPath();
+			sendfileData.pos = ((Long) stream.getCoyoteRequest()
+					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_START_ATTR)).longValue();
+			sendfileData.end = ((Long) stream.getCoyoteRequest()
+					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_END_ATTR)).longValue();
+			sendfileData.left = sendfileData.end - sendfileData.pos;
+			sendfileData.stream = stream;
+			sendfileData.outputBuffer = this;
+		}
+	}
+
+	// @Override
+	// protected final void flush() throws IOException {
+	// stream.getOutputBuffer().flush();
+	// }
+
+	// @Override
 	public void end() throws IOException {
 		next.end();
 	}
 
-	@Override
+	// @Override
 	public void flush() throws IOException {
 		next.flush();
 	}

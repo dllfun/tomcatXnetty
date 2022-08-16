@@ -96,7 +96,7 @@ public class Http2Protocol implements UpgradeProtocol {
 	private AbstractProtocol<?> http11Protocol = null;
 
 	public Http2Protocol() {
-
+		setCompression("force");
 	}
 
 	@Override

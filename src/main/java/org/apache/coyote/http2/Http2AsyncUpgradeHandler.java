@@ -319,7 +319,7 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 			sendfile.left -= bytesWritten;
 			if (sendfile.left == 0) {
 				try {
-					sendfile.stream.getOutputBuffer().end();
+					sendfile.outputBuffer.end();
 				} catch (IOException e) {
 					failed(e, sendfile);
 				}

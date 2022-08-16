@@ -87,36 +87,47 @@ class Http2Parser {
 
 		switch (frameType) {
 		case DATA:
+			System.out.println("DATA");
 			readDataFrame(streamId, flags, payloadSize, null);
 			break;
 		case HEADERS:
+			System.out.println("HEADERS");
 			readHeadersFrame(streamId, flags, payloadSize, null);
 			break;
 		case PRIORITY:
+			System.out.println("PRIORITY");
 			readPriorityFrame(streamId, null);
 			break;
 		case RST:
+			System.out.println("RST");
 			readRstFrame(streamId, null);
 			break;
 		case SETTINGS:
+			System.out.println("SETTINGS");
 			readSettingsFrame(flags, payloadSize, null);
 			break;
 		case PUSH_PROMISE:
+			System.out.println("PUSH_PROMISE");
 			readPushPromiseFrame(streamId, null);
 			break;
 		case PING:
+			System.out.println("PING");
 			readPingFrame(flags, null);
 			break;
 		case GOAWAY:
+			System.out.println("GOAWAY");
 			readGoawayFrame(payloadSize, null);
 			break;
 		case WINDOW_UPDATE:
+			System.out.println("WINDOW_UPDATE");
 			readWindowUpdateFrame(streamId, null);
 			break;
 		case CONTINUATION:
+			System.out.println("CONTINUATION");
 			readContinuationFrame(streamId, flags, payloadSize, null);
 			break;
 		case UNKNOWN:
+			System.out.println("UNKNOWN");
 			readUnknownFrame(streamId, frameType, flags, payloadSize, null);
 		}
 

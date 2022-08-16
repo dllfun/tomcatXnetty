@@ -56,7 +56,7 @@ public final class Response {
 	 */
 	private volatile AbstractProcessor processor;
 
-	private OutputBuffer outputBuffer;
+	private ResponseAction responseAction;
 
 	private Request request;
 
@@ -64,10 +64,10 @@ public final class Response {
 	// private boolean registeredForWrite = false;
 	// private final Object nonBlockingStateLock = new Object();
 
-	public Response(ResponseData responseData, AbstractProcessor processor, OutputBuffer outputBuffer) {
+	public Response(ResponseData responseData, AbstractProcessor processor, ResponseAction responseAction) {
 		this.responseData = responseData;
 		this.processor = processor;
-		this.outputBuffer = outputBuffer;
+		this.responseAction = responseAction;
 	}
 
 	// ------------------------------------------------------------- Properties
@@ -111,15 +111,15 @@ public final class Response {
 	// }
 
 	public void actionCOMMIT() {
-		processor.commit();
+		responseAction.commit();
 	}
 
 	public void actionACK() {
-		processor.sendAck();
+		responseAction.sendAck();
 	}
 
 	public void actionCLIENT_FLUSH() {
-		processor.clientFlush();
+		responseAction.clientFlush();
 	}
 
 	public void actionIS_ERROR(AtomicBoolean param) {
@@ -131,7 +131,7 @@ public final class Response {
 	}
 
 	public void actionCLOSE() {
-		processor.close();
+		responseAction.close();
 	}
 
 	public void actionCLOSE_NOW(Object param) {
@@ -273,7 +273,8 @@ public final class Response {
 
 	public void setTrailerFields(Supplier<Map<String, String>> supplier) {
 		AtomicBoolean trailerFieldsSupported = new AtomicBoolean(false);
-		processor.actionIS_TRAILER_FIELDS_SUPPORTED(trailerFieldsSupported);
+		// processor.actionIS_TRAILER_FIELDS_SUPPORTED(trailerFieldsSupported);
+		trailerFieldsSupported.set(responseAction.isTrailerFieldsSupported());
 		if (!trailerFieldsSupported.get()) {
 			throw new IllegalStateException(sm.getString("response.noTrailers.notSupported"));
 		}
@@ -389,10 +390,10 @@ public final class Response {
 			// Send the connector a request for commit. The connector should
 			// then validate the headers, send them (using sendHeaders) and
 			// set the filters accordingly.
-			processor.commit();
+			responseAction.commit();
 		}
 		int len = chunk.remaining();
-		outputBuffer.doWrite(chunk);
+		responseAction.doWrite(chunk);
 		long contentWritten = this.responseData.getContentWritten();
 		contentWritten += len - chunk.remaining();
 		this.responseData.setContentWritten(contentWritten);
@@ -435,7 +436,7 @@ public final class Response {
 		if (flush) {
 			actionCLIENT_FLUSH();
 		}
-		return outputBuffer.getBytesWritten();
+		return responseAction.getBytesWritten();
 	}
 
 	public WriteListener getWriteListener() {
@@ -494,7 +495,8 @@ public final class Response {
 		AtomicBoolean ready = new AtomicBoolean(false);
 		synchronized (responseData.getNonBlockingStateLock()) {
 			if (!responseData.isRegisteredForWrite()) {
-				processor.actionNB_WRITE_INTEREST(ready);
+				// processor.actionNB_WRITE_INTEREST(ready);
+				ready.set(responseAction.isReadyForWrite());
 				responseData.setRegisteredForWrite(!ready.get());
 			}
 		}
