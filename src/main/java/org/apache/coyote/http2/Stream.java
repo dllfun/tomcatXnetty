@@ -547,11 +547,11 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		return weight;
 	}
 
-	final RequestData getCoyoteRequest() {
+	final RequestData getRequestData() {
 		return requestData;
 	}
 
-	final ResponseData getCoyoteResponse() {
+	final ResponseData getResponseData() {
 		return responseData;
 	}
 
@@ -652,7 +652,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 
 	@Override
 	public boolean isClosed() {
-		return this.isClosedFinal();
+		return !state.isActive();
 	}
 
 	final boolean isClosedFinal() {
@@ -682,6 +682,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 	}
 
 	final void close(Http2Exception http2Exception) {
+		System.out.println("stream(" + getIdentifier() + ") closed");
 		if (http2Exception instanceof StreamException) {
 			try {
 				StreamException se = (StreamException) http2Exception;

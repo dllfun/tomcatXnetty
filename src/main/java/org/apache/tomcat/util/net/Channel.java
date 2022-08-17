@@ -12,6 +12,8 @@ public interface Channel {
 
 	public void setError(IOException error);
 
+	public void checkError() throws IOException;
+
 	public boolean isClosed();
 
 	public void close();
@@ -21,10 +23,6 @@ public interface Channel {
 	public Throwable getCloseException();
 
 	public void close(Throwable e);
-
-	public void registerReadInterest();
-
-	public void registerWriteInterest();
 
 	public Object getLock();
 

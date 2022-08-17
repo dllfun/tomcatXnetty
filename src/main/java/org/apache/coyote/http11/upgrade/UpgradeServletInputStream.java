@@ -36,7 +36,7 @@ public class UpgradeServletInputStream extends ServletInputStream {
 	private static final StringManager sm = StringManager.getManager(UpgradeServletInputStream.class);
 
 	private final UpgradeProcessorBase processor;
-	private final SocketChannel socketWrapper;
+	private final SocketChannel channel;
 
 	private volatile boolean closed = false;
 	private volatile boolean eof = false;
@@ -44,9 +44,9 @@ public class UpgradeServletInputStream extends ServletInputStream {
 	private volatile Boolean ready = Boolean.TRUE;
 	private volatile ReadListener listener = null;
 
-	public UpgradeServletInputStream(UpgradeProcessorBase processor, SocketChannel socketWrapper) {
+	public UpgradeServletInputStream(UpgradeProcessorBase processor, SocketChannel channel) {
 		this.processor = processor;
-		this.socketWrapper = socketWrapper;
+		this.channel = channel;
 	}
 
 	@Override
@@ -73,7 +73,7 @@ public class UpgradeServletInputStream extends ServletInputStream {
 		}
 
 		try {
-			ready = Boolean.valueOf(socketWrapper.isReadyForRead());
+			ready = Boolean.valueOf(channel.isReadyForRead());
 		} catch (IOException e) {
 			onError(e);
 		}
@@ -98,7 +98,7 @@ public class UpgradeServletInputStream extends ServletInputStream {
 		if (ContainerThreadMarker.isContainerThread()) {
 			processor.addDispatch(DispatchType.NON_BLOCKING_READ);
 		} else {
-			socketWrapper.registerReadInterest();
+			channel.registerReadInterest();
 		}
 
 		// Switching to non-blocking. Don't know if data is available.
@@ -136,7 +136,7 @@ public class UpgradeServletInputStream extends ServletInputStream {
 		preReadChecks();
 
 		try {
-			int result = socketWrapper.read(listener == null, b, off, len);
+			int result = channel.read(listener == null, b, off, len);
 			if (result == -1) {
 				eof = true;
 			}
@@ -170,7 +170,7 @@ public class UpgradeServletInputStream extends ServletInputStream {
 		byte[] b = new byte[1];
 		int result;
 		try {
-			result = socketWrapper.read(listener == null, b, 0, 1);
+			result = channel.read(listener == null, b, 0, 1);
 		} catch (IOException ioe) {
 			close();
 			throw ioe;
@@ -187,7 +187,7 @@ public class UpgradeServletInputStream extends ServletInputStream {
 
 	final void onDataAvailable() {
 		try {
-			if (listener == null || !socketWrapper.isReadyForRead()) {
+			if (listener == null || !channel.isReadyForRead()) {
 				return;
 			}
 		} catch (IOException e) {

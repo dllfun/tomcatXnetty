@@ -7,12 +7,11 @@ import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.Channel;
-import org.apache.tomcat.util.net.Nio2Channel;
-import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.net.Endpoint.Handler;
-import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
+import org.apache.tomcat.util.net.Nio2Channel;
 import org.apache.tomcat.util.net.Nio2Endpoint.Nio2SocketWrapper;
 import org.apache.tomcat.util.net.SocketChannel;
+import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
 public class Nio2LaunchHandler implements Handler {

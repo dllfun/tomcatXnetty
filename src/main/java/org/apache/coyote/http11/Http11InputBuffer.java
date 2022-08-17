@@ -1257,11 +1257,11 @@ public class Http11InputBuffer implements RequestAction {
 		return false;
 	}
 
-	void init(SocketChannel socketWrapper) {
+	void init(SocketChannel channel) {
 
-		channel = socketWrapper;
+		this.channel = channel;
 
-		channel.initAppReadBuffer(headerBufferSize);
+		this.channel.initAppReadBuffer(headerBufferSize);
 
 		// this.appReadBuffer = channel.getAppReadBuffer();
 

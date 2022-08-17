@@ -2,6 +2,8 @@ package org.apache.coyote;
 
 import java.io.IOException;
 
+import org.apache.coyote.http11.OutputFilter;
+
 public interface ResponseAction extends OutputWriter {
 
 	public boolean isTrailerFieldsSupported();

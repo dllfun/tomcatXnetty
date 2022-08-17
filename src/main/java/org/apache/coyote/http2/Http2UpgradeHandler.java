@@ -94,7 +94,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 
 	protected final Http2Protocol protocol;
 	private final Adapter adapter;
-	protected volatile SocketChannel channel;
+	private volatile SocketChannel channel;
 	private volatile SSLSupport sslSupport;
 
 	private volatile Http2Parser parser;
@@ -191,7 +191,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 			queuedRunnable = new ConcurrentLinkedQueue<>();
 		}
 
-		parser = getParser(connectionId);
+		parser = createParser(connectionId);
 
 		Stream stream = null;
 
@@ -205,7 +205,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 			try {
 				// Process the initial settings frame
 				stream = getStream(1, true);
-				String base64Settings = stream.getCoyoteRequest().getHeader(HTTP2_SETTINGS_HEADER);
+				String base64Settings = stream.getRequestData().getHeader(HTTP2_SETTINGS_HEADER);
 				byte[] settings = Base64.decodeBase64URLSafe(base64Settings);
 
 				// Settings are only valid on stream 0
@@ -255,7 +255,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 		}
 	}
 
-	protected Http2Parser getParser(String connectionId) {
+	protected Http2Parser createParser(String connectionId) {
 		return new Http2Parser(connectionId, this, this);
 	}
 
@@ -282,6 +282,10 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	@Override
 	public void setChannel(SocketChannel channel) {
 		this.channel = channel;
+	}
+
+	protected SocketChannel getChannel() {
+		return channel;
 	}
 
 	@Override
@@ -1495,14 +1499,14 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	}
 
 	@Override
-	public void reset(int streamId, long errorCode) throws Http2Exception {
+	public void receiveReset(int streamId, long errorCode) throws Http2Exception {
 		Stream stream = getStream(streamId, true);
 		stream.checkState(FrameType.RST);
 		stream.receiveReset(errorCode);
 	}
 
 	@Override
-	public void setting(Setting setting, long value) throws ConnectionException {
+	public void receiveSetting(Setting setting, long value) throws ConnectionException {
 
 		increaseOverheadCount();
 
@@ -1555,7 +1559,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	}
 
 	@Override
-	public void goaway(int lastStreamId, long errorCode, String debugData) {
+	public void receiveGoaway(int lastStreamId, long errorCode, String debugData) {
 		if (log.isDebugEnabled()) {
 			log.debug(sm.getString("upgradeHandler.goaway.debug", connectionId, Integer.toString(lastStreamId),
 					Long.toHexString(errorCode), debugData));

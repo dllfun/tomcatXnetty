@@ -38,7 +38,6 @@ import org.apache.catalina.core.AsyncContextImpl;
 import org.apache.catalina.util.ServerInfo;
 import org.apache.catalina.util.SessionConfig;
 import org.apache.catalina.util.URLEncoder;
-import org.apache.coyote.ActionCode;
 import org.apache.coyote.Adapter;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;

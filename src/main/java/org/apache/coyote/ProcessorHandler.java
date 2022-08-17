@@ -258,7 +258,9 @@ public class ProcessorHandler implements Handler {
 				// processor. Continue to poll for the next request.
 				channel.setCurrentProcessor(null);
 				protocol.release(processor);
-				channel.registerReadInterest();
+				if (channel instanceof SocketChannel) {
+					((SocketChannel) channel).registerReadInterest();
+				}
 			} else if (state == SocketState.SENDFILE) {
 				// Sendfile in progress. If it fails, the socket will be
 				// closed. If it works, the socket either be added to the

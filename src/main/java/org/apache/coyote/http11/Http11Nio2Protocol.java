@@ -16,21 +16,14 @@
  */
 package org.apache.coyote.http11;
 
-import java.io.IOException;
-
 import org.apache.coyote.DispatchHandler;
 import org.apache.coyote.HandShakeHandler;
 import org.apache.coyote.ProcessorHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.ExceptionUtils;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Nio2Channel;
 import org.apache.tomcat.util.net.Nio2Endpoint;
-import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.net.Endpoint.Handler;
-import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.Nio2Endpoint.Nio2SocketWrapper;
 
 /**
  * HTTP/1.1 protocol implementation using NIO2.

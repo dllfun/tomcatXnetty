@@ -96,9 +96,13 @@ public class HandShakeHandler implements Handler {
 					// socketWrapper);
 					channel.close();
 				} else if (handshake == HandShakeable.HANDSHAKE_NEEDREAD) {
-					channel.registerReadInterest();
+					if (channel instanceof SocketChannel) {
+						((SocketChannel) channel).registerReadInterest();
+					}
 				} else if (handshake == HandShakeable.HANDSHAKE_NEEDWRITE) {
-					channel.registerWriteInterest();
+					if (channel instanceof SocketChannel) {
+						((SocketChannel) channel).registerWriteInterest();
+					}
 				} else if (handshake == HandShakeable.HANDSHAKE_IGNORE) {
 					// do nothing
 				}

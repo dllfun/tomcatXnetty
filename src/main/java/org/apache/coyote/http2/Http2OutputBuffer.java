@@ -155,14 +155,14 @@ public class Http2OutputBuffer implements ResponseAction {
 	}
 
 	protected void prepareSendfile() {
-		String fileName = (String) stream.getCoyoteRequest()
+		String fileName = (String) stream.getRequestData()
 				.getAttribute(org.apache.coyote.Constants.SENDFILE_FILENAME_ATTR);
 		if (fileName != null) {
 			sendfileData = new SendfileData();
 			sendfileData.path = new File(fileName).toPath();
-			sendfileData.pos = ((Long) stream.getCoyoteRequest()
+			sendfileData.pos = ((Long) stream.getRequestData()
 					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_START_ATTR)).longValue();
-			sendfileData.end = ((Long) stream.getCoyoteRequest()
+			sendfileData.end = ((Long) stream.getRequestData()
 					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_END_ATTR)).longValue();
 			sendfileData.left = sendfileData.end - sendfileData.pos;
 			sendfileData.stream = stream;

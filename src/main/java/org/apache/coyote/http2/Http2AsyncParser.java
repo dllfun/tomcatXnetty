@@ -35,16 +35,16 @@ import org.apache.tomcat.util.net.SocketWrapperBase;
 
 class Http2AsyncParser extends Http2Parser {
 
-	private final SocketChannel socketWrapper;
+	private final SocketChannel channel;
 	private final Http2AsyncUpgradeHandler upgradeHandler;
 	private Throwable error = null;
 
-	Http2AsyncParser(String connectionId, Input input, Output output, SocketChannel socketWrapper,
+	Http2AsyncParser(String connectionId, Input input, Output output, SocketChannel channel,
 			Http2AsyncUpgradeHandler upgradeHandler) {
 		super(connectionId, input, output);
-		this.socketWrapper = socketWrapper;
-		if (socketWrapper instanceof SocketWrapperBase<?>) {
-			((SocketWrapperBase<?>) socketWrapper).expandSocketBuffer(input.getMaxFrameSize());
+		this.channel = channel;
+		if (channel instanceof SocketWrapperBase<?>) {
+			((SocketWrapperBase<?>) channel).expandSocketBuffer(input.getMaxFrameSize());
 		}
 		this.upgradeHandler = upgradeHandler;
 	}
@@ -57,8 +57,8 @@ class Http2AsyncParser extends Http2Parser {
 		ByteBuffer framePaylod = ByteBuffer.allocate(input.getMaxFrameSize());
 		PrefaceCompletionHandler handler = new PrefaceCompletionHandler(webConnection, stream, prefaceData, preface,
 				header, framePaylod);
-		socketWrapper.read(BlockingMode.NON_BLOCK, socketWrapper.getReadTimeout(), TimeUnit.MILLISECONDS, null, handler,
-				handler, preface, header, framePaylod);
+		channel.read(BlockingMode.NON_BLOCK, channel.getReadTimeout(), TimeUnit.MILLISECONDS, null, handler, handler,
+				preface, header, framePaylod);
 	}
 
 	private class PrefaceCompletionHandler extends FrameCompletionHandler {
@@ -120,7 +120,7 @@ class Http2AsyncParser extends Http2Parser {
 				}
 				// Any extra frame is not processed yet, so put back any leftover data
 				if (payload.hasRemaining()) {
-					socketWrapper.unRead(payload);
+					channel.unRead(payload);
 				}
 			}
 			// Finish processing the connection
@@ -137,8 +137,8 @@ class Http2AsyncParser extends Http2Parser {
 		ByteBuffer header = ByteBuffer.allocate(9);
 		ByteBuffer framePayload = ByteBuffer.allocate(input.getMaxFrameSize());
 		FrameCompletionHandler handler = new FrameCompletionHandler(expected, header, framePayload);
-		CompletionState state = socketWrapper.read(block ? BlockingMode.BLOCK : BlockingMode.NON_BLOCK,
-				socketWrapper.getReadTimeout(), TimeUnit.MILLISECONDS, null, handler, handler, header, framePayload);
+		CompletionState state = channel.read(block ? BlockingMode.BLOCK : BlockingMode.NON_BLOCK,
+				channel.getReadTimeout(), TimeUnit.MILLISECONDS, null, handler, handler, header, framePayload);
 		if (state == CompletionState.ERROR || state == CompletionState.INLINE) {
 			handleAsyncException();
 			return true;
@@ -306,7 +306,7 @@ class Http2AsyncParser extends Http2Parser {
 					error = e;
 				}
 				if (payload.hasRemaining()) {
-					socketWrapper.unRead(payload);
+					channel.unRead(payload);
 				}
 			}
 			if (state == CompletionState.DONE) {

@@ -155,12 +155,17 @@ public class Nio2Channel implements AsynchronousByteChannel {
 		read(dst, 0L, TimeUnit.MILLISECONDS, attachment, handler);
 	}
 
-	public <A> void read(ByteBuffer dst, long timeout, TimeUnit unit, A attachment,
+	protected <A> void read(ByteBuffer dst, long timeout, TimeUnit unit, A attachment,
 			CompletionHandler<Integer, ? super A> handler) {
 		sc.read(dst, timeout, unit, attachment, handler);
 	}
 
-	public <A> void read(ByteBuffer[] dsts, int offset, int length, long timeout, TimeUnit unit, A attachment,
+	public <A> void read(ByteBuffer[] dsts, int offset, int length, A attachment,
+			CompletionHandler<Long, ? super A> handler) {
+		read(dsts, offset, length, 0L, TimeUnit.MILLISECONDS, attachment, handler);
+	}
+
+	protected <A> void read(ByteBuffer[] dsts, int offset, int length, long timeout, TimeUnit unit, A attachment,
 			CompletionHandler<Long, ? super A> handler) {
 		sc.read(dsts, offset, length, timeout, unit, attachment, handler);
 	}

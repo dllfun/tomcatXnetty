@@ -146,7 +146,7 @@ public abstract class AbstractProcessorLight implements Processor {
 	 * @throws IOException If an I/O error occurs during the processing of the
 	 *                     request
 	 */
-	protected void logAccess(Channel socketWrapper) throws IOException {
+	protected void logAccess(Channel channel) throws IOException {
 		// NO-OP by default
 	}
 

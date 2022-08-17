@@ -45,6 +45,10 @@ public class DispatchHandler implements Handler {
 				return;
 			}
 
+			if (event == SocketEvent.TIMEOUT) {
+				System.out.println();
+			}
+
 			// SocketProcessorBase<S> sc = endpoint.popSocketProcessor();
 			// if (sc == null) {
 			// sc = endpoint.createSocketProcessor(channel, event);

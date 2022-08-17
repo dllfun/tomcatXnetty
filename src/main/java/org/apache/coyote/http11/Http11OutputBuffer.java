@@ -22,7 +22,6 @@ import java.util.Arrays;
 
 import javax.servlet.http.HttpServletResponse;
 
-import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.CloseNowException;
 import org.apache.coyote.ErrorState;
 import org.apache.coyote.ResponseAction;
@@ -32,7 +31,6 @@ import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.FastHttpDateFormat;
 import org.apache.tomcat.util.http.MimeHeaders;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.SendfileDataBase;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;

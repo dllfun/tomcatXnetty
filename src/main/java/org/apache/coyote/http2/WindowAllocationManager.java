@@ -172,7 +172,7 @@ class WindowAllocationManager {
 				// to stream.notify(). Additional notify() calls may trigger
 				// unexpected timeouts.
 				waitingFor = NONE;
-				if (stream.getCoyoteRequest().getAsyncStateMachine().getWriteListener() == null) {
+				if (stream.getRequestData().getAsyncStateMachine().getWriteListener() == null) {
 					// Blocking, so use notify to release StreamOutputBuffer
 					if (log.isDebugEnabled()) {
 						log.debug(sm.getString("windowAllocationManager.notified", stream.getConnectionId(),

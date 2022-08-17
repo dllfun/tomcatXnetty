@@ -17,7 +17,6 @@
 package org.apache.tomcat.util.net;
 
 import java.io.IOException;
-import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ByteChannel;
 import java.nio.channels.GatheringByteChannel;
@@ -25,7 +24,6 @@ import java.nio.channels.ScatteringByteChannel;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 
-import org.apache.tomcat.util.buf.ByteBufferUtils;
 import org.apache.tomcat.util.net.NioEndpoint.NioSocketWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -67,6 +65,7 @@ public class NioChannel implements ByteChannel, ScatteringByteChannel, Gathering
 		this.socketChannel = channel;
 		this.socketWrapper = socketWrapper;
 		this.socketBufferHandler.reset();
+		System.out.println(socketChannel.socket().getPort() + " created");
 	}
 
 	/**
@@ -98,6 +97,7 @@ public class NioChannel implements ByteChannel, ScatteringByteChannel, Gathering
 	 */
 	@Override
 	public void close() throws IOException {
+		System.out.println(socketChannel.socket().getPort() + " closed");
 		socketChannel.close();
 	}
 

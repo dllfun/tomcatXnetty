@@ -309,7 +309,7 @@ class Http2Parser {
 		}
 
 		long errorCode = ByteUtil.getFourBytes(payload, 0);
-		output.reset(streamId, errorCode);
+		output.receiveReset(streamId, errorCode);
 		headersCurrentStream = -1;
 		headersEndStream = false;
 	}
@@ -323,7 +323,7 @@ class Http2Parser {
 
 		if (payloadSize == 0 && !ack) {
 			// Ensure empty SETTINGS frame increments the overhead count
-			output.setting(null, 0);
+			output.receiveSetting(null, 0);
 		} else {
 			// Process the settings
 			byte[] setting = new byte[6];
@@ -335,7 +335,7 @@ class Http2Parser {
 				}
 				int id = ByteUtil.getTwoBytes(setting, 0);
 				long value = ByteUtil.getFourBytes(setting, 2);
-				output.setting(Setting.valueOf(id), value);
+				output.receiveSetting(Setting.valueOf(id), value);
 			}
 		}
 		output.settingsEnd(ack);
@@ -382,7 +382,7 @@ class Http2Parser {
 		if (payloadSize > 8) {
 			debugData = new String(payload, 8, payloadSize - 8, StandardCharsets.UTF_8);
 		}
-		output.goaway(lastStreamId, errorCode, debugData);
+		output.receiveGoaway(lastStreamId, errorCode, debugData);
 	}
 
 	protected void readWindowUpdateFrame(int streamId, ByteBuffer buffer) throws Http2Exception, IOException {
@@ -727,10 +727,10 @@ class Http2Parser {
 		void reprioritise(int streamId, int parentStreamId, boolean exclusive, int weight) throws Http2Exception;
 
 		// Reset frames
-		void reset(int streamId, long errorCode) throws Http2Exception;
+		void receiveReset(int streamId, long errorCode) throws Http2Exception;
 
 		// Settings frames
-		void setting(Setting setting, long value) throws ConnectionException;
+		void receiveSetting(Setting setting, long value) throws ConnectionException;
 
 		void settingsEnd(boolean ack) throws IOException;
 
@@ -738,7 +738,7 @@ class Http2Parser {
 		void pingReceive(byte[] payload, boolean ack) throws IOException;
 
 		// Goaway
-		void goaway(int lastStreamId, long errorCode, String debugData);
+		void receiveGoaway(int lastStreamId, long errorCode, String debugData);
 
 		// Window size
 		void incrementWindowSize(int streamId, int increment) throws Http2Exception;

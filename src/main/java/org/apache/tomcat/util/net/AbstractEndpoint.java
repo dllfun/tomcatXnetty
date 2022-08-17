@@ -31,7 +31,6 @@ import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
 import org.apache.coyote.AbstractProtocol;
-import org.apache.coyote.http11.Http11NioProtocol;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.IntrospectionUtils;
@@ -105,7 +104,33 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 
 		@Override
 		public void processSocket(Channel channel, SocketEvent event, boolean dispatch) {
-			channel.close();
+			if (event == SocketEvent.OPEN_READ) {
+				if (channel instanceof SocketChannel) {
+					SocketChannel socketChannel = (SocketChannel) channel;
+					try {
+
+						StringBuffer sb = new StringBuffer();
+						sb.append("HTTP/1.1 200 OK\r\n");
+						sb.append("Server: nginx\r\n");
+						sb.append("Content-Length: 59\r\n");
+						sb.append("ContentType: text/html;charset=utf-8\r\n");
+						sb.append("Connection: close\r\n");
+						sb.append("\r\n");
+						sb.append("<!DOCTYPE html><html><head></head><body>error</body></html>");// 40
+
+						byte[] b = sb.toString().getBytes("utf-8");
+						socketChannel.write(true, b, 0, b.length);
+						socketChannel.flush(true);
+						socketChannel.registerReadInterest();
+						// socketChannel.close();
+					} catch (IOException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+				}
+			} else {
+				channel.close();
+			}
 		}
 
 		@Override

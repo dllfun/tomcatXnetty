@@ -1004,7 +1004,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 						}
 					}
 					if (nBytes == 0) {
-						getSocket().read(buffers, offset, length, timeout, unit, this, completion);
+						getSocket().read(buffers, offset, length, timeout, unit, this, completion);// TODO remove ,
 					}
 				} else {
 					// If there is still data inside the main write buffer, it needs to be written
@@ -1088,7 +1088,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 			} else {
 				Nio2Endpoint.startInline();
 				getSocket().read(to, Endpoint.toTimeout(getReadTimeout()), TimeUnit.MILLISECONDS, to,
-						readCompletionHandler);
+						readCompletionHandler);// TODO remove ,
 				Nio2Endpoint.endInline();
 				if (getReadPending().availablePermits() == 1) {
 					nRead = to.position();

@@ -38,7 +38,6 @@ import org.apache.coyote.UpgradeToken;
 import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.coyote.http11.upgrade.UpgradeProcessorInternal;
 import org.apache.tomcat.util.buf.StringUtils;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.SocketChannel;
 
 public class Http2Protocol implements UpgradeProtocol {
@@ -96,7 +95,7 @@ public class Http2Protocol implements UpgradeProtocol {
 	private AbstractProtocol<?> http11Protocol = null;
 
 	public Http2Protocol() {
-		setCompression("force");
+		// setCompression("force");
 	}
 
 	@Override
@@ -393,8 +392,8 @@ public class Http2Protocol implements UpgradeProtocol {
 	@Override
 	public void setHttp11Protocol(AbstractProtocol<?> http11Protocol) {
 		this.http11Protocol = http11Protocol;
-		this.readTimeout = http11Protocol.getConnectionTimeout();
-		this.writeTimeout = http11Protocol.getConnectionTimeout();
-		this.keepAliveTimeout = http11Protocol.getKeepAliveTimeout();
+		// this.readTimeout = http11Protocol.getConnectionTimeout();
+		// this.writeTimeout = http11Protocol.getConnectionTimeout();
+		// this.keepAliveTimeout = http11Protocol.getKeepAliveTimeout();
 	}
 }

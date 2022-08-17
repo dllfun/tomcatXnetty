@@ -118,6 +118,10 @@ public interface SocketChannel extends Channel {
 
 	public int getLocalPort();
 
+	public void registerReadInterest();
+
+	public void registerWriteInterest();
+
 	public boolean hasDataToRead();
 
 	public boolean hasDataToWrite();

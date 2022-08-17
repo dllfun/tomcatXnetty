@@ -36,7 +36,7 @@ public class UpgradeServletOutputStream extends ServletOutputStream {
 	private static final StringManager sm = StringManager.getManager(UpgradeServletOutputStream.class);
 
 	private final UpgradeProcessorBase processor;
-	private final SocketChannel socketWrapper;
+	private final SocketChannel channel;
 
 	// Used to ensure that isReady() and onWritePossible() have a consistent
 	// view of buffer and registered.
@@ -59,9 +59,9 @@ public class UpgradeServletOutputStream extends ServletOutputStream {
 	// Guarded by registeredLock
 	private boolean registered = false;
 
-	public UpgradeServletOutputStream(UpgradeProcessorBase processor, SocketChannel socketWrapper) {
+	public UpgradeServletOutputStream(UpgradeProcessorBase processor, SocketChannel channel) {
 		this.processor = processor;
-		this.socketWrapper = socketWrapper;
+		this.channel = channel;
 	}
 
 	@Override
@@ -86,7 +86,7 @@ public class UpgradeServletOutputStream extends ServletOutputStream {
 				// registrations will cause problems.
 				return false;
 			} else {
-				boolean result = socketWrapper.isReadyForWrite();
+				boolean result = channel.isReadyForWrite();
 				registered = !result;
 				return result;
 			}
@@ -112,7 +112,7 @@ public class UpgradeServletOutputStream extends ServletOutputStream {
 			if (ContainerThreadMarker.isContainerThread()) {
 				processor.addDispatch(DispatchType.NON_BLOCKING_WRITE);
 			} else {
-				socketWrapper.registerWriteInterest();
+				channel.registerWriteInterest();
 			}
 		}
 
@@ -148,12 +148,12 @@ public class UpgradeServletOutputStream extends ServletOutputStream {
 		try {
 			synchronized (writeLock) {
 				if (updateFlushing) {
-					flushing = socketWrapper.flush(block);
+					flushing = channel.flush(block);
 					if (flushing) {
-						socketWrapper.registerWriteInterest();
+						channel.registerWriteInterest();
 					}
 				} else {
-					socketWrapper.flush(block);
+					channel.flush(block);
 				}
 			}
 		} catch (Throwable t) {
@@ -177,7 +177,7 @@ public class UpgradeServletOutputStream extends ServletOutputStream {
 	}
 
 	private void preWriteChecks() {
-		if (listener != null && !socketWrapper.canWrite()) {
+		if (listener != null && !channel.canWrite()) {
 			throw new IllegalStateException(sm.getString("upgrade.sos.write.ise"));
 		}
 		if (closed) {
@@ -191,9 +191,9 @@ public class UpgradeServletOutputStream extends ServletOutputStream {
 	private void writeInternal(byte[] b, int off, int len) throws IOException {
 		if (listener == null) {
 			// Simple case - blocking IO
-			socketWrapper.write(true, b, off, len);
+			channel.write(true, b, off, len);
 		} else {
-			socketWrapper.write(false, b, off, len);
+			channel.write(false, b, off, len);
 		}
 	}
 
@@ -220,7 +220,7 @@ public class UpgradeServletOutputStream extends ServletOutputStream {
 		// should fire
 		boolean fire = false;
 		synchronized (registeredLock) {
-			if (socketWrapper.isReadyForWrite()) {
+			if (channel.isReadyForWrite()) {
 				registered = false;
 				fire = true;
 			} else {

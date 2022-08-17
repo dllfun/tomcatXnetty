@@ -995,13 +995,13 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 //	}
 
 	protected void longPoll(Channel channel, Processor processor) {
-		if (!processor.isAsync()) {
+		if (!processor.isAsync() && channel instanceof SocketChannel) {
 			// This is currently only used with HTTP
 			// Either:
 			// - this is an upgraded connection
 			// - the request line/headers have not been completely
 			// read
-			channel.registerReadInterest();
+			((SocketChannel) channel).registerReadInterest();
 		}
 	}
 

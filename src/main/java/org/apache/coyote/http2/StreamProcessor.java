@@ -50,8 +50,7 @@ class StreamProcessor extends AbstractProcessor {
 	private final Http2OutputBuffer http2OutputBuffer;
 
 	StreamProcessor(Http2UpgradeHandler handler, Stream stream, Adapter adapter) {
-		super(handler.getProtocol().getHttp11Protocol(), adapter, stream.getCoyoteRequest(),
-				stream.getCoyoteResponse());
+		super(handler.getProtocol().getHttp11Protocol(), adapter, stream.getRequestData(), stream.getResponseData());
 		this.handler = handler;
 		this.stream = stream;
 		this.stream.setCurrentProcessor(this);

@@ -34,6 +34,7 @@ public abstract class AbstractChannel implements Channel {
 		this.error = error;
 	}
 
+	@Override
 	public void checkError() throws IOException {
 		if (error != null) {
 			throw error;
@@ -48,16 +49,6 @@ public abstract class AbstractChannel implements Channel {
 	@Override
 	public void setCurrentProcessor(Object currentProcessor) {
 		this.currentProcessor = currentProcessor;
-	}
-
-	@Override
-	public void registerReadInterest() {
-		throw new UnsupportedOperationException();
-	}
-
-	@Override
-	public void registerWriteInterest() {
-		throw new UnsupportedOperationException();
 	}
 
 	@Override

@@ -64,7 +64,7 @@ public interface UpgradeProtocol {
 	 *
 	 * @return A processor instance for processing a connection using this protocol.
 	 */
-	public Processor getProcessor(SocketChannel socketWrapper, Adapter adapter);
+	public Processor getProcessor(SocketChannel channel, Adapter adapter);
 
 	/**
 	 * @param socketWrapper The socket

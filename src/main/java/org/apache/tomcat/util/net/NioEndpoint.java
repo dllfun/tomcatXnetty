@@ -103,7 +103,8 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 	// ------------------------------------------------------------- Properties
 
 	public NioEndpoint() {
-		setUseAsyncIO(false);
+		// TODO remove
+		// setUseAsyncIO(false);
 	}
 
 	/**
@@ -387,7 +388,6 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 				channel = nioChannels.pop();
 			}
 			if (channel == null) {
-
 				if (isSSLEnabled()) {
 					channel = new SecureNioChannel(socketProperties, selectorPool, this);
 				} else {
@@ -445,7 +445,6 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 	@Override
 	protected SocketChannel serverSocketAccept() throws Exception {
 		SocketChannel socketChannel = serverSock.accept();
-		System.out.println(socketChannel.socket().getPort() + " created");
 		return socketChannel;
 	}
 
