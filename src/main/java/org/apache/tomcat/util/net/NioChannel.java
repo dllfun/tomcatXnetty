@@ -34,24 +34,19 @@ import org.apache.tomcat.util.res.StringManager;
  *
  * @version 1.0
  */
-public class NioChannel implements ByteChannel, ScatteringByteChannel, GatheringByteChannel {
+public class NioChannel extends SocketBufferHandler
+		implements ByteChannel, ScatteringByteChannel, GatheringByteChannel {
 
 	protected static final StringManager sm = StringManager.getManager(NioChannel.class);
 
 	protected static final ByteBuffer emptyBuf = ByteBuffer.allocate(0);
 
-	protected final SocketBufferHandler socketBufferHandler;
+	// protected final SocketBufferHandler socketBufferHandler;
 	protected SocketChannel socketChannel = null;
 	protected NioSocketWrapper socketWrapper = null;
 
-	public NioChannel(SocketProperties socketProperties) {
-		if (socketProperties != null) {
-			SocketBufferHandler socketBufferHandler = new SocketBufferHandler(socketProperties.getAppReadBufSize(),
-					socketProperties.getAppWriteBufSize(), socketProperties.getDirectBuffer());
-			this.socketBufferHandler = socketBufferHandler;
-		} else {
-			this.socketBufferHandler = SocketBufferHandler.EMPTY;
-		}
+	public NioChannel(int readBufferSize, int writeBufferSize, boolean direct) {
+		super(readBufferSize, writeBufferSize, direct);
 	}
 
 	/**
@@ -64,7 +59,7 @@ public class NioChannel implements ByteChannel, ScatteringByteChannel, Gathering
 	public void reset(SocketChannel channel, NioSocketWrapper socketWrapper) throws IOException {
 		this.socketChannel = channel;
 		this.socketWrapper = socketWrapper;
-		this.socketBufferHandler.reset();
+		super.reset();
 		System.out.println(socketChannel.socket().getPort() + " created");
 	}
 
@@ -72,7 +67,7 @@ public class NioChannel implements ByteChannel, ScatteringByteChannel, Gathering
 	 * Free the channel memory
 	 */
 	public void free() {
-		socketBufferHandler.free();
+		super.free();
 	}
 
 	/**
@@ -171,9 +166,9 @@ public class NioChannel implements ByteChannel, ScatteringByteChannel, Gathering
 		return socketChannel.read(dsts, offset, length);
 	}
 
-	protected SocketBufferHandler getBufHandler() {
-		return socketBufferHandler;
-	}
+	// protected SocketBufferHandler getBufHandler() {
+	// return socketBufferHandler;
+	// }
 
 	public SocketChannel getIOChannel() {
 		return socketChannel;
@@ -247,7 +242,12 @@ public class NioChannel implements ByteChannel, ScatteringByteChannel, Gathering
 		return appReadBufHandler;
 	}
 
-	static final NioChannel CLOSED_NIO_CHANNEL = new NioChannel(null) {
+	static final NioChannel CLOSED_NIO_CHANNEL = new NioChannel(0, 0, false) {
+
+		@Override
+		public void expand(int newSize) {
+		}
+
 		@Override
 		public void close() throws IOException {
 		}

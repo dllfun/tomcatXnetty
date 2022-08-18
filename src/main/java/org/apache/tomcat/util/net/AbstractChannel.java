@@ -19,6 +19,8 @@ public abstract class AbstractChannel implements Channel {
 
 	private volatile Throwable closeException = null;
 
+	private volatile boolean processing = false;
+
 	@Override
 	public IOException getError() {
 		return error;
@@ -59,6 +61,14 @@ public abstract class AbstractChannel implements Channel {
 	@Override
 	public Throwable getCloseException() {
 		return closeException;
+	}
+
+	public boolean isProcessing() {
+		return processing;
+	}
+
+	public void setProcessing(boolean processing) {
+		this.processing = processing;
 	}
 
 }

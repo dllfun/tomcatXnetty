@@ -97,7 +97,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	}
 
 	protected void reset(E closedSocket) {
-		socket = closedSocket;
+		this.socket = closedSocket;
 	}
 
 	protected AbstractEndpoint<E, ?> getEndpoint() {

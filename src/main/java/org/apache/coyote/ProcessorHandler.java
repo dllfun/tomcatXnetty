@@ -166,7 +166,9 @@ public class ProcessorHandler implements Handler {
 			do {
 				try {
 					processor.beforeProcess();
+					channel.setProcessing(true);
 					state = processor.process(channel, event);
+					channel.setProcessing(false);
 				} finally {
 					processor.afterProcess();
 				}

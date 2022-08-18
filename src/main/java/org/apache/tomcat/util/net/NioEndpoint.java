@@ -391,7 +391,8 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 				if (isSSLEnabled()) {
 					channel = new SecureNioChannel(socketProperties, selectorPool, this);
 				} else {
-					channel = new NioChannel(socketProperties);
+					channel = new NioChannel(socketProperties.getAppReadBufSize(),
+							socketProperties.getAppWriteBufSize(), socketProperties.getDirectBuffer());
 				}
 			}
 			NioSocketWrapper newWrapper = new NioSocketWrapper(channel, this);
@@ -598,7 +599,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 							// We are registering the key to start with, reset the fairness counter.
 							try {
 								int ops = key.interestOps() | interestOps;
-								attachment.interestOps(ops);
+								// attachment.interestOps(ops);
 								key.interestOps(ops);
 							} catch (CancelledKeyException ckx) {
 								cancelledKey(key, socketWrapper);
@@ -624,7 +625,8 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		 * @param socketWrapper The socket wrapper
 		 */
 		public void register(final NioSocketWrapper socketWrapper) {
-			socketWrapper.interestOps(SelectionKey.OP_READ);// this is what OP_REGISTER turns into.
+			// socketWrapper.interestOps(SelectionKey.OP_READ);// this is what OP_REGISTER
+			// turns into.
 			PollerEvent event = null;
 			if (eventCache != null) {
 				event = eventCache.pop();
@@ -898,7 +900,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 
 		protected void reg(SelectionKey sk, NioSocketWrapper socketWrapper, int intops) {
 			sk.interestOps(intops);
-			socketWrapper.interestOps(intops);
+			// socketWrapper.interestOps(intops);
 		}
 
 		protected void timeout(int keyCount, boolean hasEvents) {
@@ -925,14 +927,14 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 						} else if (close) {
 							key.interestOps(0);
 							// Avoid duplicate stop calls
-							socketWrapper.interestOps(0);
+							// socketWrapper.interestOps(0);
 							cancelledKey(key, socketWrapper);
-						} else if ((socketWrapper.interestOps() & SelectionKey.OP_READ) == SelectionKey.OP_READ
-								|| (socketWrapper.interestOps() & SelectionKey.OP_WRITE) == SelectionKey.OP_WRITE) {
+						} else if ((key.interestOps() & SelectionKey.OP_READ) == SelectionKey.OP_READ
+								|| (key.interestOps() & SelectionKey.OP_WRITE) == SelectionKey.OP_WRITE) {
 							boolean readTimeout = false;
 							boolean writeTimeout = false;
 							// Check for read timeout
-							if ((socketWrapper.interestOps() & SelectionKey.OP_READ) == SelectionKey.OP_READ) {
+							if ((key.interestOps() & SelectionKey.OP_READ) == SelectionKey.OP_READ) {
 								long delta = now - socketWrapper.getLastRead();
 								long timeout = socketWrapper.getReadTimeout();
 								if (timeout > 0 && delta > timeout) {
@@ -940,8 +942,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 								}
 							}
 							// Check for write timeout
-							if (!readTimeout
-									&& (socketWrapper.interestOps() & SelectionKey.OP_WRITE) == SelectionKey.OP_WRITE) {
+							if (!readTimeout && (key.interestOps() & SelectionKey.OP_WRITE) == SelectionKey.OP_WRITE) {
 								long delta = now - socketWrapper.getLastWrite();
 								long timeout = socketWrapper.getWriteTimeout();
 								if (timeout > 0 && delta > timeout) {
@@ -951,7 +952,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 							if (readTimeout || writeTimeout) {
 								key.interestOps(0);
 								// Avoid duplicate timeout calls
-								socketWrapper.interestOps(0);
+								// socketWrapper.interestOps(0);
 								socketWrapper.setError(new SocketTimeoutException());
 								if (readTimeout && socketWrapper.getReadOperation() != null) {
 									if (!socketWrapper.getReadOperation().process()) {
@@ -995,7 +996,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		private final SynchronizedStack<NioChannel> nioChannels;
 		private final Poller poller;
 
-		private int interestOps = 0;
+		// private int interestOps = 0;
 		private CountDownLatch readLatch = null;
 		private CountDownLatch writeLatch = null;
 		private volatile SendfileData sendfileData = null;
@@ -1007,21 +1008,21 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 			pool = endpoint.getSelectorPool();
 			nioChannels = endpoint.getNioChannels();
 			poller = endpoint.getPoller();
-			// setSocketBufferHandler(channel.getBufHandler());
+			// setSocketBufferHandler(channel);
 		}
 
 		public Poller getPoller() {
 			return poller;
 		}
 
-		public int interestOps() {
-			return interestOps;
-		}
+		// public int interestOps() {
+		// return interestOps;
+		// }
 
-		public int interestOps(int ops) {
-			this.interestOps = ops;
-			return ops;
-		}
+		// public int interestOps(int ops) {
+		// this.interestOps = ops;
+		// return ops;
+		// }
 
 		public CountDownLatch getReadLatch() {
 			return readLatch;
@@ -1117,20 +1118,20 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 
 		@Override
 		protected SocketBufferHandler getSocketBufferHandler() {
-			return getSocket().getBufHandler();
+			return getSocket();
 		}
 
 		@Override
 		public boolean isReadyForRead() throws IOException {
-			getSocket().getBufHandler().configureReadBufferForRead();
+			getSocket().configureReadBufferForRead();
 
-			if (getSocket().getBufHandler().getReadBuffer().remaining() > 0) {
+			if (getSocket().getReadBuffer().remaining() > 0) {
 				return true;
 			}
 
 			fillReadBuffer(false);
 
-			boolean isReady = getSocket().getBufHandler().getReadBuffer().position() > 0;
+			boolean isReady = getSocket().getReadBuffer().position() > 0;
 			return isReady;
 		}
 
@@ -1154,9 +1155,9 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 			// Fill as much of the remaining byte array as possible with the
 			// data that was just read
 			if (nRead > 0) {
-				getSocket().getBufHandler().configureReadBufferForRead();
+				getSocket().configureReadBufferForRead();
 				nRead = Math.min(nRead, len);
-				getSocket().getBufHandler().getReadBuffer().get(b, off, nRead);
+				getSocket().getReadBuffer().get(b, off, nRead);
 			}
 			return nRead;
 		}
@@ -1175,7 +1176,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 			}
 
 			// The socket read buffer capacity is socket.appReadBufSize
-			int limit = getSocket().getBufHandler().getReadBuffer().capacity();
+			int limit = getSocket().getReadBuffer().capacity();
 			if (to.remaining() >= limit) {
 				to.limit(to.position() + limit);
 				nRead = fillReadBuffer(block, to);
@@ -1240,8 +1241,8 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		}
 
 		private int fillReadBuffer(boolean block) throws IOException {
-			getSocket().getBufHandler().configureReadBufferForWrite();
-			return fillReadBuffer(block, getSocket().getBufHandler().getReadBuffer());
+			getSocket().configureReadBufferForWrite();
+			return fillReadBuffer(block, getSocket().getReadBuffer());
 		}
 
 		private int fillReadBuffer(boolean block, ByteBuffer to) throws IOException {
@@ -1316,6 +1317,10 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 
 		@Override
 		public void registerReadInterest() {
+			if (isProcessing()) {
+				// registe will be handled by processor
+				return;
+			}
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("endpoint.debug.registerRead", this));
 			}
@@ -1484,13 +1489,11 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 							}
 							if (read) {
 								// Read from main buffer first
-								if (!getSocket().getBufHandler().isReadBufferEmpty()) {
+								if (!getSocket().isReadBufferEmpty()) {
 									// There is still data inside the main read buffer, it needs to be read first
-									getSocket().getBufHandler().configureReadBufferForRead();
-									for (int i = 0; i < length
-											&& !getSocket().getBufHandler().isReadBufferEmpty(); i++) {
-										nBytes += transfer(getSocket().getBufHandler().getReadBuffer(),
-												buffers[offset + i]);
+									getSocket().configureReadBufferForRead();
+									for (int i = 0; i < length && !getSocket().isReadBufferEmpty(); i++) {
+										nBytes += transfer(getSocket().getReadBuffer(), buffers[offset + i]);
 									}
 								}
 								if (nBytes == 0) {
@@ -1500,14 +1503,14 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 							} else {
 								boolean doWrite = true;
 								// Write from main buffer first
-								if (!getSocket().getBufHandler().isWriteBufferEmpty()) {
+								if (!getSocket().isWriteBufferEmpty()) {
 									// There is still data inside the main write buffer, it needs to be written
 									// first
-									getSocket().getBufHandler().configureWriteBufferForRead();
+									getSocket().configureWriteBufferForRead();
 									do {
-										nBytes = getSocket().write(getSocket().getBufHandler().getWriteBuffer());
-									} while (!getSocket().getBufHandler().isWriteBufferEmpty() && nBytes > 0);
-									if (!getSocket().getBufHandler().isWriteBufferEmpty()) {
+										nBytes = getSocket().write(getSocket().getWriteBuffer());
+									} while (!getSocket().isWriteBufferEmpty() && nBytes > 0);
+									if (!getSocket().isWriteBufferEmpty()) {
 										doWrite = false;
 									}
 									// Preserve a negative value since it is an error

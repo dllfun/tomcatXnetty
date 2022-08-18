@@ -71,7 +71,8 @@ public class SecureNioChannel extends NioChannel {
 	protected NioSelectorPool pool;
 
 	public SecureNioChannel(SocketProperties socketProperties, NioSelectorPool pool, NioEndpoint endpoint) {
-		super(socketProperties);
+		super(socketProperties.getAppReadBufSize(), socketProperties.getAppWriteBufSize(),
+				socketProperties.getDirectBuffer());
 
 		// Create the network buffers (these hold the encrypted data).
 		if (endpoint.getSocketProperties().getDirectSslBuffer()) {
@@ -362,7 +363,7 @@ public class SecureNioChannel extends NioChannel {
 
 		// Ensure the application buffers (which have to be created earlier) are
 		// big enough.
-		getBufHandler().expand(sslEngine.getSession().getApplicationBufferSize());
+		expand(sslEngine.getSession().getApplicationBufferSize());
 		if (netOutBuffer.capacity() < sslEngine.getSession().getApplicationBufferSize()) {
 			// Info for now as we may need to increase DEFAULT_NET_BUFFER_SIZE
 			log.info(sm.getString("channel.nio.ssl.expandNetOutBuffer",
@@ -401,10 +402,10 @@ public class SecureNioChannel extends NioChannel {
 		if (netOutBuffer.position() > 0 && netOutBuffer.position() < netOutBuffer.limit()) {
 			throw new IOException(sm.getString("channel.nio.ssl.netOutputNotEmpty"));
 		}
-		if (!getBufHandler().isReadBufferEmpty()) {
+		if (!isReadBufferEmpty()) {
 			throw new IOException(sm.getString("channel.nio.ssl.appInputNotEmpty"));
 		}
-		if (!getBufHandler().isWriteBufferEmpty()) {
+		if (!isWriteBufferEmpty()) {
 			throw new IOException(sm.getString("channel.nio.ssl.appOutputNotEmpty"));
 		}
 		handshakeComplete = false;
@@ -491,9 +492,9 @@ public class SecureNioChannel extends NioChannel {
 			// so we can clear it here.
 			netOutBuffer.clear();
 			// perform the wrap
-			// getBufHandler().configureWriteBufferForRead();
+			// configureWriteBufferForRead();
 			int pos = netOutBuffer.position();
-			result = sslEngine.wrap(getEmptyBuf(), netOutBuffer);// getBufHandler().getWriteBuffer()
+			result = sslEngine.wrap(getEmptyBuf(), netOutBuffer);// getWriteBuffer()
 			printOutBuffer(pos);
 			// prepare the results to be written
 			netOutBuffer.flip();
@@ -561,7 +562,7 @@ public class SecureNioChannel extends NioChannel {
 
 			// prepare the buffer with the incoming data
 			// call unwrap
-			// getBufHandler().configureReadBufferForWrite();
+			// configureReadBufferForWrite();
 
 			result = sslEngine.unwrap(netInBuffer, buffer);
 
@@ -671,7 +672,7 @@ public class SecureNioChannel extends NioChannel {
 	 *         channel has reached end-of-stream
 	 * @throws IOException              If some other I/O error occurs
 	 * @throws IllegalArgumentException if the destination buffer is different than
-	 *                                  getBufHandler().getReadBuffer()
+	 *                                  getReadBuffer()
 	 */
 	@Override
 	public int read(ByteBuffer dst) throws IOException {
@@ -732,10 +733,10 @@ public class SecureNioChannel extends NioChannel {
 				} else {
 					// The SSL session has increased the required buffer size
 					// since the buffer was created.
-					if (dst == getBufHandler().getReadBuffer()) {
+					if (dst == getReadBuffer()) {
 						// This is the normal case for this code
-						getBufHandler().expand(sslEngine.getSession().getApplicationBufferSize());
-						dst = getBufHandler().getReadBuffer();
+						expand(sslEngine.getSession().getApplicationBufferSize());
+						dst = getReadBuffer();
 					} else if (getAppReadBufHandler() != null && dst == getAppReadBufHandler().getByteBuffer()) {
 						getAppReadBufHandler().expand(sslEngine.getSession().getApplicationBufferSize());
 						dst = getAppReadBufHandler().getByteBuffer();
@@ -797,7 +798,7 @@ public class SecureNioChannel extends NioChannel {
 				read += unwrap.bytesProduced();
 				if (overflowState == OverflowState.DONE) {
 					// Remove the data read into the overflow buffer
-					read -= getBufHandler().getReadBuffer().position();
+					read -= getReadBuffer().position();
 				}
 				// perform any tasks if needed
 				if (unwrap.getHandshakeStatus() == HandshakeStatus.NEED_TASK) {
@@ -814,18 +815,18 @@ public class SecureNioChannel extends NioChannel {
 					// read is attempted
 					break;
 				} else {
-					ByteBuffer readBuffer = getBufHandler().getReadBuffer();
+					ByteBuffer readBuffer = getReadBuffer();
 					boolean found = false;
 					boolean resized = true;
 					for (int i = 0; i < length; i++) {
 						// The SSL session has increased the required buffer size
 						// since the buffer was created.
-						if (dsts[offset + i] == getBufHandler().getReadBuffer()) {
-							getBufHandler().expand(sslEngine.getSession().getApplicationBufferSize());
-							if (dsts[offset + i] == getBufHandler().getReadBuffer()) {
+						if (dsts[offset + i] == getReadBuffer()) {
+							expand(sslEngine.getSession().getApplicationBufferSize());
+							if (dsts[offset + i] == getReadBuffer()) {
 								resized = false;
 							}
-							dsts[offset + i] = getBufHandler().getReadBuffer();
+							dsts[offset + i] = getReadBuffer();
 							found = true;
 						} else if (getAppReadBufHandler() != null
 								&& dsts[offset + i] == getAppReadBufHandler().getByteBuffer()) {
@@ -855,7 +856,7 @@ public class SecureNioChannel extends NioChannel {
 						}
 						dsts = dsts2;
 						length++;
-						getBufHandler().configureReadBufferForWrite();
+						configureReadBufferForWrite();
 						overflowState = OverflowState.PROCESSING;
 					}
 				}

@@ -35,22 +35,16 @@ import org.apache.tomcat.util.buf.ByteBufferUtils;
  * for an SSL socket channel remains the same as for a non SSL, making sure we
  * don't need to code for any exception cases.
  */
-public class Nio2Channel implements AsynchronousByteChannel {
+public class Nio2Channel extends SocketBufferHandler implements AsynchronousByteChannel {
 
 	protected static final ByteBuffer emptyBuf = ByteBuffer.allocate(0);
 
-	protected final SocketBufferHandler socketBufferHandler;
+	// protected final SocketBufferHandler socketBufferHandler;
 	protected AsynchronousSocketChannel sc = null;
 	protected SocketWrapperBase<Nio2Channel> socketWrapper = null;
 
-	public Nio2Channel(SocketProperties socketProperties) {
-		if (socketProperties != null) {
-			SocketBufferHandler socketBufferHandler = new SocketBufferHandler(socketProperties.getAppReadBufSize(),
-					socketProperties.getAppWriteBufSize(), socketProperties.getDirectBuffer());
-			this.socketBufferHandler = socketBufferHandler;
-		} else {
-			this.socketBufferHandler = SocketBufferHandler.EMPTY;
-		}
+	public Nio2Channel(int readBufferSize, int writeBufferSize, boolean direct) {
+		super(readBufferSize, writeBufferSize, direct);
 	}
 
 	/**
@@ -66,14 +60,14 @@ public class Nio2Channel implements AsynchronousByteChannel {
 			throws IOException {
 		this.sc = channel;
 		this.socketWrapper = socketWrapper;
-		socketBufferHandler.reset();
+		super.reset();
 	}
 
 	/**
 	 * Free the channel memory
 	 */
 	public void free() {
-		socketBufferHandler.free();
+		super.free();
 	}
 
 	// SocketWrapperBase<Nio2Channel> getSocketWrapper() {
@@ -113,9 +107,9 @@ public class Nio2Channel implements AsynchronousByteChannel {
 		return sc.isOpen();
 	}
 
-	protected SocketBufferHandler getBufHandler() {
-		return socketBufferHandler;
-	}
+	// protected SocketBufferHandler getBufHandler() {
+	// return socketBufferHandler;
+	// }
 
 	public AsynchronousSocketChannel getIOChannel() {
 		return sc;
@@ -260,7 +254,12 @@ public class Nio2Channel implements AsynchronousByteChannel {
 		}
 	};
 
-	static final Nio2Channel CLOSED_NIO2_CHANNEL = new Nio2Channel(null) {
+	static final Nio2Channel CLOSED_NIO2_CHANNEL = new Nio2Channel(0, 0, false) {
+
+		@Override
+		public void expand(int newSize) {
+		}
+
 		@Override
 		public void close() throws IOException {
 		}

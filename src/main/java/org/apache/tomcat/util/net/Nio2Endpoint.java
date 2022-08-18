@@ -288,7 +288,8 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				if (isSSLEnabled()) {
 					channel = new SecureNio2Channel(socketProperties, this);
 				} else {
-					channel = new Nio2Channel(socketProperties);
+					channel = new Nio2Channel(socketProperties.getAppReadBufSize(),
+							socketProperties.getAppWriteBufSize(), socketProperties.getDirectBuffer());
 				}
 			}
 			Nio2SocketWrapper newWrapper = new Nio2SocketWrapper(channel, this);
@@ -459,7 +460,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					return;
 				}
 				attachment.pos += nWrite.intValue();
-				ByteBuffer buffer = getSocket().getBufHandler().getWriteBuffer();
+				ByteBuffer buffer = getSocket().getWriteBuffer();
 				if (!buffer.hasRemaining()) {
 					if (attachment.length <= 0) {
 						// All data has now been written
@@ -494,7 +495,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 						}
 						return;
 					} else {
-						getSocket().getBufHandler().configureWriteBufferForWrite();
+						getSocket().configureWriteBufferForWrite();
 						int nRead = -1;
 						try {
 							nRead = attachment.fchannel.read(buffer);
@@ -503,7 +504,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 							return;
 						}
 						if (nRead > 0) {
-							getSocket().getBufHandler().configureWriteBufferForRead();
+							getSocket().configureWriteBufferForRead();
 							if (attachment.length < buffer.remaining()) {
 								buffer.limit(buffer.limit() - buffer.remaining() + (int) attachment.length);
 							}
@@ -718,7 +719,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 
 		@Override
 		protected SocketBufferHandler getSocketBufferHandler() {
-			return getSocket().getBufHandler();
+			return getSocket();
 		}
 
 		@Override
@@ -734,7 +735,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					return false;
 				}
 				// It is possible to read directly from the buffer contents
-				if (!getSocket().getBufHandler().isReadBufferEmpty()) {
+				if (!getSocket().isReadBufferEmpty()) {
 					getReadPending().release();
 					return true;
 				}
@@ -760,7 +761,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					return false;
 				}
 				// If the buffer is empty, it is possible to write to it
-				if (getSocket().getBufHandler().isWriteBufferEmpty() && nonBlockingWriteBuffer.isEmpty()) {
+				if (getSocket().isWriteBufferEmpty() && nonBlockingWriteBuffer.isEmpty()) {
 					getWritePending().release();
 					return true;
 				}
@@ -820,9 +821,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				// Fill as much of the remaining byte array as possible with the
 				// data that was just read
 				if (nRead > 0) {
-					getSocket().getBufHandler().configureReadBufferForRead();
+					getSocket().configureReadBufferForRead();
 					nRead = Math.min(nRead, len);
-					getSocket().getBufHandler().getReadBuffer().get(b, off, nRead);
+					getSocket().getReadBuffer().get(b, off, nRead);
 				} else if (nRead == 0 && !block) {
 					readInterest = true;
 				}
@@ -872,7 +873,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 
 			synchronized (readCompletionHandler) {
 				// The socket read buffer capacity is socket.appReadBufSize
-				int limit = getSocket().getBufHandler().getReadBuffer().capacity();
+				int limit = getSocket().getReadBuffer().capacity();
 				if (block && to.remaining() >= limit) {
 					to.limit(to.position() + limit);
 					nRead = fillReadBuffer(block, to);
@@ -992,11 +993,11 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				if (read) {
 					long nBytes = 0;
 					// If there is still data inside the main read buffer, it needs to be read first
-					if (!getSocket().getBufHandler().isReadBufferEmpty()) {
+					if (!getSocket().isReadBufferEmpty()) {
 						synchronized (readCompletionHandler) {
-							getSocket().getBufHandler().configureReadBufferForRead();
-							for (int i = 0; i < length && !getSocket().getBufHandler().isReadBufferEmpty(); i++) {
-								nBytes += transfer(getSocket().getBufHandler().getReadBuffer(), buffers[offset + i]);
+							getSocket().configureReadBufferForRead();
+							for (int i = 0; i < length && !getSocket().isReadBufferEmpty(); i++) {
+								nBytes += transfer(getSocket().getReadBuffer(), buffers[offset + i]);
 							}
 						}
 						if (nBytes > 0) {
@@ -1009,11 +1010,10 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				} else {
 					// If there is still data inside the main write buffer, it needs to be written
 					// first
-					if (!getSocket().getBufHandler().isWriteBufferEmpty()) {
+					if (!getSocket().isWriteBufferEmpty()) {
 						synchronized (writeCompletionHandler) {
-							getSocket().getBufHandler().configureWriteBufferForRead();
-							ByteBuffer[] array = nonBlockingWriteBuffer
-									.toArray(getSocket().getBufHandler().getWriteBuffer());
+							getSocket().configureWriteBufferForRead();
+							ByteBuffer[] array = nonBlockingWriteBuffer.toArray(getSocket().getWriteBuffer());
 							if (buffersArrayHasRemaining(array, 0, array.length)) {
 								getSocket().write(array, 0, array.length, timeout, unit, array,
 										new CompletionHandler<Long, ByteBuffer[]>() {
@@ -1053,8 +1053,8 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		 * semaphore once the read has completed.
 		 */
 		private int fillReadBuffer(boolean block) throws IOException {
-			getSocket().getBufHandler().configureReadBufferForWrite();
-			return fillReadBuffer(block, getSocket().getBufHandler().getReadBuffer());
+			getSocket().configureReadBufferForWrite();
+			return fillReadBuffer(block, getSocket().getReadBuffer());
 		}
 
 		private int fillReadBuffer(boolean block, ByteBuffer to) throws IOException {
@@ -1120,8 +1120,8 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				if (writeNotify || getWritePending().tryAcquire()) {
 					// No pending completion handler, so writing to the main buffer
 					// is possible
-					getSocket().getBufHandler().configureWriteBufferForWrite();
-					int thisTime = transfer(buf, off, len, getSocket().getBufHandler().getWriteBuffer());
+					getSocket().configureWriteBufferForWrite();
+					int thisTime = transfer(buf, off, len, getSocket().getWriteBuffer());
 					len = len - thisTime;
 					off = off + thisTime;
 					if (len > 0) {
@@ -1170,8 +1170,8 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				if (writeNotify || getWritePending().tryAcquire()) {
 					// No pending completion handler, so writing to the main buffer
 					// is possible
-					getSocket().getBufHandler().configureWriteBufferForWrite();
-					transfer(from, getSocket().getBufHandler().getWriteBuffer());
+					getSocket().configureWriteBufferForWrite();
+					transfer(from, getSocket().getWriteBuffer());
 					if (from.remaining() > 0) {
 						// Remaining data must be buffered
 						nonBlockingWriteBuffer.add(from);
@@ -1247,20 +1247,18 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				if (writeNotify || hasPermit || getWritePending().tryAcquire()) {
 					// The code that was notified is now writing its data
 					writeNotify = false;
-					getSocket().getBufHandler().configureWriteBufferForRead();
+					getSocket().configureWriteBufferForRead();
 					if (!nonBlockingWriteBuffer.isEmpty()) {
-						ByteBuffer[] array = nonBlockingWriteBuffer
-								.toArray(getSocket().getBufHandler().getWriteBuffer());
+						ByteBuffer[] array = nonBlockingWriteBuffer.toArray(getSocket().getWriteBuffer());
 						Nio2Endpoint.startInline();
 						getSocket().write(array, 0, array.length, Endpoint.toTimeout(getWriteTimeout()),
 								TimeUnit.MILLISECONDS, array, gatheringWriteCompletionHandler);
 						Nio2Endpoint.endInline();
-					} else if (getSocket().getBufHandler().getWriteBuffer().hasRemaining()) {
+					} else if (getSocket().getWriteBuffer().hasRemaining()) {
 						// Regular write
 						Nio2Endpoint.startInline();
-						getSocket().write(getSocket().getBufHandler().getWriteBuffer(),
-								Endpoint.toTimeout(getWriteTimeout()), TimeUnit.MILLISECONDS,
-								getSocket().getBufHandler().getWriteBuffer(), writeCompletionHandler);
+						getSocket().write(getSocket().getWriteBuffer(), Endpoint.toTimeout(getWriteTimeout()),
+								TimeUnit.MILLISECONDS, getSocket().getWriteBuffer(), writeCompletionHandler);
 						Nio2Endpoint.endInline();
 					} else {
 						// Nothing was written
@@ -1277,15 +1275,15 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		@Override
 		public boolean hasDataToRead() {
 			synchronized (readCompletionHandler) {
-				return !getSocket().getBufHandler().isReadBufferEmpty() || readNotify || getError() != null;
+				return !getSocket().isReadBufferEmpty() || readNotify || getError() != null;
 			}
 		}
 
 		@Override
 		public boolean hasDataToWrite() {
 			synchronized (writeCompletionHandler) {
-				return !getSocket().getBufHandler().isWriteBufferEmpty() || !nonBlockingWriteBuffer.isEmpty()
-						|| writeNotify || getWritePending().availablePermits() == 0 || getError() != null;
+				return !getSocket().isWriteBufferEmpty() || !nonBlockingWriteBuffer.isEmpty() || writeNotify
+						|| getWritePending().availablePermits() == 0 || getError() != null;
 			}
 		}
 
@@ -1409,8 +1407,8 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					return SendfileState.ERROR;
 				}
 			}
-			getSocket().getBufHandler().configureWriteBufferForWrite();
-			ByteBuffer buffer = getSocket().getBufHandler().getWriteBuffer();
+			getSocket().configureWriteBufferForWrite();
+			ByteBuffer buffer = getSocket().getWriteBuffer();
 			int nRead = -1;
 			try {
 				nRead = data.fchannel.read(buffer);
@@ -1420,7 +1418,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 
 			if (nRead >= 0) {
 				data.length -= nRead;
-				getSocket().getBufHandler().configureWriteBufferForRead();
+				getSocket().configureWriteBufferForRead();
 				Nio2Endpoint.startInline();
 				getSocket().write(buffer, Endpoint.toTimeout(getWriteTimeout()), TimeUnit.MILLISECONDS, data,
 						sendfileHandler);
