@@ -28,8 +28,8 @@ public interface Channel {
 
 	public SSLSupport getSslSupport(String clientCertProvider);
 
-	public boolean isProcessing();
+	// public boolean isProcessing();
 
-	public void setProcessing(boolean processing);
+	// public void setProcessing(boolean processing);
 
 }

@@ -37,6 +37,7 @@ import javax.servlet.http.WebConnection;
 
 import org.apache.coyote.Adapter;
 import org.apache.coyote.CloseNowException;
+import org.apache.coyote.DispatchHandler.ConcurrencyControlled;
 import org.apache.coyote.ProtocolException;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
@@ -49,6 +50,7 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.codec.binary.Base64;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
+import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SendfileState;
 import org.apache.tomcat.util.net.SocketChannel;
@@ -139,6 +141,50 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	private final AtomicLong overheadCount = new AtomicLong(-10);
 	private volatile int lastNonFinalDataPayload;
 	private volatile int lastWindowUpdate;
+	protected final ConcurrencyControlled controlled = new ConcurrencyControlled() {
+
+		@Override
+		public boolean checkPassOrFail(Channel channel, SocketEvent event) {
+			if (streamConcurrency == null) {
+				return true;
+			} else {
+				synchronized (this) {
+					if (streamConcurrency.get() < protocol.getMaxConcurrentStreamExecution()) {
+						streamConcurrency.incrementAndGet();
+						System.out.println(streamConcurrency);
+						return true;
+					} else {
+						System.out.println("failed");
+						StreamRunnable streamRunnable = new StreamRunnable((Stream) channel,
+								(StreamProcessor) channel.getCurrentProcessor(), event);
+						queuedRunnable.offer(streamRunnable);
+						return false;
+					}
+				}
+			}
+		}
+
+		@Override
+		public void released(Channel channel) {
+			if (streamConcurrency == null) {
+				return;
+			}
+			StreamRunnable streamRunnable = null;
+			synchronized (this) {
+				decreaseStreamConcurrency();
+				System.out.println(streamConcurrency);
+				if (getStreamConcurrency() < protocol.getMaxConcurrentStreamExecution()) {
+					streamRunnable = queuedRunnable.poll();
+				}
+			}
+			if (streamRunnable != null) {
+				// increaseStreamConcurrency();
+				protocol.getHttp11Protocol().getHandler().processSocket(streamRunnable.getStream(),
+						streamRunnable.getEvent(), true);// .getExecutor().execute(streamRunnable)
+			}
+		}
+
+	};
 
 	Http2UpgradeHandler(Http2Protocol protocol, Adapter adapter, RequestData coyoteRequest) {
 		super(STREAM_ID_ZERO);
@@ -262,7 +308,9 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	protected void processStreamOnContainerThread(Stream stream) {
 		StreamProcessor streamProcessor = new StreamProcessor(this, stream, adapter);
 		streamProcessor.setSslSupport(sslSupport);
-		processStreamOnContainerThread(stream, streamProcessor, SocketEvent.OPEN_READ);
+		protocol.getHttp11Protocol().getHandler().processSocket(stream, SocketEvent.OPEN_READ, true);
+		// processStreamOnContainerThread(stream, streamProcessor,
+		// SocketEvent.OPEN_READ);
 	}
 
 	void processStreamOnContainerThread(Stream stream, StreamProcessor streamProcessor, SocketEvent event) {
@@ -491,20 +539,9 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 		return streamConcurrency.get();
 	}
 
-	void executeQueuedStream() {
-		if (streamConcurrency == null) {
-			return;
-		}
-		decreaseStreamConcurrency();
-		if (getStreamConcurrency() < protocol.getMaxConcurrentStreamExecution()) {
-			StreamRunnable streamRunnable = queuedRunnable.poll();
-			if (streamRunnable != null) {
-				increaseStreamConcurrency();
-				protocol.getHttp11Protocol().getHandler().processSocket(streamRunnable.getStream(),
-						streamRunnable.getEvent(), true);// .getExecutor().execute(streamRunnable)
-			}
-		}
-	}
+//	void executeQueuedStream() {
+
+//	}
 
 	void sendStreamReset(StreamException se) throws IOException {
 

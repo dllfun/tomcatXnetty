@@ -136,7 +136,14 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		}
 		if (blockIo && isAsync() && setError) {
 			if (requestData.getAsyncStateMachine().asyncError()) {
-				processSocketEvent(SocketEvent.ERROR, true);
+				// processSocketEvent(SocketEvent.ERROR, true);
+				Channel channel = getChannel();
+				if (channel != null) {
+
+					// TODO sads
+					// channel.processSocket(event, dispatch);
+					protocol.getHandler().processSocket(channel, SocketEvent.ERROR, true);
+				}
 			}
 		}
 	}
@@ -185,18 +192,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	@Override
 	public boolean isAsync() {
 		return requestData.getAsyncStateMachine().isAsync();
-	}
-
-	@Override
-	public void beforeProcess() {
-		// TODO Auto-generated method stub
-
-	}
-
-	@Override
-	public void afterProcess() {
-		// TODO Auto-generated method stub
-
 	}
 
 	@Override
@@ -812,7 +807,14 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		// Avoid multiple timeouts
 		requestData.getAsyncStateMachine().setAsyncTimeout(-1);
 		asyncTimeoutGeneration = requestData.getAsyncStateMachine().getCurrentGeneration();
-		processSocketEvent(SocketEvent.TIMEOUT, true);
+		// processSocketEvent(SocketEvent.TIMEOUT, true);
+		Channel channel = getChannel();
+		if (channel != null) {
+
+			// TODO sads
+			// channel.processSocket(event, dispatch);
+			protocol.getHandler().processSocket(channel, SocketEvent.TIMEOUT, true);
+		}
 	}
 
 	@Override
@@ -894,15 +896,15 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	}
 
 	// @Override
-	public void processSocketEvent(SocketEvent event, boolean dispatch) {
-		Channel channel = getChannel();
-		if (channel != null) {
-
-			// TODO sads
-			// channel.processSocket(event, dispatch);
-			protocol.getHandler().processSocket(channel, event, dispatch);
-		}
-	}
+//	public void processSocketEvent(SocketEvent event, boolean dispatch) {
+//		Channel channel = getChannel();
+//		if (channel != null) {
+//
+//			// TODO sads
+//			// channel.processSocket(event, dispatch);
+//			protocol.getHandler().processSocket(channel, event, dispatch);
+//		}
+//	}
 
 //	protected abstract boolean isReadyForWrite();
 

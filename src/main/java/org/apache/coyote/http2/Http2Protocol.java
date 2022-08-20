@@ -95,7 +95,9 @@ public class Http2Protocol implements UpgradeProtocol {
 	private AbstractProtocol<?> http11Protocol = null;
 
 	public Http2Protocol() {
+		// TODO remove
 		// setCompression("force");
+		// maxConcurrentStreamExecution = 1;
 	}
 
 	@Override

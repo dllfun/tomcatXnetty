@@ -2425,10 +2425,10 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			}
 		}
 
-		@Override
-		public void setAppReadBufHandler(ApplicationBufferHandler handler) {
-			// no-op
-		}
+		// @Override
+		// public void setAppReadBufHandler(ApplicationBufferHandler handler) {
+		// no-op
+		// }
 
 		String getSSLInfoS(int id) {
 			synchronized (closed) {

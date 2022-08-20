@@ -56,7 +56,7 @@ class StreamProcessor extends AbstractProcessor {
 		this.stream.setCurrentProcessor(this);
 		this.http2OutputBuffer = new Http2OutputBuffer(this, stream, responseData, stream.getOutputBuffer());
 		// inputHandler = this.stream.getInputBuffer();
-		setChannel(stream.getChannel());
+		setChannel(stream);
 	}
 
 	public Http2UpgradeHandler getHandler() {
@@ -71,12 +71,6 @@ class StreamProcessor extends AbstractProcessor {
 	@Override
 	protected Response createResponse() {
 		return new Response(this.responseData, this, http2OutputBuffer);
-	}
-
-	@Override
-	public void beforeProcess() {
-		// TODO Auto-generated method stub
-
 	}
 
 	final void process(SocketEvent event) {
@@ -125,13 +119,9 @@ class StreamProcessor extends AbstractProcessor {
 				}
 			}
 		} finally {
-			handler.executeQueuedStream();
+			// handler.executeQueuedStream();
+			stream.released(stream);
 		}
-	}
-
-	@Override
-	public void afterProcess() {
-		handler.executeQueuedStream();
 	}
 
 	final void addOutputFilter(OutputFilter filter) {
@@ -197,15 +187,15 @@ class StreamProcessor extends AbstractProcessor {
 		// NO-OP
 	}
 
-	@Override
-	public void processSocketEvent(SocketEvent event, boolean dispatch) {
-		if (dispatch) {
-			handler.processStreamOnContainerThread(stream, this, event);
-		} else {
-			handler.getProtocol().getHttp11Protocol().getHandler().processSocket(stream, event, dispatch);
-			// this.process(event);
-		}
-	}
+//	@Override
+//	public void processSocketEvent(SocketEvent event, boolean dispatch) {
+//		if (dispatch) {
+//			handler.processStreamOnContainerThread(stream, this, event);
+//		} else {
+//			handler.getProtocol().getHttp11Protocol().getHandler().processSocket(stream, event, dispatch);
+//			// this.process(event);
+//		}
+//	}
 
 //	@Override
 //	protected final boolean isReadyForWrite() {
@@ -231,7 +221,9 @@ class StreamProcessor extends AbstractProcessor {
 			 * after a Window update has released one or more Streams. By dispatching each
 			 * Stream to a dedicated thread, those Streams may progress concurrently.
 			 */
-			processSocketEvent(dispatchType.getSocketStatus(), true);
+			// processSocketEvent(dispatchType.getSocketStatus(), true);
+			handler.getProtocol().getHttp11Protocol().getHandler().processSocket(stream, dispatchType.getSocketStatus(),
+					true);
 		}
 	}
 

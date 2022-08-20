@@ -87,7 +87,7 @@ abstract class AbstractStream extends AbstractChannel {
 	}
 
 	final synchronized void setWindowSize(long windowSize) {
-		System.out.println("stream(" + identifier + ") setWindowSize:" + windowSize);
+		// System.out.println("stream(" + identifier + ") setWindowSize:" + windowSize);
 		this.windowSize = windowSize;
 	}
 
@@ -106,7 +106,8 @@ abstract class AbstractStream extends AbstractChannel {
 		// No need for overflow protection here.
 		// Increment can't be more than Integer.MAX_VALUE and once windowSize
 		// goes beyond 2^31-1 an error is triggered.
-		System.out.println("stream(" + identifier + ") incrementWindowSize:" + increment);
+		// System.out.println("stream(" + identifier + ") incrementWindowSize:" +
+		// increment);
 		windowSize += increment;
 
 		if (log.isDebugEnabled()) {
@@ -126,7 +127,8 @@ abstract class AbstractStream extends AbstractChannel {
 	}
 
 	final synchronized void decrementWindowSize(int decrement) {
-		System.out.println("stream(" + identifier + ") decrementWindowSize:" + decrement);
+		// System.out.println("stream(" + identifier + ") decrementWindowSize:" +
+		// decrement);
 		// No need for overflow protection here. Decrement can never be larger
 		// the Integer.MAX_VALUE and once windowSize goes negative no further
 		// decrements are permitted

@@ -5,7 +5,7 @@ import java.nio.ByteBuffer;
 
 import org.apache.tomcat.util.buf.ByteBufferUtils;
 
-public class SocketBufferHandler {
+public class SocketBufferHandler implements ApplicationBufferHandler {
 
 	static SocketBufferHandler EMPTY = new SocketBufferHandler(0, 0, false) {
 		@Override
@@ -20,6 +20,11 @@ public class SocketBufferHandler {
 	private volatile ByteBuffer writeBuffer;
 
 	private final boolean direct;
+
+	/**
+	 * The application read buffer.
+	 */
+	private ByteBuffer appReadBuffer = ByteBuffer.allocate(0);
 
 	public SocketBufferHandler(int readBufferSize, int writeBufferSize, boolean direct) {
 		this.direct = direct;
@@ -187,6 +192,40 @@ public class SocketBufferHandler {
 			ByteBufferUtils.cleanDirectBuffer(readBuffer);
 			ByteBufferUtils.cleanDirectBuffer(writeBuffer);
 		}
+	}
+
+	public void initAppReadBuffer(int headerBufferSize) {
+		if (this.readBuffer != null) {
+			int bufLength = headerBufferSize + this.readBuffer.capacity();
+			ByteBuffer buffer = this.appReadBuffer;
+			if (buffer == null || buffer.capacity() < bufLength) {
+				buffer = ByteBuffer.allocate(bufLength);
+				buffer.position(0).limit(0);
+				this.appReadBuffer = buffer;
+			}
+		}
+	}
+
+	@Override
+	public void setAppReadBuffer(ByteBuffer buffer) {
+		this.appReadBuffer = buffer;
+	}
+
+	@Override
+	public ByteBuffer getAppReadBuffer() {
+		return this.appReadBuffer;
+	}
+
+	@Override
+	public void expandAppReadBuffer(int size) {
+		if (this.appReadBuffer.capacity() >= size) {
+			this.appReadBuffer.limit(size);
+		}
+		ByteBuffer temp = ByteBuffer.allocate(size);
+		temp.put(this.appReadBuffer);
+		this.appReadBuffer = temp;
+		this.appReadBuffer.mark();
+		temp = null;
 	}
 
 }

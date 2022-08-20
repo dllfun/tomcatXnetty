@@ -232,15 +232,15 @@ public class NioChannel extends SocketBufferHandler
 		}
 	}
 
-	private ApplicationBufferHandler appReadBufHandler;
+	// private ApplicationBufferHandler appReadBufHandler;
 
-	public void setAppReadBufHandler(ApplicationBufferHandler handler) {
-		this.appReadBufHandler = handler;
-	}
+	// public void setAppReadBufHandler(ApplicationBufferHandler handler) {
+	// this.appReadBufHandler = handler;
+	// }
 
-	protected ApplicationBufferHandler getAppReadBufHandler() {
-		return appReadBufHandler;
-	}
+	// protected ApplicationBufferHandler getAppReadBufHandler() {
+	// return appReadBufHandler;
+	// }
 
 	static final NioChannel CLOSED_NIO_CHANNEL = new NioChannel(0, 0, false) {
 
@@ -265,9 +265,9 @@ public class NioChannel extends SocketBufferHandler
 		public void free() {
 		}
 
-		@Override
-		public void setAppReadBufHandler(ApplicationBufferHandler handler) {
-		}
+		// @Override
+		// public void setAppReadBufHandler(ApplicationBufferHandler handler) {
+		// }
 
 		@Override
 		public int read(ByteBuffer dst) throws IOException {

@@ -1317,10 +1317,10 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 
 		@Override
 		public void registerReadInterest() {
-			if (isProcessing()) {
-				// registe will be handled by processor
-				return;
-			}
+			// if (isProcessing()) {
+			// registe will be handled by processor
+			// return;
+			// }
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("endpoint.debug.registerRead", this));
 			}
@@ -1441,10 +1441,10 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 			}
 		}
 
-		@Override
-		public void setAppReadBufHandler(ApplicationBufferHandler handler) {
-			getSocket().setAppReadBufHandler(handler);
-		}
+		// @Override
+		// public void setAppReadBufHandler(ApplicationBufferHandler handler) {
+		// getSocket().setAppReadBufHandler(handler);
+		// }
 
 		@Override
 		protected <A> OperationState<A> newOperationState(boolean read, ByteBuffer[] buffers, int offset, int length,
@@ -1541,6 +1541,9 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 				}
 				if (nBytes > 0 || (nBytes == 0 && !buffersArrayHasRemaining(buffers, offset, length))) {
 					// The bytes processed are only updated in the completion handler
+					if (nBytes == 0) {
+						System.out.println();
+					}
 					completion.completed(Long.valueOf(nBytes), this);
 				} else if (nBytes < 0 || getError() != null) {
 					IOException error = getError();
@@ -1552,7 +1555,9 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 					// As soon as the operation uses the poller, it is no longer inline
 					inline = false;
 					if (read) {
-						registerReadInterest();
+						if (!ContainerThreadMarker.isContainerThread()) {
+							registerReadInterest();
+						}
 					} else {
 						registerWriteInterest();
 					}

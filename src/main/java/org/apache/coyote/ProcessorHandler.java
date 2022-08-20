@@ -164,14 +164,9 @@ public class ProcessorHandler implements Handler {
 			SocketState state = SocketState.CLOSED;
 
 			do {
-				try {
-					processor.beforeProcess();
-					channel.setProcessing(true);
-					state = processor.process(channel, event);
-					channel.setProcessing(false);
-				} finally {
-					processor.afterProcess();
-				}
+
+				state = processor.process(channel, event);
+
 				if (state == SocketState.UPGRADING) {
 					SocketChannel socketChannel = (SocketChannel) channel;
 					// Get the HTTP upgrade handler

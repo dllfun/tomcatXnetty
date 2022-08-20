@@ -777,9 +777,10 @@ public class SecureNio2Channel extends Nio2Channel {
 							// This is the normal case for this code
 							expand(sslEngine.getSession().getApplicationBufferSize());
 							dst = getReadBuffer();
-						} else if (dst == getAppReadBufHandler().getByteBuffer()) {
-							getAppReadBufHandler().expand(sslEngine.getSession().getApplicationBufferSize());
-							dst = getAppReadBufHandler().getByteBuffer();
+						} else if (dst == SecureNio2Channel.this.getAppReadBuffer()) {
+							SecureNio2Channel.this
+									.expandAppReadBuffer(sslEngine.getSession().getApplicationBufferSize());
+							dst = SecureNio2Channel.this.getAppReadBuffer();
 						} else {
 							// Can't expand the buffer as there is no way to signal
 							// to the caller that the buffer has been replaced.
@@ -974,11 +975,10 @@ public class SecureNio2Channel extends Nio2Channel {
 										// This is the normal case for this code
 										expand(sslEngine.getSession().getApplicationBufferSize());
 										dst2 = getReadBuffer();
-									} else if (getAppReadBufHandler() != null
-											&& dst2 == getAppReadBufHandler().getByteBuffer()) {
-										getAppReadBufHandler()
-												.expand(sslEngine.getSession().getApplicationBufferSize());
-										dst2 = getAppReadBufHandler().getByteBuffer();
+									} else if (dst2 == SecureNio2Channel.this.getAppReadBuffer()) {
+										SecureNio2Channel.this
+												.expandAppReadBuffer(sslEngine.getSession().getApplicationBufferSize());
+										dst2 = SecureNio2Channel.this.getAppReadBuffer();
 									} else {
 										// Can't expand the buffer as there is no way to signal
 										// to the caller that the buffer has been replaced.
@@ -1095,14 +1095,13 @@ public class SecureNio2Channel extends Nio2Channel {
 										}
 										dsts[offset + i] = getReadBuffer();
 										found = true;
-									} else if (getAppReadBufHandler() != null
-											&& dsts[offset + i] == getAppReadBufHandler().getByteBuffer()) {
-										getAppReadBufHandler()
-												.expand(sslEngine.getSession().getApplicationBufferSize());
-										if (dsts[offset + i] == getAppReadBufHandler().getByteBuffer()) {
+									} else if (dsts[offset + i] == SecureNio2Channel.this.getAppReadBuffer()) {
+										SecureNio2Channel.this
+												.expandAppReadBuffer(sslEngine.getSession().getApplicationBufferSize());
+										if (dsts[offset + i] == SecureNio2Channel.this.getAppReadBuffer()) {
 											resized = false;
 										}
-										dsts[offset + i] = getAppReadBufHandler().getByteBuffer();
+										dsts[offset + i] = SecureNio2Channel.this.getAppReadBuffer();
 										found = true;
 									}
 								}

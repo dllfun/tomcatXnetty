@@ -18,11 +18,10 @@ package org.apache.tomcat.util.net;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.buf.ByteBufferUtils;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper.ByteBufferProvider;
 import org.apache.tomcat.util.res.StringManager;
 
 public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
@@ -43,7 +42,13 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	/**
 	 * The read buffer.
 	 */
-	private ByteBufferWrapper appReadBuffer = new ByteBufferWrapper(this, ByteBuffer.allocate(0));
+	private ByteBufferWrapper appReadBuffer = new ByteBufferWrapper(this, new ByteBufferProvider() {
+
+		@Override
+		public ByteBuffer getByteBuffer() {
+			return ByteBuffer.allocate(0);
+		}
+	});
 
 	/**
 	 * The max size of the individual buffered write buffers
@@ -75,15 +80,15 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	public void initAppReadBuffer(int headerBufferSize) {
 
 		if (getSocketBufferHandler() != null && getSocketBufferHandler().getReadBuffer() != null) {
-			int bufLength = headerBufferSize + getSocketBufferHandler().getReadBuffer().capacity();
-			ByteBuffer buffer = appReadBuffer.getByteBuffer();
-			if (buffer == null || buffer.capacity() < bufLength) {
-				buffer = ByteBuffer.allocate(bufLength);
-				buffer.position(0).limit(0);
-				appReadBuffer.setByteBuffer(buffer);
-			}
-
-			setAppReadBufHandler(appReadBuffer);
+			getSocketBufferHandler().initAppReadBuffer(headerBufferSize);
+			appReadBuffer.setProvider(new ByteBufferProvider() {
+				@Override
+				public ByteBuffer getByteBuffer() {
+					return getSocketBufferHandler().getAppReadBuffer();
+				}
+			});
+			// setAppReadBufHandler(appReadBuffer);
+			// socket.addAppReadBufferExpandListener();
 		}
 
 	}
@@ -117,7 +122,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	@Override
 	public BufWrapper allocate(int size) {
 		ByteBuffer byteBuffer = ByteBuffer.allocate(size);
-		ByteBufferWrapper byteBufferWrapper = new ByteBufferWrapper(this, byteBuffer);
+		ByteBufferWrapper byteBufferWrapper = ByteBufferWrapper.wrapper(byteBuffer);
 		return byteBufferWrapper;
 	}
 
@@ -240,6 +245,8 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 			}
 			delegate.limit(delegate.capacity());
 			int nRead = read(block, delegate);
+			// after read buffer may has changed if buffer is appReadBuffer
+			delegate = byteBufferWrapper.getByteBuffer();
 			delegate.limit(delegate.position()).reset();
 			if (nRead > 0) {
 				return nRead;
@@ -422,7 +429,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	protected void writeBlocking(BufWrapper from) throws IOException {
 		if (from instanceof ByteBufferWrapper) {
 			ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) from;
-			writeBlocking(byteBufferWrapper.delegate);
+			writeBlocking(byteBufferWrapper.provider.getByteBuffer());
 		}
 	}
 
@@ -430,7 +437,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	protected void writeNonBlocking(BufWrapper from) throws IOException {
 		if (from instanceof ByteBufferWrapper) {
 			ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) from;
-			writeNonBlocking(byteBufferWrapper.delegate);
+			writeNonBlocking(byteBufferWrapper.provider.getByteBuffer());
 		}
 	}
 
@@ -535,13 +542,20 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 	// public abstract SSLSupport getSslSupport(String clientCertProvider);
 
-	public abstract void setAppReadBufHandler(ApplicationBufferHandler handler);
+	// public abstract void setAppReadBufHandler(ApplicationBufferHandler handler);
 
-	public static class ByteBufferWrapper implements BufWrapper, ApplicationBufferHandler {
+	public static class ByteBufferWrapper implements BufWrapper {
+
+		@FunctionalInterface
+		public interface ByteBufferProvider {
+
+			public ByteBuffer getByteBuffer();
+
+		}
 
 		private SocketWrapperBase<?> channel;
 
-		private ByteBuffer delegate;
+		private ByteBufferProvider provider;
 
 		private boolean parsingHeader;
 
@@ -555,27 +569,27 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 		private boolean readMode = true;
 
-		public ByteBufferWrapper(SocketWrapperBase<?> channel, ByteBuffer delegate) {
+		public ByteBufferWrapper(SocketWrapperBase<?> channel, ByteBufferProvider provider) {
 			super();
 			this.channel = channel;
-			this.delegate = delegate;
+			this.provider = provider;
 		}
 
-		@Override
+		// @Override
 		public ByteBuffer getByteBuffer() {
-			return delegate;
+			return provider.getByteBuffer();
 		}
 
-		@Override
-		public void setByteBuffer(ByteBuffer buffer) {
-			this.delegate = buffer;
+		// @Override
+		public void setProvider(ByteBufferProvider provider) {
+			this.provider = provider;
 		}
 
 		@Override
 		public void switchToWriteMode() {
 			if (readMode) {
-				delegate.position(delegate.limit());
-				delegate.limit(delegate.capacity());
+				provider.getByteBuffer().position(provider.getByteBuffer().limit());
+				provider.getByteBuffer().limit(provider.getByteBuffer().capacity());
 				readMode = false;
 			}
 		}
@@ -583,8 +597,8 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		@Override
 		public void switchToReadMode() {
 			if (!readMode) {
-				delegate.limit(delegate.position());
-				delegate.position(0);
+				provider.getByteBuffer().limit(provider.getByteBuffer().position());
+				provider.getByteBuffer().position(0);
 				readMode = true;
 			}
 		}
@@ -596,52 +610,52 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 		@Override
 		public int getLimit() {
-			return delegate.limit();
+			return provider.getByteBuffer().limit();
 		}
 
 		@Override
 		public void setLimit(int limit) {
-			delegate.limit(limit);
+			provider.getByteBuffer().limit(limit);
 		}
 
 		@Override
 		public byte getByte() {
-			return delegate.get();
+			return provider.getByteBuffer().get();
 		}
 
 		@Override
 		public void getByte(byte[] b, int off, int len) {
-			delegate.get(b, off, len);
+			provider.getByteBuffer().get(b, off, len);
 		}
 
 		@Override
 		public byte getByte(int index) {
-			return delegate.get(index);
+			return provider.getByteBuffer().get(index);
 		}
 
 		@Override
 		public int getPosition() {
-			return delegate.position();
+			return provider.getByteBuffer().position();
 		}
 
 		@Override
 		public void setPosition(int position) {
-			delegate.position(position);
+			provider.getByteBuffer().position(position);
 		}
 
 		@Override
 		public boolean hasArray() {
-			return delegate.hasArray();
+			return provider.getByteBuffer().hasArray();
 		}
 
 		@Override
 		public byte[] getArray() {
-			return delegate.array();
+			return provider.getByteBuffer().array();
 		}
 
 		@Override
 		public int getRemaining() {
-			return delegate.remaining();
+			return provider.getByteBuffer().remaining();
 		}
 
 		// @Override
@@ -651,37 +665,37 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 		@Override
 		public boolean hasRemaining() {
-			return delegate.remaining() > 0;
+			return provider.getByteBuffer().remaining() > 0;
 		}
 
 		@Override
 		public boolean hasNoRemaining() {
-			return delegate.remaining() <= 0;
+			return provider.getByteBuffer().remaining() <= 0;
 		}
 
 		@Override
 		public int getCapacity() {
-			return delegate.capacity();
+			return provider.getByteBuffer().capacity();
 		}
 
 		@Override
 		public void setByte(int index, byte b) {
-			delegate.put(index, b);
+			provider.getByteBuffer().put(index, b);
 		}
 
 		@Override
 		public void putByte(byte b) {
-			delegate.put(b);
+			provider.getByteBuffer().put(b);
 		}
 
 		@Override
 		public void putBytes(byte[] b) {
-			delegate.put(b);
+			provider.getByteBuffer().put(b);
 		}
 
 		@Override
 		public void putBytes(byte[] b, int off, int len) {
-			delegate.put(b, off, len);
+			provider.getByteBuffer().put(b, off, len);
 		}
 
 		/**
@@ -743,53 +757,59 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		public void finishParsingHeader(boolean keepHeadPos) {
 			parsingHeader = false;
 			if (keepHeadPos) {
-				headerPos = delegate.position();
+				headerPos = provider.getByteBuffer().position();
 			}
 		}
 
-		@Override
-		public void expand(int size) {
-			if (delegate.capacity() >= size) {
-				delegate.limit(size);
-			}
-			ByteBuffer temp = ByteBuffer.allocate(size);
-			temp.put(delegate);
-			delegate = temp;
-			delegate.mark();
-			temp = null;
-		}
+//		@Override
+//		public void expand(int size) {
+//			if (delegate.capacity() >= size) {
+//				delegate.limit(size);
+//			}
+//			ByteBuffer temp = ByteBuffer.allocate(size);
+//			temp.put(delegate);
+//			delegate = temp;
+//			delegate.mark();
+//			temp = null;
+//		}
 
 		@Override
 		public void nextRequest() {
-			if (delegate.position() > 0) {
-				if (delegate.remaining() > 0) {
+			if (provider.getByteBuffer().position() > 0) {
+				if (provider.getByteBuffer().remaining() > 0) {
 					// Copy leftover bytes to the beginning of the buffer
-					delegate.compact();
-					delegate.flip();
+					provider.getByteBuffer().compact();
+					provider.getByteBuffer().flip();
 				} else {
 					// Reset position and limit to 0
-					delegate.position(0).limit(0);
+					provider.getByteBuffer().position(0).limit(0);
 				}
 			}
 		}
 
 		@Override
 		public void reset() {
-			delegate.limit(0).position(0);
+			provider.getByteBuffer().limit(0).position(0);
 		}
 
 		@Override
 		public ByteBuffer nioBuffer() {
-			return delegate.duplicate();
+			return provider.getByteBuffer().duplicate();
 		}
 
 		// @Override
-		public BufWrapper duplicate() {
-			return new ByteBufferWrapper(channel, delegate.duplicate());
-		}
+		// public BufWrapper duplicate() {
+		// return new ByteBufferWrapper(channel, delegate.duplicate());
+		// }
 
-		public static BufWrapper wrapper(ByteBuffer buffer) {
-			return new ByteBufferWrapper(null, buffer);
+		public static ByteBufferWrapper wrapper(ByteBuffer buffer) {
+			return new ByteBufferWrapper(null, new ByteBufferProvider() {
+
+				@Override
+				public ByteBuffer getByteBuffer() {
+					return buffer;
+				}
+			});
 		}
 
 		@Override

@@ -1566,10 +1566,10 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 			}
 		}
 
-		@Override
-		public void setAppReadBufHandler(ApplicationBufferHandler handler) {
-			getSocket().setAppReadBufHandler(handler);
-		}
+		// @Override
+		// public void setAppReadBufHandler(ApplicationBufferHandler handler) {
+		// getSocket().setAppReadBufHandler(handler);
+		// }
 	}
 
 	public static void startInline() {

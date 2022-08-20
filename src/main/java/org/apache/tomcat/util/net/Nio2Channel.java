@@ -216,15 +216,15 @@ public class Nio2Channel extends SocketBufferHandler implements AsynchronousByte
 		return DONE;
 	}
 
-	private ApplicationBufferHandler appReadBufHandler;
+	// private ApplicationBufferHandler appReadBufHandler;
 
-	public void setAppReadBufHandler(ApplicationBufferHandler handler) {
-		this.appReadBufHandler = handler;
-	}
+	// public void setAppReadBufHandler(ApplicationBufferHandler handler) {
+	// this.appReadBufHandler = handler;
+	// }
 
-	protected ApplicationBufferHandler getAppReadBufHandler() {
-		return appReadBufHandler;
-	}
+	// protected ApplicationBufferHandler getAppReadBufHandler() {
+	// return appReadBufHandler;
+	// }
 
 	private static final Future<Integer> DONE_INT = new Future<Integer>() {
 		@Override
@@ -277,9 +277,9 @@ public class Nio2Channel extends SocketBufferHandler implements AsynchronousByte
 		public void free() {
 		}
 
-		@Override
-		public void setAppReadBufHandler(ApplicationBufferHandler handler) {
-		}
+		// @Override
+		// public void setAppReadBufHandler(ApplicationBufferHandler handler) {
+		// }
 
 		@Override
 		public Future<Integer> read(ByteBuffer dst) {

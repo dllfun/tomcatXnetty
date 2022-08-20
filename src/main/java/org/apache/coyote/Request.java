@@ -311,7 +311,8 @@ public final class Request implements InputReader {
 	// @Override
 	public void asyncDispatch() {
 		if (requestData.getAsyncStateMachine().asyncDispatch()) {
-			processor.processSocketEvent(SocketEvent.OPEN_READ, true);
+			// processor.processSocketEvent(SocketEvent.OPEN_READ, true);
+			processor.getProtocol().getHandler().processSocket(processor.getChannel(), SocketEvent.OPEN_READ, true);
 		}
 	}
 
@@ -328,7 +329,8 @@ public final class Request implements InputReader {
 	public void asyncComplete() {
 		processor.clearDispatches();
 		if (requestData.getAsyncStateMachine().asyncComplete()) {
-			processor.processSocketEvent(SocketEvent.OPEN_READ, true);
+			// processor.processSocketEvent(SocketEvent.OPEN_READ, true);
+			processor.getProtocol().getHandler().processSocket(processor.getChannel(), SocketEvent.OPEN_READ, true);
 		}
 	}
 

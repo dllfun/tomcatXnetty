@@ -3,17 +3,23 @@ package org.apache.coyote;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
-import org.apache.coyote.http11.Http11NioProtocol;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.Channel;
-import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.net.Endpoint.Handler;
 import org.apache.tomcat.util.res.StringManager;
 
 public class DispatchHandler implements Handler {
+
+	public interface ConcurrencyControlled {
+
+		public boolean checkPassOrFail(Channel channel, SocketEvent event);
+
+		public void released(Channel channel);
+
+	}
 
 	/**
 	 * The string manager for this package.
@@ -44,6 +50,9 @@ public class DispatchHandler implements Handler {
 			if (channel == null) {
 				return;
 			}
+			if (event == SocketEvent.TIMEOUT) {
+				System.out.println("timeout");
+			}
 
 			// SocketProcessorBase<S> sc = endpoint.popSocketProcessor();
 			// if (sc == null) {
@@ -64,6 +73,10 @@ public class DispatchHandler implements Handler {
 							// first event to be processed results in the socket being closed,
 							// the subsequent events are not processed.
 							if (channel.isClosed()) {
+								if (channel instanceof ConcurrencyControlled) {
+									ConcurrencyControlled controlled = (ConcurrencyControlled) channel;
+									controlled.released(channel);
+								}
 								return;
 							}
 							try {
@@ -74,11 +87,25 @@ public class DispatchHandler implements Handler {
 								// the pool and its queue are full
 								log.error(sm.getString("endpoint.process.fail"), t);
 								channel.close(t);
+							} finally {
+								if (channel instanceof ConcurrencyControlled) {
+									ConcurrencyControlled controlled = (ConcurrencyControlled) channel;
+									controlled.released(channel);
+								}
 							}
 						}
 					}
 				};
-				executor.execute(runnable);
+
+				if (channel instanceof ConcurrencyControlled) {
+					ConcurrencyControlled controlled = (ConcurrencyControlled) channel;
+					boolean pass = controlled.checkPassOrFail(channel, event);
+					if (pass) {
+						executor.execute(runnable);
+					}
+				} else {
+					executor.execute(runnable);
+				}
 			} else {
 				synchronized (channel.getLock()) {
 					// It is possible that processing may be triggered for read and

@@ -32,7 +32,7 @@ public interface Processor {
 
 	boolean processInIoThread(SocketChannel channel, SocketEvent event) throws IOException;
 
-	void beforeProcess();
+	// void beforeProcess();
 
 	/**
 	 * Process a connection. This is called whenever an event occurs (e.g. more data
@@ -51,7 +51,7 @@ public interface Processor {
 	 */
 	SocketState process(Channel channel, SocketEvent event) throws IOException;
 
-	void afterProcess();
+	// void afterProcess();
 
 	/**
 	 * Generate an upgrade token.

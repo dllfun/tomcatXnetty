@@ -30,6 +30,7 @@ import java.util.function.Supplier;
 
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.CloseNowException;
+import org.apache.coyote.DispatchHandler.ConcurrencyControlled;
 import org.apache.coyote.RequestAction;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.ResponseData;
@@ -42,14 +43,16 @@ import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.parser.Host;
 import org.apache.tomcat.util.net.AbstractLogicChannel;
+import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel;
+import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.net.WriteBuffer;
 import org.apache.tomcat.util.res.StringManager;
 
-class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChannel {
+class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChannel, ConcurrencyControlled {
 
 	private static final Log log = LogFactory.getLog(Stream.class);
 	private static final StringManager sm = StringManager.getManager(Stream.class);
@@ -87,7 +90,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 	private final StreamInputBuffer inputBuffer;
 	private final StreamOutputBuffer streamOutputBuffer = new StreamOutputBuffer();
 	// private volatile AbstractProcessor processor;
-	private SocketChannel channel;
+	private final SocketChannel channel;
 
 	Stream(SocketChannel channel, Integer identifier, Http2UpgradeHandler handler) {
 		this(channel, identifier, handler, null);
@@ -134,10 +137,6 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		if (this.requestData.getStartTime() < 0) {
 			this.requestData.setStartTime(System.currentTimeMillis());
 		}
-	}
-
-	public SocketChannel getChannel() {
-		return channel;
 	}
 
 	@Override
@@ -745,6 +744,16 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 
 	StreamException getResetException() {
 		return streamOutputBuffer.reset;
+	}
+
+	@Override
+	public boolean checkPassOrFail(Channel channel, SocketEvent event) {
+		return handler.controlled.checkPassOrFail(channel, event);
+	}
+
+	@Override
+	public void released(Channel channel) {
+		handler.controlled.released(channel);
 	}
 
 	private static void push(final Http2UpgradeHandler handler, final RequestData request, final Stream stream)

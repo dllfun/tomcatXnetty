@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 
 import javax.servlet.http.WebConnection;
 
+import org.apache.coyote.ContainerThreadMarker;
 import org.apache.coyote.ProtocolException;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BlockingMode;
@@ -125,7 +126,7 @@ class Http2AsyncParser extends Http2Parser {
 			// Finish processing the connection
 			upgradeHandler.processConnectionCallback(webConnection, stream);
 			// Continue reading frames
-			if (channel.isProcessing()) {
+			if (ContainerThreadMarker.isContainerThread()) {
 				upgradeHandler.upgradeDispatch(SocketEvent.OPEN_READ);
 			} else {
 				upgradeHandler.getProtocol().getHttp11Protocol().getHandler().processSocket(channel,
@@ -316,7 +317,7 @@ class Http2AsyncParser extends Http2Parser {
 			if (state == CompletionState.DONE) {
 				// The call was not completed inline, so must start reading new frames
 				// or process the stream exception
-				if (channel.isProcessing()) {
+				if (ContainerThreadMarker.isContainerThread()) {
 					upgradeHandler.upgradeDispatch(SocketEvent.OPEN_READ);
 				} else {
 					upgradeHandler.getProtocol().getHttp11Protocol().getHandler().processSocket(channel,
@@ -333,7 +334,7 @@ class Http2AsyncParser extends Http2Parser {
 				log.debug(sm.getString("http2Parser.error", connectionId, Integer.valueOf(streamId), frameType), e);
 			}
 			if (state == null || state == CompletionState.DONE) {
-				if (channel.isProcessing()) {
+				if (ContainerThreadMarker.isContainerThread()) {
 					upgradeHandler.upgradeDispatch(SocketEvent.ERROR);
 				} else {
 					upgradeHandler.getProtocol().getHttp11Protocol().getHandler().processSocket(channel,

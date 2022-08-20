@@ -36,12 +36,11 @@ import javax.servlet.http.HttpServletResponse;
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.Adapter;
 import org.apache.coyote.ErrorState;
-import org.apache.coyote.RequestAction;
 import org.apache.coyote.Request;
+import org.apache.coyote.RequestAction;
 import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
 import org.apache.coyote.ResponseAction;
-import org.apache.coyote.http11.OutputFilter;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
@@ -50,10 +49,10 @@ import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**

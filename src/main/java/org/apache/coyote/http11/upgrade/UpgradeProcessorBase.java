@@ -62,18 +62,6 @@ public abstract class UpgradeProcessorBase extends AbstractProcessorLight implem
 	// ---------------------------- Processor methods that are NO-OP for upgrade
 
 	@Override
-	public void beforeProcess() {
-		// TODO Auto-generated method stub
-
-	}
-
-	@Override
-	public void afterProcess() {
-		// TODO Auto-generated method stub
-
-	}
-
-	@Override
 	public final SocketState service(Channel socketWrapper) throws IOException {
 		return null;
 	}

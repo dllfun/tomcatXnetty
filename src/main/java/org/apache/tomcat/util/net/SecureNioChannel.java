@@ -147,7 +147,8 @@ public class SecureNioChannel extends NioChannel {
 			boolean success = false;
 			int writed = socketChannel.write(buf);
 			success = (writed >= remaining);
-			System.out.println(socketChannel.socket().getPort() + " flush success:" + success);
+			// System.out.println(socketChannel.socket().getPort() + " flush success:" +
+			// success);
 			return success;
 		} else {
 			return true;
@@ -737,9 +738,9 @@ public class SecureNioChannel extends NioChannel {
 						// This is the normal case for this code
 						expand(sslEngine.getSession().getApplicationBufferSize());
 						dst = getReadBuffer();
-					} else if (getAppReadBufHandler() != null && dst == getAppReadBufHandler().getByteBuffer()) {
-						getAppReadBufHandler().expand(sslEngine.getSession().getApplicationBufferSize());
-						dst = getAppReadBufHandler().getByteBuffer();
+					} else if (dst == this.getAppReadBuffer()) {
+						this.expandAppReadBuffer(sslEngine.getSession().getApplicationBufferSize());
+						dst = this.getAppReadBuffer();
 					} else {
 						// Can't expand the buffer as there is no way to signal
 						// to the caller that the buffer has been replaced.
@@ -828,13 +829,12 @@ public class SecureNioChannel extends NioChannel {
 							}
 							dsts[offset + i] = getReadBuffer();
 							found = true;
-						} else if (getAppReadBufHandler() != null
-								&& dsts[offset + i] == getAppReadBufHandler().getByteBuffer()) {
-							getAppReadBufHandler().expand(sslEngine.getSession().getApplicationBufferSize());
-							if (dsts[offset + i] == getAppReadBufHandler().getByteBuffer()) {
+						} else if (dsts[offset + i] == this.getAppReadBuffer()) {
+							this.expandAppReadBuffer(sslEngine.getSession().getApplicationBufferSize());
+							if (dsts[offset + i] == this.getAppReadBuffer()) {
 								resized = false;
 							}
-							dsts[offset + i] = getAppReadBufHandler().getByteBuffer();
+							dsts[offset + i] = this.getAppReadBuffer();
 							found = true;
 						}
 					}
