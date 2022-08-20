@@ -178,6 +178,7 @@ public class SocketBufferHandler implements ApplicationBufferHandler {
 		readBufferConfiguredForWrite = true;
 		writeBuffer.clear();
 		writeBufferConfiguredForWrite = true;
+		appReadBuffer.position(0).limit(0);
 	}
 
 	public void expand(int newSize) {
