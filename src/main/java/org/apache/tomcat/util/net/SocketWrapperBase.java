@@ -42,13 +42,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	/**
 	 * The read buffer.
 	 */
-	private ByteBufferWrapper appReadBuffer = new ByteBufferWrapper(this, new ByteBufferProvider() {
-
-		@Override
-		public ByteBuffer getByteBuffer() {
-			return ByteBuffer.allocate(0);
-		}
-	});
+	private ByteBufferWrapper appReadBuffer = new ByteBufferWrapper(this, () -> ByteBuffer.allocate(0));
 
 	/**
 	 * The max size of the individual buffered write buffers
@@ -81,12 +75,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 		if (getSocketBufferHandler() != null && getSocketBufferHandler().getReadBuffer() != null) {
 			getSocketBufferHandler().initAppReadBuffer(headerBufferSize);
-			appReadBuffer.setProvider(new ByteBufferProvider() {
-				@Override
-				public ByteBuffer getByteBuffer() {
-					return getSocketBufferHandler().getAppReadBuffer();
-				}
-			});
+			appReadBuffer.setProvider(() -> getSocketBufferHandler().getAppReadBuffer());
 			// setAppReadBufHandler(appReadBuffer);
 			// socket.addAppReadBufferExpandListener();
 		}
@@ -803,13 +792,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		// }
 
 		public static ByteBufferWrapper wrapper(ByteBuffer buffer) {
-			return new ByteBufferWrapper(null, new ByteBufferProvider() {
-
-				@Override
-				public ByteBuffer getByteBuffer() {
-					return buffer;
-				}
-			});
+			return new ByteBufferWrapper(null, () -> buffer);
 		}
 
 		@Override
