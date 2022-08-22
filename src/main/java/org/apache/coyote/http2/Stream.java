@@ -91,15 +91,15 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 	private final StreamInputBuffer inputBuffer;
 	private final StreamOutputBuffer streamOutputBuffer = new StreamOutputBuffer();
 	// private volatile AbstractProcessor processor;
-	private final SocketChannel channel;
+	// private final SocketChannel channel;
 
-	Stream(SocketChannel channel, Integer identifier, Http2UpgradeHandler handler) {
-		this(channel, identifier, handler, null);
+	Stream(Integer identifier, Http2UpgradeHandler handler) {
+		this(identifier, handler, null);
 	}
 
-	Stream(SocketChannel channel, Integer identifier, Http2UpgradeHandler handler, RequestData requestData) {
+	Stream(Integer identifier, Http2UpgradeHandler handler, RequestData requestData) {
 		super(identifier);
-		this.channel = channel;
+		// this.channel = channel;
 		this.handler = handler;
 		handler.addChild(this);
 		setWindowSize(handler.getRemoteSettings().getInitialWindowSize());
@@ -147,7 +147,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 
 	@Override
 	public SSLSupport initSslSupport(String clientCertProvider) {
-		return channel.getSslSupport();
+		return handler.getChannel().getSslSupport();
 	}
 
 	private void prepareRequest() {
@@ -1213,15 +1213,15 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		 * populate this from an alternative source should override this method.
 		 */
 		protected void populateRequestAttributeRemoteHost() {
-			if (getPopulateRequestAttributesFromSocket() && channel != null) {
-				requestData.remoteHost().setString(channel.getRemoteHost());
+			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
+				requestData.remoteHost().setString(handler.getChannel().getRemoteHost());
 			}
 		}
 
 		@Override
 		public void actionREQ_HOST_ADDR_ATTRIBUTE() {
-			if (getPopulateRequestAttributesFromSocket() && channel != null) {
-				requestData.remoteAddr().setString(channel.getRemoteAddr());
+			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
+				requestData.remoteAddr().setString(handler.getChannel().getRemoteAddr());
 			}
 		}
 
@@ -1232,29 +1232,29 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 
 		@Override
 		public void actionREQ_LOCALPORT_ATTRIBUTE() {
-			if (getPopulateRequestAttributesFromSocket() && channel != null) {
-				requestData.setLocalPort(channel.getLocalPort());
+			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
+				requestData.setLocalPort(handler.getChannel().getLocalPort());
 			}
 		}
 
 		@Override
 		public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
-			if (getPopulateRequestAttributesFromSocket() && channel != null) {
-				requestData.localAddr().setString(channel.getLocalAddr());
+			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
+				requestData.localAddr().setString(handler.getChannel().getLocalAddr());
 			}
 		}
 
 		@Override
 		public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
-			if (getPopulateRequestAttributesFromSocket() && channel != null) {
-				requestData.localName().setString(channel.getLocalName());
+			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
+				requestData.localName().setString(handler.getChannel().getLocalName());
 			}
 		}
 
 		@Override
 		public void actionREQ_REMOTEPORT_ATTRIBUTE() {
-			if (getPopulateRequestAttributesFromSocket() && channel != null) {
-				requestData.setRemotePort(channel.getRemotePort());
+			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
+				requestData.setRemotePort(handler.getChannel().getRemotePort());
 			}
 		}
 
@@ -1349,7 +1349,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		 */
 		protected void populateSslRequestAttributes() {
 			try {
-				SSLSupport sslSupport = channel.getSslSupport();
+				SSLSupport sslSupport = handler.getChannel().getSslSupport();
 				if (sslSupport != null) {
 					Object sslO = sslSupport.getCipherSuite();
 					if (sslO != null) {

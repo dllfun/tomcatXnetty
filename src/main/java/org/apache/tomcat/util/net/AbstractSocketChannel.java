@@ -628,12 +628,12 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 				}
 				if (complete) {
 					boolean notify = false;
-					state.semaphore.release();
 					if (state.read) {
 						readOperation = null;
 					} else {
 						writeOperation = null;
 					}
+					state.semaphore.release();
 					if (state.block == BlockingMode.BLOCK && currentState != CompletionState.INLINE) {
 						notify = true;
 					} else {
@@ -670,12 +670,12 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 			}
 			setError(ioe);
 			boolean notify = false;
-			state.semaphore.release();
 			if (state.read) {
 				readOperation = null;
 			} else {
 				writeOperation = null;
 			}
+			state.semaphore.release();
 			if (state.block == BlockingMode.BLOCK) {
 				notify = true;
 			} else {

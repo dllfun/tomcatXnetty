@@ -130,10 +130,10 @@ class StreamProcessor extends AbstractProcessor {
 
 	// Static so it can be used by Stream to build the MimeHeaders required for
 	// an ACK. For that use case coyoteRequest, protocol and stream will be null.
-	static void prepareHeaders(RequestData coyoteRequest, ResponseData coyoteResponse, boolean noSendfile,
+	static void prepareHeaders(RequestData requestData, ResponseData responseData, boolean noSendfile,
 			Http2Protocol protocol, Stream stream) {
-		MimeHeaders headers = coyoteResponse.getMimeHeaders();
-		int statusCode = coyoteResponse.getStatus();
+		MimeHeaders headers = responseData.getMimeHeaders();
+		int statusCode = responseData.getStatus();
 
 		// Add the pseudo header for status
 		headers.addValue(":status").setString(Integer.toString(statusCode));
@@ -141,7 +141,7 @@ class StreamProcessor extends AbstractProcessor {
 		// Compression can't be used with sendfile
 		// Need to check for compression (and set headers appropriately) before
 		// adding headers below
-		if (noSendfile && protocol != null && protocol.useCompression(coyoteRequest, coyoteResponse)) {
+		if (noSendfile && protocol != null && protocol.useCompression(requestData, responseData)) {
 			// Enable compression. Headers will have been set. Need to configure
 			// output filter at this point.
 			if (stream.getCurrentProcessor() != null) {
@@ -151,17 +151,17 @@ class StreamProcessor extends AbstractProcessor {
 
 		// Check to see if a response body is present
 		if (!(statusCode < 200 || statusCode == 204 || statusCode == 205 || statusCode == 304)) {
-			String contentType = coyoteResponse.getContentType();
+			String contentType = responseData.getContentType();
 			if (contentType != null) {
 				headers.setValue("content-type").setString(contentType);
 			}
-			String contentLanguage = coyoteResponse.getContentLanguage();
+			String contentLanguage = responseData.getContentLanguage();
 			if (contentLanguage != null) {
 				headers.setValue("content-language").setString(contentLanguage);
 			}
 			// Add a content-length header if a content length has been set unless
 			// the application has already added one
-			long contentLength = coyoteResponse.getContentLengthLong();
+			long contentLength = responseData.getContentLengthLong();
 			if (contentLength != -1 && headers.getValue("content-length") == null) {
 				headers.addValue("content-length").setLong(contentLength);
 			}
@@ -169,9 +169,9 @@ class StreamProcessor extends AbstractProcessor {
 			if (statusCode == 205) {
 				// RFC 7231 requires the server to explicitly signal an empty
 				// response in this case
-				coyoteResponse.setContentLength(0);
+				responseData.setContentLength(0);
 			} else {
-				coyoteResponse.setContentLength(-1);
+				responseData.setContentLength(-1);
 			}
 		}
 

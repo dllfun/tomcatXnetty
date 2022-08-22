@@ -183,7 +183,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 
 	};
 
-	Http2UpgradeHandler(Http2Protocol protocol, Adapter adapter, RequestData coyoteRequest) {
+	Http2UpgradeHandler(Http2Protocol protocol, Adapter adapter, RequestData requestData) {
 		super(STREAM_ID_ZERO);
 		this.protocol = protocol;
 		this.adapter = adapter;
@@ -201,12 +201,12 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 		pingManager.initiateDisabled = protocol.getInitiatePingDisabled();
 
 		// Initial HTTP request becomes stream 1.
-		if (coyoteRequest != null) {
+		if (requestData != null) {
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("upgradeHandler.upgrade", connectionId));
 			}
 			Integer key = Integer.valueOf(1);
-			Stream stream = new Stream(channel, key, this, coyoteRequest);
+			Stream stream = new Stream(key, this, requestData);
 			streams.put(key, stream);
 			maxActiveRemoteStreamId = 1;
 			activeRemoteStreamCount.set(1);
@@ -306,6 +306,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	protected void processStreamOnContainerThread(Stream stream) {
 		StreamProcessor streamProcessor = new StreamProcessor(this, stream, adapter);
 		// streamProcessor.setSslSupport(sslSupport);
+		stream.setCurrentProcessor(streamProcessor);
 		protocol.getHttp11Protocol().getHandler().processSocket(stream, SocketEvent.OPEN_READ, true);
 		// processStreamOnContainerThread(stream, streamProcessor,
 		// SocketEvent.OPEN_READ);
@@ -335,13 +336,8 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	}
 
 	@Override
-	public void setSslSupport(SSLSupport sslSupport) {
-		this.sslSupport = sslSupport;
-	}
-
-	@Override
 	public SSLSupport initSslSupport(String clientCertProvider) {
-		return this.sslSupport;
+		return this.channel.getSslSupport();
 	}
 
 	@Override
@@ -1092,7 +1088,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 
 		pruneClosedStreams(streamId);
 
-		Stream result = new Stream(channel, key, this);
+		Stream result = new Stream(key, this);
 		streams.put(key, result);
 		return result;
 	}
@@ -1102,7 +1098,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 
 		Integer key = Integer.valueOf(streamId);
 
-		Stream result = new Stream(channel, key, this, request);
+		Stream result = new Stream(key, this, request);
 		streams.put(key, result);
 		return result;
 	}

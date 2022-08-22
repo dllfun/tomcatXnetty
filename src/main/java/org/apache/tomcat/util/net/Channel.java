@@ -26,10 +26,32 @@ public interface Channel {
 
 	public Object getLock();
 
-	public SSLSupport getSslSupport(String clientCertProvider);
+	public SSLSupport initSslSupport(String clientCertProvider);
+
+	public void setSslSupport(SSLSupport sslSupport);
+
+	public SSLSupport getSslSupport();
 
 	// public boolean isProcessing();
 
 	// public void setProcessing(boolean processing);
+
+	/**
+	 * Protocols that support multiplexing (e.g. HTTP/2) should override this method
+	 * and return the appropriate ID.
+	 *
+	 * @return The stream ID associated with this request or {@code null} if a
+	 *         multiplexing protocol is not being used
+	 */
+	public Object getConnectionID();
+
+	/**
+	 * Protocols that support multiplexing (e.g. HTTP/2) should override this method
+	 * and return the appropriate ID.
+	 *
+	 * @return The stream ID associated with this request or {@code null} if a
+	 *         multiplexing protocol is not being used
+	 */
+	public Object getStreamID();
 
 }

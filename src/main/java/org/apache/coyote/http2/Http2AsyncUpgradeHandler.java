@@ -46,8 +46,8 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 	private Throwable error = null;
 	private IOException applicationIOE = null;
 
-	public Http2AsyncUpgradeHandler(Http2Protocol protocol, Adapter adapter, RequestData coyoteRequest) {
-		super(protocol, adapter, coyoteRequest);
+	public Http2AsyncUpgradeHandler(Http2Protocol protocol, Adapter adapter, RequestData requestData) {
+		super(protocol, adapter, requestData);
 	}
 
 	private CompletionHandler<Long, Void> errorCompletion = new CompletionHandler<Long, Void>() {

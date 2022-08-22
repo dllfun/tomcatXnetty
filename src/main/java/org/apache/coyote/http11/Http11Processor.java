@@ -71,6 +71,11 @@ public class Http11Processor extends AbstractProcessor {
 	private final AbstractHttp11Protocol<?> protocol;
 
 	/**
+	 * Head parser
+	 */
+	private final Http11HeadParser headParser;
+
+	/**
 	 * Input.
 	 */
 	private final Http11InputBuffer inputBuffer;
@@ -107,8 +112,10 @@ public class Http11Processor extends AbstractProcessor {
 
 		httpParser = new HttpParser(protocol.getRelaxedPathChars(), protocol.getRelaxedQueryChars());
 
-		inputBuffer = new Http11InputBuffer(this, protocol.getMaxHttpHeaderSize(), protocol.getRejectIllegalHeader(),
+		headParser = new Http11HeadParser(this, protocol.getMaxHttpHeaderSize(), protocol.getRejectIllegalHeader(),
 				httpParser);
+
+		inputBuffer = new Http11InputBuffer(this, httpParser);
 		// request.setInputBuffer(inputBuffer);
 
 		outputBuffer = new Http11OutputBuffer(this, protocol.getMaxHttpHeaderSize());
@@ -171,9 +178,9 @@ public class Http11Processor extends AbstractProcessor {
 			System.out.println("parse in io thread start");
 
 			try {
-				if (!inputBuffer.parseRequestLine(false, protocol.getConnectionTimeout(),
+				if (!headParser.parseRequestLine(false, protocol.getConnectionTimeout(),
 						protocol.getKeepAliveTimeout())) {
-					if (inputBuffer.getParsingRequestLinePhase() == -1) {
+					if (headParser.getParsingRequestLinePhase() == -1) {
 						return true;
 					} else if (handleIncompleteRequestLineRead()) {
 						return false;
@@ -190,7 +197,7 @@ public class Http11Processor extends AbstractProcessor {
 					// Set this every time in case limit has been changed via JMX
 					requestData.getMimeHeaders().setLimit(protocol.getMaxHeaderCount());
 					// Don't parse headers for HTTP/0.9
-					if (!inputBuffer.http09 && !inputBuffer.parseHeaders()) {
+					if (!inputBuffer.http09 && !headParser.parseHeaders()) {
 						// We've read part of the request, don't recycle it
 						// instead associate it with the socket
 						openSocket = true;
@@ -259,9 +266,9 @@ public class Http11Processor extends AbstractProcessor {
 
 			// Parsing the request header
 			try {
-				if (!inputBuffer.parseRequestLine(keptAlive, protocol.getConnectionTimeout(),
+				if (!headParser.parseRequestLine(keptAlive, protocol.getConnectionTimeout(),
 						protocol.getKeepAliveTimeout())) {
-					if (inputBuffer.getParsingRequestLinePhase() == -1) {
+					if (headParser.getParsingRequestLinePhase() == -1) {
 						return SocketState.UPGRADING;
 					} else if (handleIncompleteRequestLineRead()) {
 						break;
@@ -282,7 +289,7 @@ public class Http11Processor extends AbstractProcessor {
 					// Set this every time in case limit has been changed via JMX
 					requestData.getMimeHeaders().setLimit(protocol.getMaxHeaderCount());
 					// Don't parse headers for HTTP/0.9
-					if (!inputBuffer.http09 && !inputBuffer.parseHeaders()) {
+					if (!inputBuffer.http09 && !headParser.parseHeaders()) {
 						// We've read part of the request, don't recycle it
 						// instead associate it with the socket
 						openSocket = true;
@@ -439,6 +446,7 @@ public class Http11Processor extends AbstractProcessor {
 				if (getErrorState().isIoAllowed()) {
 					requestData.recycle();
 					responseData.recycle();
+					headParser.nextRequest();
 					inputBuffer.nextRequest();
 					outputBuffer.nextRequest();
 				}
@@ -495,6 +503,7 @@ public class Http11Processor extends AbstractProcessor {
 		SocketChannel socketChannel = (SocketChannel) channel;
 		super.setChannel(channel);
 		this.channel = socketChannel;
+		headParser.init(socketChannel);
 		inputBuffer.init(socketChannel);
 		outputBuffer.init(socketChannel);
 	}
@@ -520,7 +529,7 @@ public class Http11Processor extends AbstractProcessor {
 		// open
 		openSocket = true;
 		// Check to see if we have read any of the request line yet
-		if (inputBuffer.getParsingRequestLinePhase() > 1) {
+		if (headParser.getParsingRequestLinePhase() > 1) {
 			// Started to read request line.
 			if (protocol.isPaused()) {
 				// Partially processed the request so need to respond
@@ -603,6 +612,7 @@ public class Http11Processor extends AbstractProcessor {
 			endRequest();
 			requestData.recycle();
 			responseData.recycle();
+			headParser.nextRequest();
 			inputBuffer.nextRequest();
 			outputBuffer.nextRequest();
 			if (channel.isReadPending()) {
@@ -774,6 +784,7 @@ public class Http11Processor extends AbstractProcessor {
 		request.setResponse(response);
 		getAdapter().checkRecycled(request, response);
 		super.recycle();
+		headParser.recycle();
 		inputBuffer.recycle();
 		outputBuffer.recycle();
 		upgradeToken = null;
