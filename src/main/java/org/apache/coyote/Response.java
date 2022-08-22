@@ -135,7 +135,7 @@ public final class Response {
 	}
 
 	public void actionCLOSE_NOW(Object param) {
-		processor.closeNow(param);
+		responseAction.closeNow(param);
 	}
 
 	// -------------------- State --------------------

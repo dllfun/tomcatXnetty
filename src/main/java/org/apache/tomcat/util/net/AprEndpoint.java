@@ -2364,7 +2364,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 		}
 
 		@Override
-		public SSLSupport getSslSupport(String clientCertProvider) {
+		public SSLSupport initSslSupport(String clientCertProvider) {
 			if (getEndpoint().isSSLEnabled()) {
 				return new AprSSLSupport(this, clientCertProvider);
 			} else {

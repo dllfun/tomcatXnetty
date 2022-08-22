@@ -53,10 +53,10 @@ public class UpgradeProcessorInternal extends UpgradeProcessorBase {
 		return internalHttpUpgradeHandler.upgradeDispatch(status);
 	}
 
-	@Override
-	public final void setSslSupport(SSLSupport sslSupport) {
-		internalHttpUpgradeHandler.setSslSupport(sslSupport);
-	}
+	// @Override
+	// public final void setSslSupport(SSLSupport sslSupport) {
+	// internalHttpUpgradeHandler.setSslSupport(sslSupport);
+	// }
 
 	@Override
 	public void pause() {

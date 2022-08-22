@@ -5,7 +5,7 @@ import java.nio.ByteBuffer;
 
 import org.apache.tomcat.util.buf.ByteBufferUtils;
 
-public class SocketBufferHandler implements ApplicationBufferHandler {
+public class SocketBufferHandler {
 
 	static SocketBufferHandler EMPTY = new SocketBufferHandler(0, 0, false) {
 		@Override
@@ -207,17 +207,10 @@ public class SocketBufferHandler implements ApplicationBufferHandler {
 		}
 	}
 
-	@Override
-	public void setAppReadBuffer(ByteBuffer buffer) {
-		this.appReadBuffer = buffer;
-	}
-
-	@Override
 	public ByteBuffer getAppReadBuffer() {
 		return this.appReadBuffer;
 	}
 
-	@Override
 	public void expandAppReadBuffer(int size) {
 		if (this.appReadBuffer.capacity() >= size) {
 			this.appReadBuffer.limit(size);

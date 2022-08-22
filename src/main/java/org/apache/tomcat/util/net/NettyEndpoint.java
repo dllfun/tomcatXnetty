@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLEngineResult.HandshakeStatus;
 import javax.net.ssl.SSLEngineResult.Status;
 
@@ -268,6 +269,8 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		private ByteBufWrapper appReadBuffer = new ByteBufWrapper(this);
 
 		private volatile boolean needDispatch = true;
+
+		protected SSLEngine sslEngine;
 
 		public NettyChannel(SocketChannel channel, NettyEndpoint endpoint) {
 			super(channel, endpoint);
@@ -663,8 +666,12 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		}
 
 		@Override
-		public SSLSupport getSslSupport(String clientCertProvider) {
-			// TODO Auto-generated method stub
+		public SSLSupport initSslSupport(String clientCertProvider) {
+			SSLEngine sslEngine = this.sslEngine;
+			if (sslEngine != null) {
+				SSLSession session = sslEngine.getSession();
+				return ((NettyEndpoint) getEndpoint()).getSslImplementation().getSSLSupport(session);
+			}
 			return null;
 		}
 
@@ -993,8 +1000,6 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 		protected boolean sniComplete = false;
 
-		protected SSLEngine sslEngine;
-
 		protected ByteBuf netInBuffer;
 		// protected ByteBuf netOutBuffer;
 		private Cumulator cumulator = ByteToMessageDecoder.MERGE_CUMULATOR;
@@ -1014,7 +1019,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 				if (handshakeComplete) {
 
-					ByteBuf msg2 = unwrap(ctx);
+					ByteBuf msg2 = unwrap(nettyChannel, ctx);
 					if (msg2 != null) {
 						ctx.fireChannelRead(msg2);
 					}
@@ -1022,7 +1027,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				} else {
 
 					if (!sniComplete) {
-						int sniResult = processSNI(ctx);
+						int sniResult = processSNI(nettyChannel, ctx);
 						if (sniResult == 0) {
 							sniComplete = true;
 						} else {
@@ -1039,12 +1044,12 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 							throw new IOException(sm.getString("channel.nio.ssl.notHandshaking"));
 						case FINISHED:
 							if (NettyEndpoint.this.hasNegotiableProtocols()) {
-								if (sslEngine instanceof SSLUtil.ProtocolInfo) {
+								if (nettyChannel.sslEngine instanceof SSLUtil.ProtocolInfo) {
 									nettyChannel.setNegotiatedProtocol(
-											((SSLUtil.ProtocolInfo) sslEngine).getNegotiatedProtocol());
+											((SSLUtil.ProtocolInfo) nettyChannel.sslEngine).getNegotiatedProtocol());
 								} else if (JreCompat.isAlpnSupported()) {
 									nettyChannel.setNegotiatedProtocol(
-											JreCompat.getInstance().getApplicationProtocol(sslEngine));
+											JreCompat.getInstance().getApplicationProtocol(nettyChannel.sslEngine));
 								}
 							}
 							// we are complete if we have delivered the last package
@@ -1055,13 +1060,13 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 							System.out.println("need wrap");
 							// perform the wrap function
 							try {
-								handshake = handshakeWrap(ctx);
+								handshake = handshakeWrap(nettyChannel, ctx);
 							} catch (SSLException e) {
-								handshake = handshakeWrap(ctx);
+								handshake = handshakeWrap(nettyChannel, ctx);
 							}
 							if (handshake.getStatus() == Status.OK) {
 								if (handshakeStatus == HandshakeStatus.NEED_TASK) {
-									handshakeStatus = tasks();
+									handshakeStatus = tasks(nettyChannel);
 								}
 							} else if (handshake.getStatus() == Status.CLOSED) {
 								// close
@@ -1086,10 +1091,10 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 						case NEED_UNWRAP:
 							System.out.println("need unwrap");
 							// perform the unwrap function
-							handshake = handshakeUnwrap(true);
+							handshake = handshakeUnwrap(nettyChannel, true);
 							if (handshake.getStatus() == Status.OK) {
 								if (handshakeStatus == HandshakeStatus.NEED_TASK) {
-									handshakeStatus = tasks();
+									handshakeStatus = tasks(nettyChannel);
 								}
 							} else if (handshake.getStatus() == Status.BUFFER_UNDERFLOW) {
 								// read more data, reregister for OP_READ
@@ -1101,7 +1106,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 							}
 							break;
 						case NEED_TASK:
-							handshakeStatus = tasks();
+							handshakeStatus = tasks(nettyChannel);
 							break;
 						default:
 							throw new IllegalStateException(
@@ -1127,7 +1132,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		 *
 		 * @throws IOException If an I/O error occurs during the SNI processing
 		 */
-		private int processSNI(ChannelHandlerContext ctx) throws IOException {
+		private int processSNI(NettyChannel nettyChannel, ChannelHandlerContext ctx) throws IOException {
 			System.out.println("processSNI start");
 			// Read some data into the network input buffer so we can peek at it.
 			if (netInBuffer.readableBytes() == 0) {
@@ -1169,12 +1174,12 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				throw new IOException(sm.getString("channel.nio.ssl.foundHttp"));
 			}
 
-			sslEngine = NettyEndpoint.this.createSSLEngine(hostName, clientRequestedCiphers,
+			nettyChannel.sslEngine = NettyEndpoint.this.createSSLEngine(hostName, clientRequestedCiphers,
 					clientRequestedApplicationProtocols);
 
 			// Initiate handshake
-			sslEngine.beginHandshake();
-			handshakeStatus = sslEngine.getHandshakeStatus();
+			nettyChannel.sslEngine.beginHandshake();
+			handshakeStatus = nettyChannel.sslEngine.getHandshakeStatus();
 			System.out.println("processSNI end");
 			return 0;
 		}
@@ -1186,16 +1191,17 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		 * @return the result
 		 * @throws IOException An IO error occurred
 		 */
-		protected SSLEngineResult handshakeWrap(ChannelHandlerContext ctx) throws IOException {
+		protected SSLEngineResult handshakeWrap(NettyChannel nettyChannel, ChannelHandlerContext ctx)
+				throws IOException {
 			// this should never be called with a network buffer that contains data
 			// so we can clear it here.
-			ByteBuf netOutBuffer = ctx.alloc().buffer(sslEngine.getSession().getPacketBufferSize());
+			ByteBuf netOutBuffer = ctx.alloc().buffer(nettyChannel.sslEngine.getSession().getPacketBufferSize());
 			netOutBuffer.writerIndex(netOutBuffer.capacity());
 			// perform the wrap
 			ByteBuffer byteBuffer = netOutBuffer.nioBuffer();
 
 			// getBufHandler().configureWriteBufferForRead();
-			SSLEngineResult result = sslEngine.wrap(Unpooled.EMPTY_BUFFER.nioBuffer(), byteBuffer);
+			SSLEngineResult result = nettyChannel.sslEngine.wrap(Unpooled.EMPTY_BUFFER.nioBuffer(), byteBuffer);
 			// prepare the results to be written
 			// set the status
 			handshakeStatus = result.getHandshakeStatus();
@@ -1211,12 +1217,12 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		 * 
 		 * @return the status
 		 */
-		protected SSLEngineResult.HandshakeStatus tasks() {
+		protected SSLEngineResult.HandshakeStatus tasks(NettyChannel nettyChannel) {
 			Runnable r = null;
-			while ((r = sslEngine.getDelegatedTask()) != null) {
+			while ((r = nettyChannel.sslEngine.getDelegatedTask()) != null) {
 				r.run();
 			}
-			return sslEngine.getHandshakeStatus();
+			return nettyChannel.sslEngine.getHandshakeStatus();
 		}
 
 		/**
@@ -1226,7 +1232,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		 * @return the result
 		 * @throws IOException An IO error occurred
 		 */
-		protected SSLEngineResult handshakeUnwrap(boolean doread) throws IOException {
+		protected SSLEngineResult handshakeUnwrap(NettyChannel nettyChannel, boolean doread) throws IOException {
 
 			SSLEngineResult result;
 			boolean cont = false;
@@ -1239,7 +1245,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				// netInBuffer.flip();
 				// call unwrap
 				// getBufHandler().configureReadBufferForWrite();
-				result = sslEngine.unwrap(byteBuffer, byteBuffer);
+				result = nettyChannel.sslEngine.unwrap(byteBuffer, byteBuffer);
 				// compact the buffer, this is an optional method, wonder what would happen if
 				// we didn't
 				// netInBuffer.compact();
@@ -1248,7 +1254,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				if (result.getStatus() == SSLEngineResult.Status.OK
 						&& result.getHandshakeStatus() == HandshakeStatus.NEED_TASK) {
 					// execute tasks if we need to
-					handshakeStatus = tasks();
+					handshakeStatus = tasks(nettyChannel);
 				}
 				// perform another unwrap?
 				cont = result.getStatus() == SSLEngineResult.Status.OK
@@ -1258,7 +1264,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			return result;
 		}
 
-		private ByteBuf unwrap(ChannelHandlerContext ctx) throws IOException {
+		private ByteBuf unwrap(NettyChannel nettyChannel, ChannelHandlerContext ctx) throws IOException {
 			ByteBuffer byteBuffer = netInBuffer.nioBuffer();
 			byteBuffer.position(netInBuffer.readerIndex());
 			byteBuffer.limit(netInBuffer.writerIndex());
@@ -1275,7 +1281,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			do {
 				// prepare the buffer
 				// unwrap the data
-				unwrap = sslEngine.unwrap(byteBuffer, dst);
+				unwrap = nettyChannel.sslEngine.unwrap(byteBuffer, dst);
 				// if (netread > 0) {
 				// System.out.println(this + "read内容:" + new String(dst.array(), 0,
 				// dst.limit()));
@@ -1288,7 +1294,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 					read += unwrap.bytesProduced();
 					// perform any tasks if needed
 					if (unwrap.getHandshakeStatus() == HandshakeStatus.NEED_TASK) {
-						tasks();
+						tasks(nettyChannel);
 					}
 					// if we need more network data, then bail out for now.
 					if (unwrap.getStatus() == Status.BUFFER_UNDERFLOW) {
@@ -1317,9 +1323,10 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 		@Override
 		public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
 			if (msg instanceof ByteBuf) {
 
-				ByteBuf msg2 = wrap(ctx, (ByteBuf) msg);
+				ByteBuf msg2 = wrap(nettyChannel, ctx, (ByteBuf) msg);
 
 				super.write(ctx, msg2, promise);
 			} else {
@@ -1327,13 +1334,13 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			}
 		}
 
-		private ByteBuf wrap(ChannelHandlerContext ctx, ByteBuf buf) throws IOException {
+		private ByteBuf wrap(NettyChannel nettyChannel, ChannelHandlerContext ctx, ByteBuf buf) throws IOException {
 			ByteBuffer src = buf.nioBuffer();
 			ByteBuf dstBuf = ctx.alloc().buffer(65535);
 			dstBuf.writerIndex(dstBuf.capacity());
 			ByteBuffer dst = dstBuf.nioBuffer();
 
-			SSLEngineResult result = sslEngine.wrap(src, dst);
+			SSLEngineResult result = nettyChannel.sslEngine.wrap(src, dst);
 			// The number of bytes written
 			int written = result.bytesConsumed();
 			dstBuf.readerIndex(0);
@@ -1341,7 +1348,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 			if (result.getStatus() == Status.OK) {
 				if (result.getHandshakeStatus() == HandshakeStatus.NEED_TASK) {
-					tasks();
+					tasks(nettyChannel);
 				}
 			} else {
 				throw new IOException(sm.getString("channel.nio.ssl.wrapFail", result.getStatus()));

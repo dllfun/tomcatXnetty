@@ -21,7 +21,6 @@ import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 import javax.servlet.RequestDispatcher;
 
@@ -33,7 +32,6 @@ import org.apache.tomcat.util.log.UserDataHelper;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -65,7 +63,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	protected final ResponseData responseData;
 	// protected InputHandler inputHandler;
 	protected volatile Channel channel = null;
-	protected volatile SSLSupport sslSupport;
+	// protected volatile SSLSupport sslSupport;
 
 	/**
 	 * Error state for the request/response currently being processed.
@@ -168,10 +166,10 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		return channel;
 	}
 
-	@Override
-	public final void setSslSupport(SSLSupport sslSupport) {
-		this.sslSupport = sslSupport;
-	}
+	// @Override
+	// public final void setSslSupport(SSLSupport sslSupport) {
+	// this.sslSupport = sslSupport;
+	// }
 
 	/**
 	 * Provides a mechanism to trigger processing on a container thread.
@@ -665,34 +663,9 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	}
 
 	// @Override
-	public void closeNow(Object param) {
-		// Prevent further writes to the response
-		setSwallowResponse();
-		if (param instanceof Throwable) {
-			setErrorState(ErrorState.CLOSE_NOW, (Throwable) param);
-		} else {
-			setErrorState(ErrorState.CLOSE_NOW, null);
-		}
-	}
-
-	// @Override
 	// public void disableSwallowInput() {
 
 	// }
-
-	// @Override
-	public void actionREQ_SSL_ATTRIBUTE() {
-		populateSslRequestAttributes();
-	}
-
-	// @Override
-	public void actionREQ_SSL_CERTIFICATE() {
-		try {
-			sslReHandShake();
-		} catch (IOException ioe) {
-			setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
-		}
-	}
 
 	// @Override
 	// public void actionREQUEST_BODY_FULLY_READ(AtomicBoolean param) {
@@ -746,18 +719,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 //		AtomicBoolean result = param;
 //		result.set(isTrailerFieldsSupported());
 //	}
-
-	// @Override
-	public void actionCONNECTION_ID(AtomicReference<Object> param) {
-		AtomicReference<Object> result = param;
-		result.set(getConnectionID());
-	}
-
-	// @Override
-	public void actionSTREAM_ID(AtomicReference<Object> param) {
-		AtomicReference<Object> result = param;
-		result.set(getStreamID());
-	}
 
 	public void handleIOException(IOException ioe) {
 		if (ioe instanceof CloseNowException) {
@@ -844,56 +805,9 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 
 	// protected abstract void setRequestBody(ByteChunk body);
 
-	protected abstract void setSwallowResponse();
+	// protected abstract void setSwallowResponse();
 
 	// protected abstract void disableSwallowRequest();
-
-	/**
-	 * Populate the TLS related request attributes from the {@link SSLSupport}
-	 * instance associated with this processor. Protocols that populate TLS
-	 * attributes from a different source (e.g. AJP) should override this method.
-	 */
-	protected void populateSslRequestAttributes() {
-		try {
-			if (sslSupport != null) {
-				Object sslO = sslSupport.getCipherSuite();
-				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.CIPHER_SUITE_KEY, sslO);
-				}
-				sslO = sslSupport.getPeerCertificateChain();
-				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
-				}
-				sslO = sslSupport.getKeySize();
-				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.KEY_SIZE_KEY, sslO);
-				}
-				sslO = sslSupport.getSessionId();
-				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.SESSION_ID_KEY, sslO);
-				}
-				sslO = sslSupport.getProtocol();
-				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, sslO);
-				}
-				requestData.setAttribute(SSLSupport.SESSION_MGR, sslSupport);
-			}
-		} catch (Exception e) {
-			getLog().warn(sm.getString("abstractProcessor.socket.ssl"), e);
-		}
-	}
-
-	/**
-	 * Processors that can perform a TLS re-handshake (e.g. HTTP/1.1) should
-	 * override this method and implement the re-handshake.
-	 *
-	 * @throws IOException If authentication is required then there will be I/O with
-	 *                     the client and this exception will be thrown if that goes
-	 *                     wrong
-	 */
-	protected void sslReHandShake() throws IOException {
-		// NO-OP
-	}
 
 	// @Override
 //	public void processSocketEvent(SocketEvent event, boolean dispatch) {
@@ -1017,28 +931,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 //	protected boolean isTrailerFieldsSupported() {
 //		return false;
 //	}
-
-	/**
-	 * Protocols that support multiplexing (e.g. HTTP/2) should override this method
-	 * and return the appropriate ID.
-	 *
-	 * @return The stream ID associated with this request or {@code null} if a
-	 *         multiplexing protocol is not being used
-	 */
-	protected Object getConnectionID() {
-		return null;
-	}
-
-	/**
-	 * Protocols that support multiplexing (e.g. HTTP/2) should override this method
-	 * and return the appropriate ID.
-	 *
-	 * @return The stream ID associated with this request or {@code null} if a
-	 *         multiplexing protocol is not being used
-	 */
-	protected Object getStreamID() {
-		return null;
-	}
 
 	/**
 	 * Flush any pending writes. Used during non-blocking writes to flush any

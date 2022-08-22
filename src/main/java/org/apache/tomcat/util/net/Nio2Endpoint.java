@@ -1542,7 +1542,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		 * @param clientCertProvider Ignored for this implementation
 		 */
 		@Override
-		public SSLSupport getSslSupport(String clientCertProvider) {
+		public SSLSupport initSslSupport(String clientCertProvider) {
 			if (getSocket() instanceof SecureNio2Channel) {
 				SecureNio2Channel ch = (SecureNio2Channel) getSocket();
 				SSLEngine sslEngine = ch.getSslEngine();

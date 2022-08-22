@@ -30,6 +30,7 @@ import java.util.function.Supplier;
 
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.CloseNowException;
+import org.apache.coyote.ErrorState;
 import org.apache.coyote.DispatchHandler.ConcurrencyControlled;
 import org.apache.coyote.RequestAction;
 import org.apache.coyote.RequestData;
@@ -145,8 +146,8 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 	}
 
 	@Override
-	public SSLSupport getSslSupport(String clientCertProvider) {
-		return channel.getSslSupport(clientCertProvider);
+	public SSLSupport initSslSupport(String clientCertProvider) {
+		return channel.getSslSupport();
 	}
 
 	private void prepareRequest() {
@@ -756,6 +757,16 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		handler.controlled.released(channel);
 	}
 
+	@Override
+	public Object getConnectionID() {
+		return this.getConnectionId();
+	}
+
+	@Override
+	public Object getStreamID() {
+		return this.getIdentifier().toString();
+	}
+
 	private static void push(final Http2UpgradeHandler handler, final RequestData request, final Stream stream)
 			throws IOException {
 		if (org.apache.coyote.Constants.IS_SECURITY_ENABLED) {
@@ -991,7 +1002,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		}
 	}
 
-	class StreamInputBuffer implements RequestAction {
+	class StreamInputBuffer extends RequestAction {
 
 		/*
 		 * Two buffers are required to avoid various multi-threading issues. These
@@ -1198,17 +1209,6 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		}
 
 		/**
-		 * Processors that populate request attributes directly (e.g. AJP) should
-		 * over-ride this method and return {@code false}.
-		 *
-		 * @return {@code true} if the SocketWrapper should be used to populate the
-		 *         request attributes, otherwise {@code false}.
-		 */
-		protected boolean getPopulateRequestAttributesFromSocket() {
-			return true;
-		}
-
-		/**
 		 * Populate the remote host request attribute. Processors (e.g. AJP) that
 		 * populate this from an alternative source should override this method.
 		 */
@@ -1218,40 +1218,40 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 			}
 		}
 
-		// @Override
+		@Override
 		public void actionREQ_HOST_ADDR_ATTRIBUTE() {
 			if (getPopulateRequestAttributesFromSocket() && channel != null) {
 				requestData.remoteAddr().setString(channel.getRemoteAddr());
 			}
 		}
 
-		// @Override
+		@Override
 		public void actionREQ_HOST_ATTRIBUTE() {
 			populateRequestAttributeRemoteHost();
 		}
 
-		// @Override
+		@Override
 		public void actionREQ_LOCALPORT_ATTRIBUTE() {
 			if (getPopulateRequestAttributesFromSocket() && channel != null) {
 				requestData.setLocalPort(channel.getLocalPort());
 			}
 		}
 
-		// @Override
+		@Override
 		public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
 			if (getPopulateRequestAttributesFromSocket() && channel != null) {
 				requestData.localAddr().setString(channel.getLocalAddr());
 			}
 		}
 
-		// @Override
+		@Override
 		public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
 			if (getPopulateRequestAttributesFromSocket() && channel != null) {
 				requestData.localName().setString(channel.getLocalName());
 			}
 		}
 
-		// @Override
+		@Override
 		public void actionREQ_REMOTEPORT_ATTRIBUTE() {
 			if (getPopulateRequestAttributesFromSocket() && channel != null) {
 				requestData.setRemotePort(channel.getRemotePort());
@@ -1342,5 +1342,66 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 			}
 		}
 
+		/**
+		 * Populate the TLS related request attributes from the {@link SSLSupport}
+		 * instance associated with this processor. Protocols that populate TLS
+		 * attributes from a different source (e.g. AJP) should override this method.
+		 */
+		protected void populateSslRequestAttributes() {
+			try {
+				SSLSupport sslSupport = channel.getSslSupport();
+				if (sslSupport != null) {
+					Object sslO = sslSupport.getCipherSuite();
+					if (sslO != null) {
+						requestData.setAttribute(SSLSupport.CIPHER_SUITE_KEY, sslO);
+					}
+					sslO = sslSupport.getPeerCertificateChain();
+					if (sslO != null) {
+						requestData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
+					}
+					sslO = sslSupport.getKeySize();
+					if (sslO != null) {
+						requestData.setAttribute(SSLSupport.KEY_SIZE_KEY, sslO);
+					}
+					sslO = sslSupport.getSessionId();
+					if (sslO != null) {
+						requestData.setAttribute(SSLSupport.SESSION_ID_KEY, sslO);
+					}
+					sslO = sslSupport.getProtocol();
+					if (sslO != null) {
+						requestData.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, sslO);
+					}
+					requestData.setAttribute(SSLSupport.SESSION_MGR, sslSupport);
+				}
+			} catch (Exception e) {
+				log.warn(sm.getString("abstractProcessor.socket.ssl"), e);
+			}
+		}
+
+		@Override
+		public void actionREQ_SSL_ATTRIBUTE() {
+			populateSslRequestAttributes();
+		}
+
+		@Override
+		public void actionREQ_SSL_CERTIFICATE() {
+			try {
+				sslReHandShake();
+			} catch (IOException ioe) {
+				((StreamProcessor) currentProcessor).setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
+			}
+		}
+
+		/**
+		 * Processors that can perform a TLS re-handshake (e.g. HTTP/1.1) should
+		 * override this method and implement the re-handshake.
+		 *
+		 * @throws IOException If authentication is required then there will be I/O with
+		 *                     the client and this exception will be thrown if that goes
+		 *                     wrong
+		 */
+		protected void sslReHandShake() throws IOException {
+			// NO-OP
+		}
 	}
 }

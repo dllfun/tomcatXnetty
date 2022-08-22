@@ -8,7 +8,7 @@ public abstract class AbstractChannel implements Channel {
 	 * The org.apache.coyote.Processor instance currently associated with the
 	 * wrapper.
 	 */
-	protected Object currentProcessor = null;
+	protected volatile Object currentProcessor = null;
 
 	/**
 	 * Used to record the first IOException that occurs during non-blocking
@@ -20,6 +20,8 @@ public abstract class AbstractChannel implements Channel {
 	private volatile Throwable closeException = null;
 
 	// private volatile boolean processing = false;
+
+	protected volatile SSLSupport sslSupport;
 
 	@Override
 	public IOException getError() {
@@ -70,5 +72,25 @@ public abstract class AbstractChannel implements Channel {
 	// public void setProcessing(boolean processing) {
 	// this.processing = processing;
 	// }
+
+	@Override
+	public void setSslSupport(SSLSupport sslSupport) {
+		this.sslSupport = sslSupport;
+	}
+
+	@Override
+	public SSLSupport getSslSupport() {
+		return sslSupport;
+	}
+
+	@Override
+	public Object getConnectionID() {
+		return null;
+	}
+
+	@Override
+	public Object getStreamID() {
+		return null;
+	}
 
 }

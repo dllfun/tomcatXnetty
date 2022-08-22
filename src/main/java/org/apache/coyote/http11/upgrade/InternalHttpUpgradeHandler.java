@@ -35,7 +35,7 @@ public interface InternalHttpUpgradeHandler extends HttpUpgradeHandler {
 
 	void setChannel(SocketChannel channel);
 
-	void setSslSupport(SSLSupport sslSupport);
+	// void setSslSupport(SSLSupport sslSupport);
 
 	void pause();
 

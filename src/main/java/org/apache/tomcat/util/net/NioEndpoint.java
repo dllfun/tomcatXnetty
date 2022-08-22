@@ -585,27 +585,31 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 						log.error(sm.getString("endpoint.nio.registerFail"), x);
 					}
 				} else {
-					final SelectionKey key = channel.getIOChannel().keyFor(getSelector());
-					if (key == null) {
-						// The key was cancelled (e.g. due to socket closure)
-						// and removed from the selector while it was being
-						// processed. Count down the connections at this point
-						// since it won't have been counted down when the socket
-						// closed.
-						socketWrapper.close();
+					if (channel.getIOChannel() == null) {
+						System.out.println(channel + "IOChannel has Closed");
 					} else {
-						final NioSocketWrapper attachment = (NioSocketWrapper) key.attachment();
-						if (attachment != null) {
-							// We are registering the key to start with, reset the fairness counter.
-							try {
-								int ops = key.interestOps() | interestOps;
-								// attachment.interestOps(ops);
-								key.interestOps(ops);
-							} catch (CancelledKeyException ckx) {
-								cancelledKey(key, socketWrapper);
-							}
+						final SelectionKey key = channel.getIOChannel().keyFor(getSelector());
+						if (key == null) {
+							// The key was cancelled (e.g. due to socket closure)
+							// and removed from the selector while it was being
+							// processed. Count down the connections at this point
+							// since it won't have been counted down when the socket
+							// closed.
+							socketWrapper.close();
 						} else {
-							cancelledKey(key, attachment);
+							final NioSocketWrapper attachment = (NioSocketWrapper) key.attachment();
+							if (attachment != null) {
+								// We are registering the key to start with, reset the fairness counter.
+								try {
+									int ops = key.interestOps() | interestOps;
+									// attachment.interestOps(ops);
+									key.interestOps(ops);
+								} catch (CancelledKeyException ckx) {
+									cancelledKey(key, socketWrapper);
+								}
+							} else {
+								cancelledKey(key, attachment);
+							}
 						}
 					}
 				}
@@ -1417,7 +1421,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		 * @param clientCertProvider Ignored for this implementation
 		 */
 		@Override
-		public SSLSupport getSslSupport(String clientCertProvider) {
+		public SSLSupport initSslSupport(String clientCertProvider) {
 			if (getSocket() instanceof SecureNioChannel) {
 				SecureNioChannel ch = (SecureNioChannel) getSocket();
 				SSLEngine sslEngine = ch.getSslEngine();
@@ -1542,7 +1546,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 				if (nBytes > 0 || (nBytes == 0 && !buffersArrayHasRemaining(buffers, offset, length))) {
 					// The bytes processed are only updated in the completion handler
 					if (nBytes == 0) {
-						System.out.println();
+						System.out.println("nBytes == 0");
 					}
 					completion.completed(Long.valueOf(nBytes), this);
 				} else if (nBytes < 0 || getError() != null) {

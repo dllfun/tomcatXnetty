@@ -94,12 +94,6 @@ public class Http11Processor extends AbstractProcessor {
 	private boolean readComplete = true;
 
 	/**
-	 * Content delimiter for the request (if false, the connection will be closed at
-	 * the end of the request).
-	 */
-	protected boolean contentDelimitation = true;
-
-	/**
 	 * Instance of the new protocol to use after the HTTP connection has been
 	 * upgraded.
 	 */
@@ -692,40 +686,6 @@ public class Http11Processor extends AbstractProcessor {
 	// return inputBuffer.available(doRead);
 	// }
 
-	@Override
-	protected final void setSwallowResponse() {
-		outputBuffer.responseFinished = true;
-	}
-
-	@Override
-	protected final void sslReHandShake() throws IOException {
-		if (sslSupport != null) {
-			// Consume and buffer the request body, so that it does not
-			// interfere with the client's handshake messages
-			InputFilter[] inputFilters = inputBuffer.getFilters();
-			((BufferedInputFilter) inputFilters[Constants.BUFFERED_FILTER]).setLimit(protocol.getMaxSavePostSize());
-			inputBuffer.addActiveFilter(inputFilters[Constants.BUFFERED_FILTER]);
-
-			/*
-			 * Outside the try/catch because we want I/O errors during renegotiation to be
-			 * thrown for the caller to handle since they will be fatal to the connection.
-			 */
-			channel.doClientAuth(sslSupport);
-			try {
-				/*
-				 * Errors processing the cert chain do not affect the client connection so they
-				 * can be logged and swallowed here.
-				 */
-				Object sslO = sslSupport.getPeerCertificateChain();
-				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
-				}
-			} catch (IOException ioe) {
-				log.warn(sm.getString("http11processor.socket.ssl"), ioe);
-			}
-		}
-	}
-
 //	@Override
 //	protected final boolean isReadyForWrite() {
 //		return outputBuffer.isReady();
@@ -818,7 +778,7 @@ public class Http11Processor extends AbstractProcessor {
 		outputBuffer.recycle();
 		upgradeToken = null;
 		channel = null;
-		sslSupport = null;
+		// sslSupport = null;
 	}
 
 	@Override

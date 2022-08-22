@@ -28,7 +28,7 @@ import org.apache.coyote.http11.OutputFilter;
 import org.apache.coyote.http2.Stream.StreamOutputBuffer;
 import org.apache.tomcat.util.net.SendfileState;
 
-public class Http2OutputBuffer implements ResponseAction {
+public class Http2OutputBuffer extends ResponseAction {
 
 	private Stream stream;
 	private final ResponseData responseData;
@@ -39,6 +39,7 @@ public class Http2OutputBuffer implements ResponseAction {
 
 	public Http2OutputBuffer(StreamProcessor processor, Stream stream, ResponseData responseData,
 			StreamOutputBuffer streamOutputBuffer) {
+		super(processor);
 		this.processor = processor;
 		this.stream = stream;
 		this.responseData = responseData;
@@ -105,7 +106,7 @@ public class Http2OutputBuffer implements ResponseAction {
 		}
 	}
 
-	// @Override
+	@Override
 	public void commit() {
 		if (!responseData.isCommitted()) {
 			try {
@@ -117,7 +118,7 @@ public class Http2OutputBuffer implements ResponseAction {
 		}
 	}
 
-	// @Override
+	@Override
 	public void close() {
 		commit();
 		try {
@@ -127,7 +128,7 @@ public class Http2OutputBuffer implements ResponseAction {
 		}
 	}
 
-	// @Override
+	@Override
 	public void sendAck() {
 		ack();
 	}
@@ -143,7 +144,7 @@ public class Http2OutputBuffer implements ResponseAction {
 		}
 	}
 
-	// @Override
+	@Override
 	public void clientFlush() {
 		commit();
 		try {
@@ -168,6 +169,11 @@ public class Http2OutputBuffer implements ResponseAction {
 			sendfileData.stream = stream;
 			sendfileData.outputBuffer = this;
 		}
+	}
+
+	@Override
+	public final void setSwallowResponse() {
+		// NO-OP
 	}
 
 	// @Override

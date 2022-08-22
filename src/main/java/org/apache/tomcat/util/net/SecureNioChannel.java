@@ -1009,10 +1009,9 @@ public class SecureNioChannel extends NioChannel {
 	}
 
 	private void printOutBuffer(int pos) {
+		if ("1".equals("1"))
+			return;
 		synchronized (endpoint) {
-			if (netOutBuffer.get(0) == 23) {
-				System.out.println("");
-			}
 			System.out.print(socketChannel.socket().getPort() + " write:[");
 			for (int i = pos; i < netOutBuffer.position(); i++) {
 				if (i > pos)

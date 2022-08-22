@@ -34,6 +34,7 @@ import org.apache.coyote.Request;
 import org.apache.coyote.RequestAction;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.Response;
+import org.apache.coyote.http11.filters.BufferedInputFilter;
 import org.apache.coyote.http11.filters.SavedRequestInputFilter;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -43,6 +44,7 @@ import org.apache.tomcat.util.http.HeaderUtil;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.parser.HttpParser;
 import org.apache.tomcat.util.http.parser.TokenList;
+import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
@@ -51,7 +53,7 @@ import org.apache.tomcat.util.res.StringManager;
  * InputBuffer for HTTP that provides request header parsing as well as transfer
  * encoding.
  */
-public class Http11InputBuffer implements RequestAction {
+public class Http11InputBuffer extends RequestAction {
 
 	// -------------------------------------------------------------- Constants
 
@@ -172,6 +174,12 @@ public class Http11InputBuffer implements RequestAction {
 	 * Keep-alive.
 	 */
 	protected volatile boolean keepAlive = true;
+
+	/**
+	 * Content delimiter for the request (if false, the connection will be closed at
+	 * the end of the request).
+	 */
+	protected boolean contentDelimitation = true;
 
 	// ----------------------------------------------------------- Constructors
 
@@ -778,7 +786,7 @@ public class Http11InputBuffer implements RequestAction {
 	 */
 	protected void prepareRequest() throws IOException {
 
-		processor.contentDelimitation = false;
+		contentDelimitation = false;
 
 		AbstractHttp11Protocol protocol = (AbstractHttp11Protocol) processor.getProtocol();
 
@@ -972,7 +980,7 @@ public class Http11InputBuffer implements RequestAction {
 			badRequest("http11processor.request.multipleContentLength");
 		}
 		if (contentLength >= 0) {
-			if (processor.contentDelimitation) {
+			if (contentDelimitation) {
 				// contentDelimitation being true at this point indicates that
 				// chunked encoding is being used but chunked encoding should
 				// not be used with a content length. RFC 2616, section 4.4,
@@ -982,19 +990,19 @@ public class Http11InputBuffer implements RequestAction {
 				requestData.setContentLength(-1);
 			} else {
 				this.addActiveFilter(inputFilters[Constants.IDENTITY_FILTER]);
-				processor.contentDelimitation = true;
+				contentDelimitation = true;
 			}
 		}
 
 		// Validate host name and extract port if present
 		processor.parseHost(hostValueMB);
 
-		if (!processor.contentDelimitation) {
+		if (!contentDelimitation) {
 			// If there's no content length
 			// (broken HTTP/1.0 or HTTP/1.1), assume
 			// the client is not broken and didn't send a body
 			this.addActiveFilter(inputFilters[Constants.VOID_FILTER]);
-			processor.contentDelimitation = true;
+			contentDelimitation = true;
 		}
 
 		if (!processor.getErrorState().isIoAllowed()) {
@@ -1017,7 +1025,7 @@ public class Http11InputBuffer implements RequestAction {
 			// Skip
 		} else if (encodingName.equals("chunked")) {
 			this.addActiveFilter(inputFilters[Constants.CHUNKED_FILTER]);
-			processor.contentDelimitation = true;
+			contentDelimitation = true;
 		} else {
 			for (int i = pluggableFilterIndex; i < inputFilters.length; i++) {
 				if (inputFilters[i].getEncodingName().toString().equals(encodingName)) {
@@ -1165,17 +1173,6 @@ public class Http11InputBuffer implements RequestAction {
 	}
 
 	/**
-	 * Processors that populate request attributes directly (e.g. AJP) should
-	 * over-ride this method and return {@code false}.
-	 *
-	 * @return {@code true} if the SocketWrapper should be used to populate the
-	 *         request attributes, otherwise {@code false}.
-	 */
-	protected boolean getPopulateRequestAttributesFromSocket() {
-		return true;
-	}
-
-	/**
 	 * Populate the remote host request attribute. Processors (e.g. AJP) that
 	 * populate this from an alternative source should override this method.
 	 */
@@ -1185,40 +1182,40 @@ public class Http11InputBuffer implements RequestAction {
 		}
 	}
 
-	// @Override
+	@Override
 	public void actionREQ_HOST_ADDR_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && channel != null) {
 			requestData.remoteAddr().setString(channel.getRemoteAddr());
 		}
 	}
 
-	// @Override
+	@Override
 	public void actionREQ_HOST_ATTRIBUTE() {
 		populateRequestAttributeRemoteHost();
 	}
 
-	// @Override
+	@Override
 	public void actionREQ_LOCALPORT_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && channel != null) {
 			requestData.setLocalPort(channel.getLocalPort());
 		}
 	}
 
-	// @Override
+	@Override
 	public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && channel != null) {
 			requestData.localAddr().setString(channel.getLocalAddr());
 		}
 	}
 
-	// @Override
+	@Override
 	public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && channel != null) {
 			requestData.localName().setString(channel.getLocalName());
 		}
 	}
 
-	// @Override
+	@Override
 	public void actionREQ_REMOTEPORT_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && channel != null) {
 			requestData.setRemotePort(channel.getRemotePort());
@@ -1255,6 +1252,95 @@ public class Http11InputBuffer implements RequestAction {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Populate the TLS related request attributes from the {@link SSLSupport}
+	 * instance associated with this processor. Protocols that populate TLS
+	 * attributes from a different source (e.g. AJP) should override this method.
+	 */
+	protected void populateSslRequestAttributes() {
+		try {
+			SSLSupport sslSupport = channel.getSslSupport();
+			if (sslSupport != null) {
+				Object sslO = sslSupport.getCipherSuite();
+				if (sslO != null) {
+					requestData.setAttribute(SSLSupport.CIPHER_SUITE_KEY, sslO);
+				}
+				sslO = sslSupport.getPeerCertificateChain();
+				if (sslO != null) {
+					requestData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
+				}
+				sslO = sslSupport.getKeySize();
+				if (sslO != null) {
+					requestData.setAttribute(SSLSupport.KEY_SIZE_KEY, sslO);
+				}
+				sslO = sslSupport.getSessionId();
+				if (sslO != null) {
+					requestData.setAttribute(SSLSupport.SESSION_ID_KEY, sslO);
+				}
+				sslO = sslSupport.getProtocol();
+				if (sslO != null) {
+					requestData.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, sslO);
+				}
+				requestData.setAttribute(SSLSupport.SESSION_MGR, sslSupport);
+			}
+		} catch (Exception e) {
+			log.warn(sm.getString("abstractProcessor.socket.ssl"), e);
+		}
+	}
+
+	@Override
+	public void actionREQ_SSL_ATTRIBUTE() {
+		populateSslRequestAttributes();
+	}
+
+	@Override
+	public void actionREQ_SSL_CERTIFICATE() {
+		try {
+			sslReHandShake();
+		} catch (IOException ioe) {
+			processor.setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
+		}
+	}
+
+	/**
+	 * Processors that can perform a TLS re-handshake (e.g. HTTP/1.1) should
+	 * override this method and implement the re-handshake.
+	 *
+	 * @throws IOException If authentication is required then there will be I/O with
+	 *                     the client and this exception will be thrown if that goes
+	 *                     wrong
+	 */
+	// @Override
+	protected final void sslReHandShake() throws IOException {
+		SSLSupport sslSupport = channel.getSslSupport();
+		if (sslSupport != null) {
+			// Consume and buffer the request body, so that it does not
+			// interfere with the client's handshake messages
+			InputFilter[] inputFilters = this.getFilters();
+			((BufferedInputFilter) inputFilters[Constants.BUFFERED_FILTER])
+					.setLimit(((AbstractHttp11Protocol) processor.getProtocol()).getMaxSavePostSize());
+			this.addActiveFilter(inputFilters[Constants.BUFFERED_FILTER]);
+
+			/*
+			 * Outside the try/catch because we want I/O errors during renegotiation to be
+			 * thrown for the caller to handle since they will be fatal to the connection.
+			 */
+			channel.doClientAuth(sslSupport);
+			try {
+				/*
+				 * Errors processing the cert chain do not affect the client connection so they
+				 * can be logged and swallowed here.
+				 */
+				Object sslO = sslSupport.getPeerCertificateChain();
+				if (sslO != null) {
+					requestData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
+				}
+			} catch (IOException ioe) {
+				log.warn(sm.getString("http11processor.socket.ssl"), ioe);
+			}
+		}
 	}
 
 	void init(SocketChannel channel) {

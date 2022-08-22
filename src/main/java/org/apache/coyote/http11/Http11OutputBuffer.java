@@ -22,6 +22,7 @@ import java.util.Arrays;
 
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.CloseNowException;
 import org.apache.coyote.ErrorState;
 import org.apache.coyote.ResponseAction;
@@ -42,7 +43,7 @@ import org.apache.tomcat.util.res.StringManager;
  * headers (once committed) and the response body. Note that buffering of the
  * response body happens at a higher level.
  */
-public class Http11OutputBuffer implements ResponseAction {
+public class Http11OutputBuffer extends ResponseAction {
 
 	// -------------------------------------------------------------- Variables
 
@@ -112,7 +113,7 @@ public class Http11OutputBuffer implements ResponseAction {
 	private SendfileDataBase sendfileData = null;
 
 	protected Http11OutputBuffer(Http11Processor processor, int headerBufferSize) {
-
+		super(processor);
 		this.processor = processor;
 
 		// this.asyncState = processor.getAsyncStateMachine();
@@ -255,7 +256,7 @@ public class Http11OutputBuffer implements ResponseAction {
 		AbstractHttp11Protocol protocol = (AbstractHttp11Protocol) processor.getProtocol();
 
 		boolean entityBody = true;
-		processor.contentDelimitation = false;
+		inputBuffer.contentDelimitation = false;
 
 		OutputFilter[] outputFilters = this.getFilters();
 
@@ -271,7 +272,7 @@ public class Http11OutputBuffer implements ResponseAction {
 			// No entity body
 			this.addActiveFilter(outputFilters[Constants.VOID_FILTER]);
 			entityBody = false;
-			processor.contentDelimitation = true;
+			inputBuffer.contentDelimitation = true;
 			if (statusCode == 205) {
 				// RFC 7231 requires the server to explicitly signal an empty
 				// response in this case
@@ -285,7 +286,7 @@ public class Http11OutputBuffer implements ResponseAction {
 		if (methodMB.equals("HEAD")) {
 			// No entity body
 			this.addActiveFilter(outputFilters[Constants.VOID_FILTER]);
-			processor.contentDelimitation = true;
+			inputBuffer.contentDelimitation = true;
 		}
 
 		// Sendfile support
@@ -319,12 +320,12 @@ public class Http11OutputBuffer implements ResponseAction {
 		if (inputBuffer.http11 && responseData.getTrailerFields() != null) {
 			// If trailer fields are set, always use chunking
 			this.addActiveFilter(outputFilters[Constants.CHUNKED_FILTER]);
-			processor.contentDelimitation = true;
+			inputBuffer.contentDelimitation = true;
 			headers.addValue(Constants.TRANSFERENCODING).setString(Constants.CHUNKED);
 		} else if (contentLength != -1) {
 			headers.setValue("Content-Length").setLong(contentLength);
 			this.addActiveFilter(outputFilters[Constants.IDENTITY_FILTER]);
-			processor.contentDelimitation = true;
+			inputBuffer.contentDelimitation = true;
 		} else {
 			// If the response code supports an entity body and we're on
 			// HTTP 1.1 then we chunk unless we have a Connection: close header
@@ -332,7 +333,7 @@ public class Http11OutputBuffer implements ResponseAction {
 			// System.out.println("connectionClosePresent:" + connectionClosePresent);
 			if (inputBuffer.http11 && entityBody && !connectionClosePresent) {
 				this.addActiveFilter(outputFilters[Constants.CHUNKED_FILTER]);
-				processor.contentDelimitation = true;
+				inputBuffer.contentDelimitation = true;
 				headers.addValue(Constants.TRANSFERENCODING).setString(Constants.CHUNKED);
 			} else {
 				this.addActiveFilter(outputFilters[Constants.IDENTITY_FILTER]);
@@ -352,7 +353,7 @@ public class Http11OutputBuffer implements ResponseAction {
 		// FIXME: Add transfer encoding header
 
 		// System.out.println("contentDelimitation:" + contentDelimitation);
-		if ((entityBody) && (!processor.contentDelimitation)) {
+		if ((entityBody) && (!inputBuffer.contentDelimitation)) {
 			// Mark as close the connection after the request, and add the
 			// connection: close header
 			inputBuffer.keepAlive = false;
@@ -364,7 +365,7 @@ public class Http11OutputBuffer implements ResponseAction {
 
 		// If we know that the request is bad this early, add the
 		// Connection: close header.
-		if (inputBuffer.keepAlive && processor.statusDropsConnection(statusCode)) {
+		if (inputBuffer.keepAlive && Http11Processor.statusDropsConnection(statusCode)) {
 			inputBuffer.keepAlive = false;
 		}
 		// System.out.println("keepAlive:" + keepAlive);
@@ -379,7 +380,7 @@ public class Http11OutputBuffer implements ResponseAction {
 			}
 
 			if (protocol.getUseKeepAliveResponseHeader()) {
-				boolean connectionKeepAlivePresent = processor.isConnectionToken(
+				boolean connectionKeepAlivePresent = Http11Processor.isConnectionToken(
 						responseData.getRequestData().getMimeHeaders(), Constants.KEEP_ALIVE_HEADER_VALUE_TOKEN);
 
 				if (connectionKeepAlivePresent) {
@@ -447,7 +448,7 @@ public class Http11OutputBuffer implements ResponseAction {
 		} else {
 			// No entity body sent here
 			this.addActiveFilter(outputFilters[Constants.VOID_FILTER]);
-			processor.contentDelimitation = true;
+			inputBuffer.contentDelimitation = true;
 			long pos = ((Long) responseData.getRequestData()
 					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_START_ATTR)).longValue();
 			long end = ((Long) responseData.getRequestData()
@@ -461,7 +462,7 @@ public class Http11OutputBuffer implements ResponseAction {
 		this.end();
 	}
 
-	// @Override
+	@Override
 	public void commit() {
 		if (!responseData.isCommitted()) {
 			try {
@@ -473,7 +474,7 @@ public class Http11OutputBuffer implements ResponseAction {
 		}
 	}
 
-	// @Override
+	@Override
 	public void close() {
 		commit();
 		try {
@@ -483,7 +484,7 @@ public class Http11OutputBuffer implements ResponseAction {
 		}
 	}
 
-	// @Override
+	@Override
 	public void sendAck() {
 		ack();
 	}
@@ -503,7 +504,7 @@ public class Http11OutputBuffer implements ResponseAction {
 		}
 	}
 
-	// @Override
+	@Override
 	public void clientFlush() {
 		commit();
 		try {
@@ -869,6 +870,11 @@ public class Http11OutputBuffer implements ResponseAction {
 		channel.registerWriteInterest();
 	}
 
+	@Override
+	public final void setSwallowResponse() {
+		this.responseFinished = true;
+	}
+
 	boolean isChunking() {
 		for (int i = 0; i < lastActiveFilter; i++) {
 			if (activeFilters[i] == filterLibrary[Constants.CHUNKED_FILTER]) {
@@ -902,7 +908,7 @@ public class Http11OutputBuffer implements ResponseAction {
 				byteCount += len;
 				return len;
 			} catch (IOException ioe) {
-				processor.closeNow(ioe);
+				closeNow(ioe);
 				// Re-throw
 				throw ioe;
 			}

@@ -19,9 +19,9 @@ package org.apache.tomcat.util.net;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper.ByteBufferProvider;
 import org.apache.tomcat.util.res.StringManager;
 
 public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {

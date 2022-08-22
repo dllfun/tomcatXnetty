@@ -17,6 +17,7 @@
 package org.apache.coyote;
 
 import java.net.InetAddress;
+import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -166,11 +167,46 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	/**
 	 * The adapter provides the link between the ProtocolHandler and the connector.
 	 */
-	private Adapter adapter;
+	private Adapter adapter = new Adapter() {
+
+		@Override
+		public void service(Request req, Response res) throws Exception {
+			byte[] b = "adapter not set!".getBytes("utf-8");
+			res.doWrite(ByteBuffer.wrap(b));
+			res.actionCLOSE();
+		}
+
+		@Override
+		public boolean prepare(Request req, Response res) throws Exception {
+			return false;
+		}
+
+		@Override
+		public void log(Request req, Response res, long time) {
+
+		}
+
+		@Override
+		public String getDomain() {
+			return null;
+		}
+
+		@Override
+		public void checkRecycled(Request req, Response res) {
+
+		}
+
+		@Override
+		public boolean asyncDispatch(Request req, Response res, SocketEvent status) throws Exception {
+			return false;
+		}
+	};
 
 	@Override
 	public void setAdapter(Adapter adapter) {
-		this.adapter = adapter;
+		if (adapter != null) {
+			this.adapter = adapter;
+		}
 	}
 
 	@Override
@@ -1244,7 +1280,9 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 						}
 					}
 
-					processor.setSslSupport(socketChannel.getSslSupport(getClientCertProvider()));
+					if (channel.getSslSupport() == null) {
+						channel.setSslSupport(socketChannel.initSslSupport(getClientCertProvider()));
+					}
 
 					// Associate the processor with the connection
 					socketChannel.setCurrentProcessor(processor);

@@ -107,7 +107,7 @@ public interface Processor {
 	 *
 	 * @param sslSupport The SSL support object to use for this connection
 	 */
-	void setSslSupport(SSLSupport sslSupport);
+	// void setSslSupport(SSLSupport sslSupport);
 
 	/**
 	 * Allows retrieving additional input during the upgrade process.

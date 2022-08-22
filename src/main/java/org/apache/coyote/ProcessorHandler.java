@@ -156,7 +156,9 @@ public class ProcessorHandler implements Handler {
 				}
 			}
 
-			processor.setSslSupport(channel.getSslSupport(protocol.getClientCertProvider()));
+			if (channel.getSslSupport() == null) {
+				channel.setSslSupport(channel.initSslSupport(protocol.getClientCertProvider()));
+			}
 
 			// Associate the processor with the connection
 			channel.setCurrentProcessor(processor);
@@ -271,7 +273,7 @@ public class ProcessorHandler implements Handler {
 				// to the poller if necessary.
 				if (event != SocketEvent.OPEN_WRITE) {
 					protocol.longPoll(channel, processor);
-					protocol.addWaitingProcessor(processor);
+					// protocol.addWaitingProcessor(processor);
 				}
 			} else if (state == SocketState.SUSPENDED) {
 				// Don't add sockets back to the poller.

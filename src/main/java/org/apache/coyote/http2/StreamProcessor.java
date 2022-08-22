@@ -182,11 +182,6 @@ class StreamProcessor extends AbstractProcessor {
 		}
 	}
 
-	@Override
-	protected final void setSwallowResponse() {
-		// NO-OP
-	}
-
 //	@Override
 //	public void processSocketEvent(SocketEvent event, boolean dispatch) {
 //		if (dispatch) {
@@ -246,16 +241,6 @@ class StreamProcessor extends AbstractProcessor {
 //	protected boolean isTrailerFieldsSupported() {
 //		return stream.isTrailerFieldsSupported();
 //	}
-
-	@Override
-	protected Object getConnectionID() {
-		return stream.getConnectionId();
-	}
-
-	@Override
-	protected Object getStreamID() {
-		return stream.getIdentifier().toString();
-	}
 
 	@Override
 	public Exception collectCloseException() {

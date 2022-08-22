@@ -97,7 +97,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	protected final Http2Protocol protocol;
 	private final Adapter adapter;
 	private volatile SocketChannel channel;
-	private volatile SSLSupport sslSupport;
+	// private volatile SSLSupport sslSupport;
 
 	private volatile Http2Parser parser;
 
@@ -131,7 +131,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	private long backLogSize = 0;
 	// The time at which the connection will timeout unless data arrives before
 	// then. -1 means no timeout.
-	private volatile long connectionTimeout = -1;
+	// private volatile long connectionTimeout = -1;
 
 	// Stream concurrency control
 	private AtomicInteger streamConcurrency = null;
@@ -151,10 +151,8 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 				synchronized (this) {
 					if (streamConcurrency.get() < protocol.getMaxConcurrentStreamExecution()) {
 						streamConcurrency.incrementAndGet();
-						System.out.println(streamConcurrency);
 						return true;
 					} else {
-						System.out.println("failed");
 						StreamRunnable streamRunnable = new StreamRunnable((Stream) channel,
 								(StreamProcessor) channel.getCurrentProcessor(), event);
 						queuedRunnable.offer(streamRunnable);
@@ -172,7 +170,6 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 			StreamRunnable streamRunnable = null;
 			synchronized (this) {
 				decreaseStreamConcurrency();
-				System.out.println(streamConcurrency);
 				if (getStreamConcurrency() < protocol.getMaxConcurrentStreamExecution()) {
 					streamRunnable = queuedRunnable.poll();
 				}
@@ -215,6 +212,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 			activeRemoteStreamCount.set(1);
 			maxProcessedStreamId = 1;
 		}
+		System.out.println(this + " created");
 	}
 
 	protected PingManager getPingManager() {
@@ -307,7 +305,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 
 	protected void processStreamOnContainerThread(Stream stream) {
 		StreamProcessor streamProcessor = new StreamProcessor(this, stream, adapter);
-		streamProcessor.setSslSupport(sslSupport);
+		// streamProcessor.setSslSupport(sslSupport);
 		protocol.getHttp11Protocol().getHandler().processSocket(stream, SocketEvent.OPEN_READ, true);
 		// processStreamOnContainerThread(stream, streamProcessor,
 		// SocketEvent.OPEN_READ);
@@ -342,7 +340,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 	}
 
 	@Override
-	public SSLSupport getSslSupport(String clientCertProvider) {
+	public SSLSupport initSslSupport(String clientCertProvider) {
 		return this.sslSupport;
 	}
 
@@ -368,7 +366,7 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 					// reading frames ...
 					channel.setReadTimeout(protocol.getReadTimeout());
 					// ... and disable the connection timeout
-					setConnectionTimeout(-1);
+					// setConnectionTimeout(-1);
 					while (true) {
 						try {
 							if (!parser.readFrame(false)) {
@@ -452,29 +450,30 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
 			// timeout for the connection.
 			long keepAliveTimeout = protocol.getKeepAliveTimeout();
 			if (keepAliveTimeout == -1) {
-				setConnectionTimeout(-1);
+				channel.setReadTimeout(-1);
 			} else {
-				setConnectionTimeout(System.currentTimeMillis() + keepAliveTimeout);
+				channel.setReadTimeout(keepAliveTimeout);// System.currentTimeMillis() +
 			}
 		} else {
 			// Streams currently active. Individual streams have
 			// timeouts so keep the connection open.
-			setConnectionTimeout(-1);
+			channel.setReadTimeout(-1);
 		}
 	}
 
-	private void setConnectionTimeout(long connectionTimeout) {
-		this.connectionTimeout = connectionTimeout;
-	}
+	// private void setConnectionTimeout(long connectionTimeout) {
+	// this.connectionTimeout = connectionTimeout;
+	// }
 
 	@Override
 	public void timeoutAsync(long now) {
-		long connectionTimeout = this.connectionTimeout;
-		if (now == -1 || connectionTimeout > -1 && now > connectionTimeout) {
-			// Have to dispatch as this will be executed from a non-container
-			// thread.
-			protocol.getHttp11Protocol().getHandler().processSocket(channel, SocketEvent.TIMEOUT, true);
-		}
+		// long connectionTimeout = this.connectionTimeout;
+		// if (now == -1 || connectionTimeout > -1 && now > connectionTimeout) {
+		// Have to dispatch as this will be executed from a non-container
+		// thread.
+		// protocol.getHttp11Protocol().getHandler().processSocket(channel,
+		// SocketEvent.TIMEOUT, true);
+		// }
 	}
 
 	ConnectionSettingsRemote getRemoteSettings() {

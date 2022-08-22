@@ -279,7 +279,7 @@ public class AjpProcessor extends AbstractProcessor {
 		getBodyMessageArray = new byte[getBodyMessage.getLen()];
 		System.arraycopy(getBodyMessage.getBuffer(), 0, getBodyMessageArray, 0, getBodyMessage.getLen());
 
-		outputBuffer = new SocketOutputBuffer();
+		outputBuffer = new SocketOutputBuffer(this);
 	}
 
 	@Override
@@ -594,50 +594,6 @@ public class AjpProcessor extends AbstractProcessor {
 		requestData.setServerPort(requestData.getLocalPort());
 	}
 
-	@Override
-	protected final void setSwallowResponse() {
-		swallowResponse = true;
-	}
-
-	@Override
-	protected final void populateSslRequestAttributes() {
-		if (!certificates.isNull()) {
-			ByteChunk certData = certificates.getByteChunk();
-			X509Certificate jsseCerts[] = null;
-			ByteArrayInputStream bais = new ByteArrayInputStream(certData.getBytes(), certData.getStart(),
-					certData.getLength());
-			// Fill the elements.
-			try {
-				CertificateFactory cf;
-				String clientCertProvider = protocol.getClientCertProvider();
-				if (clientCertProvider == null) {
-					cf = CertificateFactory.getInstance("X.509");
-				} else {
-					cf = CertificateFactory.getInstance("X.509", clientCertProvider);
-				}
-				while (bais.available() > 0) {
-					X509Certificate cert = (X509Certificate) cf.generateCertificate(bais);
-					if (jsseCerts == null) {
-						jsseCerts = new X509Certificate[1];
-						jsseCerts[0] = cert;
-					} else {
-						X509Certificate[] temp = new X509Certificate[jsseCerts.length + 1];
-						System.arraycopy(jsseCerts, 0, temp, 0, jsseCerts.length);
-						temp[jsseCerts.length] = cert;
-						jsseCerts = temp;
-					}
-				}
-			} catch (java.security.cert.CertificateException e) {
-				getLog().error(sm.getString("ajpprocessor.certs.fail"), e);
-				return;
-			} catch (NoSuchProviderException e) {
-				getLog().error(sm.getString("ajpprocessor.certs.fail"), e);
-				return;
-			}
-			requestData.setAttribute(SSLSupport.CERTIFICATE_KEY, jsseCerts);
-		}
-	}
-
 //	@Override
 //	protected final boolean isReadyForWrite() {
 //		return responseMsgPos == -1 && channel.isReadyForWrite();
@@ -691,7 +647,7 @@ public class AjpProcessor extends AbstractProcessor {
 	/**
 	 * This class is an input buffer which will read its data from an input stream.
 	 */
-	protected class SocketInputReader implements RequestAction {
+	protected class SocketInputReader extends RequestAction {
 
 		// @Override
 		/*
@@ -892,39 +848,40 @@ public class AjpProcessor extends AbstractProcessor {
 			}
 		}
 
+		@Override
 		public void actionREQ_HOST_ADDR_ATTRIBUTE() {
 			if (getPopulateRequestAttributesFromSocket() && channel != null) {
 				requestData.remoteAddr().setString(channel.getRemoteAddr());
 			}
 		}
 
-		// @Override
+		@Override
 		public void actionREQ_HOST_ATTRIBUTE() {
 			populateRequestAttributeRemoteHost();
 		}
 
-		// @Override
+		@Override
 		public void actionREQ_LOCALPORT_ATTRIBUTE() {
 			if (getPopulateRequestAttributesFromSocket() && channel != null) {
 				requestData.setLocalPort(channel.getLocalPort());
 			}
 		}
 
-		// @Override
+		@Override
 		public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
 			if (getPopulateRequestAttributesFromSocket() && channel != null) {
 				requestData.localAddr().setString(channel.getLocalAddr());
 			}
 		}
 
-		// @Override
+		@Override
 		public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
 			if (getPopulateRequestAttributesFromSocket() && channel != null) {
 				requestData.localName().setString(channel.getLocalName());
 			}
 		}
 
-		// @Override
+		@Override
 		public void actionREQ_REMOTEPORT_ATTRIBUTE() {
 			if (getPopulateRequestAttributesFromSocket() && channel != null) {
 				requestData.setRemotePort(channel.getRemotePort());
@@ -1203,6 +1160,70 @@ public class AjpProcessor extends AbstractProcessor {
 			}
 		}
 
+		// @Override
+		protected final void populateSslRequestAttributes() {
+			if (!certificates.isNull()) {
+				ByteChunk certData = certificates.getByteChunk();
+				X509Certificate jsseCerts[] = null;
+				ByteArrayInputStream bais = new ByteArrayInputStream(certData.getBytes(), certData.getStart(),
+						certData.getLength());
+				// Fill the elements.
+				try {
+					CertificateFactory cf;
+					String clientCertProvider = protocol.getClientCertProvider();
+					if (clientCertProvider == null) {
+						cf = CertificateFactory.getInstance("X.509");
+					} else {
+						cf = CertificateFactory.getInstance("X.509", clientCertProvider);
+					}
+					while (bais.available() > 0) {
+						X509Certificate cert = (X509Certificate) cf.generateCertificate(bais);
+						if (jsseCerts == null) {
+							jsseCerts = new X509Certificate[1];
+							jsseCerts[0] = cert;
+						} else {
+							X509Certificate[] temp = new X509Certificate[jsseCerts.length + 1];
+							System.arraycopy(jsseCerts, 0, temp, 0, jsseCerts.length);
+							temp[jsseCerts.length] = cert;
+							jsseCerts = temp;
+						}
+					}
+				} catch (java.security.cert.CertificateException e) {
+					getLog().error(sm.getString("ajpprocessor.certs.fail"), e);
+					return;
+				} catch (NoSuchProviderException e) {
+					getLog().error(sm.getString("ajpprocessor.certs.fail"), e);
+					return;
+				}
+				requestData.setAttribute(SSLSupport.CERTIFICATE_KEY, jsseCerts);
+			}
+		}
+
+		@Override
+		public void actionREQ_SSL_ATTRIBUTE() {
+			populateSslRequestAttributes();
+		}
+
+		@Override
+		public void actionREQ_SSL_CERTIFICATE() {
+			try {
+				sslReHandShake();
+			} catch (IOException ioe) {
+				setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
+			}
+		}
+
+		/**
+		 * Processors that can perform a TLS re-handshake (e.g. HTTP/1.1) should
+		 * override this method and implement the re-handshake.
+		 *
+		 * @throws IOException If authentication is required then there will be I/O with
+		 *                     the client and this exception will be thrown if that goes
+		 *                     wrong
+		 */
+		protected void sslReHandShake() throws IOException {
+			// NO-OP
+		}
 	}
 
 	// ----------------------------------- OutputStreamOutputBuffer Inner Class
@@ -1210,7 +1231,11 @@ public class AjpProcessor extends AbstractProcessor {
 	/**
 	 * This class is an output buffer which will write data to an output stream.
 	 */
-	protected class SocketOutputBuffer implements ResponseAction {
+	protected class SocketOutputBuffer extends ResponseAction {
+
+		public SocketOutputBuffer(AbstractProcessor processor) {
+			super(processor);
+		}
 
 		private void writeData(ByteBuffer chunk) throws IOException {
 			boolean blocking = (requestData.getAsyncStateMachine().getWriteListener() == null);
@@ -1382,7 +1407,7 @@ public class AjpProcessor extends AbstractProcessor {
 			channel.flush(true);
 		}
 
-		// @Override
+		@Override
 		public void commit() {
 			if (!responseData.isCommitted()) {
 				try {
@@ -1394,7 +1419,7 @@ public class AjpProcessor extends AbstractProcessor {
 			}
 		}
 
-		// @Override
+		@Override
 		public void close() {
 			commit();
 			try {
@@ -1404,7 +1429,7 @@ public class AjpProcessor extends AbstractProcessor {
 			}
 		}
 
-		// @Override
+		@Override
 		public void sendAck() {
 			ack();
 		}
@@ -1414,7 +1439,7 @@ public class AjpProcessor extends AbstractProcessor {
 			// NO-OP for AJP
 		}
 
-		// @Override
+		@Override
 		public void clientFlush() {
 			commit();
 			try {
@@ -1440,6 +1465,11 @@ public class AjpProcessor extends AbstractProcessor {
 				}
 				channel.flush(true);
 			}
+		}
+
+		@Override
+		public final void setSwallowResponse() {
+			swallowResponse = true;
 		}
 
 	}

@@ -286,11 +286,11 @@ public final class Request implements InputReader {
 	}
 
 	public void actionREQ_SSL_ATTRIBUTE() {
-		processor.actionREQ_SSL_ATTRIBUTE();
+		requestAction.actionREQ_SSL_ATTRIBUTE();
 	}
 
 	public void actionREQ_SSL_CERTIFICATE() {
-		processor.actionREQ_SSL_CERTIFICATE();
+		requestAction.actionREQ_SSL_CERTIFICATE();
 	}
 
 	// @Override
@@ -430,12 +430,24 @@ public final class Request implements InputReader {
 		processor.actionPUSH_REQUEST(param);
 	}
 
+//	public void actionCONNECTION_ID(AtomicReference<Object> param) {
+//		processor.actionCONNECTION_ID(param);
+//	}
+
+//	public void actionSTREAM_ID(AtomicReference<Object> param) {
+//		processor.actionSTREAM_ID(param);
+//	}
+
+	// @Override
 	public void actionCONNECTION_ID(AtomicReference<Object> param) {
-		processor.actionCONNECTION_ID(param);
+		AtomicReference<Object> result = param;
+		result.set(processor.getChannel().getConnectionID());
 	}
 
+	// @Override
 	public void actionSTREAM_ID(AtomicReference<Object> param) {
-		processor.actionSTREAM_ID(param);
+		AtomicReference<Object> result = param;
+		result.set(processor.getChannel().getStreamID());
 	}
 
 	// -------------------- Cookies --------------------

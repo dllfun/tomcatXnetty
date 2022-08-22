@@ -33,9 +33,7 @@ import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
@@ -222,9 +220,9 @@ public class WsHttpUpgradeHandler implements InternalHttpUpgradeHandler {
 		wsSession.onClose(cr);
 	}
 
-	@Override
-	public void setSslSupport(SSLSupport sslSupport) {
-		// NO-OP. WebSocket has no requirement to access the TLS information
-		// associated with the underlying connection.
-	}
+	// @Override
+	// public void setSslSupport(SSLSupport sslSupport) {
+	// NO-OP. WebSocket has no requirement to access the TLS information
+	// associated with the underlying connection.
+	// }
 }

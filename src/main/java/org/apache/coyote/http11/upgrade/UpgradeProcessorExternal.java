@@ -120,10 +120,10 @@ public class UpgradeProcessorExternal extends UpgradeProcessorBase {
 
 	// ----------------------------------------- Unimplemented Processor methods
 
-	@Override
-	public final void setSslSupport(SSLSupport sslSupport) {
-		// NO-OP
-	}
+	// @Override
+	// public final void setSslSupport(SSLSupport sslSupport) {
+	// NO-OP
+	// }
 
 	@Override
 	public void pause() {

@@ -73,11 +73,13 @@ public class DispatchHandler implements Handler {
 							// first event to be processed results in the socket being closed,
 							// the subsequent events are not processed.
 							if (channel.isClosed()) {
-								if (channel instanceof ConcurrencyControlled) {
-									ConcurrencyControlled controlled = (ConcurrencyControlled) channel;
-									controlled.released(channel);
+								if (channel.getCurrentProcessor() == null) {
+									if (channel instanceof ConcurrencyControlled) {
+										ConcurrencyControlled controlled = (ConcurrencyControlled) channel;
+										controlled.released(channel);
+									}
+									return;
 								}
-								return;
 							}
 							try {
 								next.processSocket(channel, event, false);
