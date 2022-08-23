@@ -22,7 +22,6 @@ import java.util.Arrays;
 
 import javax.servlet.http.HttpServletResponse;
 
-import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.CloseNowException;
 import org.apache.coyote.ErrorState;
 import org.apache.coyote.ResponseAction;
@@ -89,11 +88,6 @@ public class Http11OutputBuffer extends ResponseAction {
 	 * Index of the last active filter.
 	 */
 	protected int lastActiveFilter;
-
-	/**
-	 * Wrapper for socket where data will be written to.
-	 */
-	protected SocketChannel channel;
 
 	/**
 	 * Underlying output buffer.
@@ -453,7 +447,7 @@ public class Http11OutputBuffer extends ResponseAction {
 					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_START_ATTR)).longValue();
 			long end = ((Long) responseData.getRequestData()
 					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_END_ATTR)).longValue();
-			sendfileData = channel.createSendfileData(fileName, pos, end - pos);
+			sendfileData = ((SocketChannel) processor.getChannel()).createSendfileData(fileName, pos, end - pos);
 		}
 	}
 
@@ -564,7 +558,7 @@ public class Http11OutputBuffer extends ResponseAction {
 			headerBuffer.setLimit(headerBuffer.getCapacity());
 		} else {
 			if (headerBuffer.released()) {
-				headerBuffer = channel.allocate(headerBufferSize);
+				headerBuffer = ((SocketChannel) processor.getChannel()).allocate(headerBufferSize);
 			}
 			headerBuffer.switchToWriteMode();
 			headerBuffer.setPosition(0);
@@ -577,7 +571,7 @@ public class Http11OutputBuffer extends ResponseAction {
 	 */
 	public void recycle() {
 		nextRequest();
-		channel = null;
+		// channel = null;
 		sendfileData = null;
 	}
 
@@ -600,7 +594,7 @@ public class Http11OutputBuffer extends ResponseAction {
 			headerBuffer.setLimit(headerBuffer.getCapacity());
 		} else {
 			if (headerBuffer.released()) {
-				headerBuffer = channel.allocate(headerBufferSize);
+				headerBuffer = ((SocketChannel) processor.getChannel()).allocate(headerBufferSize);
 			}
 			headerBuffer.switchToWriteMode();
 			headerBuffer.setPosition(0);
@@ -613,7 +607,7 @@ public class Http11OutputBuffer extends ResponseAction {
 	}
 
 	public void init(SocketChannel channel) {
-		this.channel = channel;
+		// this.channel = channel;
 		if (headerBuffer == null) {
 			headerBuffer = channel.allocate(headerBufferSize);
 		} else {
@@ -637,7 +631,8 @@ public class Http11OutputBuffer extends ResponseAction {
 
 	private void localSendAck() throws IOException {
 		if (!responseData.isCommitted()) {
-			channel.write(isBlocking(), Constants.ACK_BYTES, 0, Constants.ACK_BYTES.length);
+			((SocketChannel) processor.getChannel()).write(isBlocking(), Constants.ACK_BYTES, 0,
+					Constants.ACK_BYTES.length);
 			if (flushBuffer(true)) {
 				throw new IOException(sm.getString("iob.failedwrite.ack"));
 			}
@@ -656,7 +651,7 @@ public class Http11OutputBuffer extends ResponseAction {
 			// Sending the response header buffer
 			headerBuffer.switchToReadMode();
 			try {
-				SocketChannel channel = this.channel;
+				SocketChannel channel = ((SocketChannel) processor.getChannel());
 				if (channel != null) {
 					channel.write(isBlocking(), headerBuffer);
 				} else {
@@ -842,7 +837,7 @@ public class Http11OutputBuffer extends ResponseAction {
 	 * @throws IOException Error writing data
 	 */
 	protected boolean flushBuffer(boolean block) throws IOException {
-		return channel.flush(block);
+		return ((SocketChannel) processor.getChannel()).flush(block);
 	}
 
 	/**
@@ -857,17 +852,17 @@ public class Http11OutputBuffer extends ResponseAction {
 	protected final boolean isReady() {
 		boolean result = !hasDataToWrite();
 		if (!result) {
-			channel.registerWriteInterest();
+			((SocketChannel) processor.getChannel()).registerWriteInterest();
 		}
 		return result;
 	}
 
 	public boolean hasDataToWrite() {
-		return channel.hasDataToWrite();
+		return ((SocketChannel) processor.getChannel()).hasDataToWrite();
 	}
 
 	public void registerWriteInterest() {
-		channel.registerWriteInterest();
+		((SocketChannel) processor.getChannel()).registerWriteInterest();
 	}
 
 	@Override
@@ -898,7 +893,7 @@ public class Http11OutputBuffer extends ResponseAction {
 		public int doWrite(ByteBuffer chunk) throws IOException {
 			try {
 				int len = chunk.remaining();
-				SocketChannel channel = Http11OutputBuffer.this.channel;
+				SocketChannel channel = ((SocketChannel) processor.getChannel());
 				if (channel != null) {
 					channel.write(isBlocking(), chunk);
 				} else {
@@ -921,12 +916,12 @@ public class Http11OutputBuffer extends ResponseAction {
 
 		@Override
 		public void end() throws IOException {
-			channel.flush(true);
+			((SocketChannel) processor.getChannel()).flush(true);
 		}
 
 		@Override
 		public void flush() throws IOException {
-			channel.flush(isBlocking());
+			((SocketChannel) processor.getChannel()).flush(isBlocking());
 		}
 	}
 }

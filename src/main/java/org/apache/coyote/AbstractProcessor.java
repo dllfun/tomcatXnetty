@@ -44,8 +44,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	private static final StringManager sm = StringManager.getManager(AbstractProcessor.class);
 
 	protected final AbstractProtocol<?> protocol;
-	// Used to avoid useless B2C conversion on the host name.
-	private char[] hostNameC = new char[0];
 
 	private final Adapter adapter;
 	// private volatile long asyncTimeout = -1;
@@ -62,7 +60,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	protected final RequestData requestData;
 	protected final ResponseData responseData;
 	// protected InputHandler inputHandler;
-	protected volatile Channel channel = null;
+	private volatile Channel channel = null;
 	// protected volatile SSLSupport sslSupport;
 
 	/**
@@ -155,14 +153,17 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	 * 
 	 * @param channel The socket wrapper
 	 */
-	protected void setChannel(Channel channel) {
+	public final void setChannel(Channel channel) {
 		this.channel = channel;
+		initChannel(channel);
 	}
+
+	protected abstract void initChannel(Channel channel);
 
 	/**
 	 * @return the socket wrapper being used.
 	 */
-	protected final Channel getChannel() {
+	public final Channel getChannel() {
 		return channel;
 	}
 
@@ -281,98 +282,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		}
 
 		return state;
-	}
-
-	public void parseHost(MessageBytes valueMB) {
-		if (valueMB == null || valueMB.isNull()) {
-			populateHost();
-			populatePort();
-			return;
-		} else if (valueMB.getLength() == 0) {
-			// Empty Host header so set sever name to empty string
-			requestData.serverName().setString("");
-			populatePort();
-			return;
-		}
-
-		ByteChunk valueBC = valueMB.getByteChunk();
-		byte[] valueB = valueBC.getBytes();
-		int valueL = valueBC.getLength();
-		int valueS = valueBC.getStart();
-		if (hostNameC.length < valueL) {
-			hostNameC = new char[valueL];
-		}
-
-		try {
-			// Validates the host name
-			int colonPos = Host.parse(valueMB);
-
-			// Extract the port information first, if any
-			if (colonPos != -1) {
-				int port = 0;
-				for (int i = colonPos + 1; i < valueL; i++) {
-					char c = (char) valueB[i + valueS];
-					if (c < '0' || c > '9') {
-						responseData.setStatus(400);
-						setErrorState(ErrorState.CLOSE_CLEAN, null);
-						return;
-					}
-					port = port * 10 + c - '0';
-				}
-				requestData.setServerPort(port);
-
-				// Only need to copy the host name up to the :
-				valueL = colonPos;
-			}
-
-			// Extract the host name
-			for (int i = 0; i < valueL; i++) {
-				hostNameC[i] = (char) valueB[i + valueS];
-			}
-			requestData.serverName().setChars(hostNameC, 0, valueL);
-
-		} catch (IllegalArgumentException e) {
-			// IllegalArgumentException indicates that the host name is invalid
-			UserDataHelper.Mode logMode = userDataHelper.getNextMode();
-			if (logMode != null) {
-				String message = sm.getString("abstractProcessor.hostInvalid", valueMB.toString());
-				switch (logMode) {
-				case INFO_THEN_DEBUG:
-					message += sm.getString("abstractProcessor.fallToDebug");
-					//$FALL-THROUGH$
-				case INFO:
-					getLog().info(message, e);
-					break;
-				case DEBUG:
-					getLog().debug(message, e);
-				}
-			}
-
-			responseData.setStatus(400);
-			setErrorState(ErrorState.CLOSE_CLEAN, e);
-		}
-	}
-
-	/**
-	 * Called when a host header is not present in the request (e.g. HTTP/1.0). It
-	 * populates the server name with appropriate information. The source is
-	 * expected to vary by protocol.
-	 * <p>
-	 * The default implementation is a NO-OP.
-	 */
-	protected void populateHost() {
-		// NO-OP
-	}
-
-	/**
-	 * Called when a host header is not present or is empty in the request (e.g.
-	 * HTTP/1.0). It populates the server port with appropriate information. The
-	 * source is expected to vary by protocol.
-	 * <p>
-	 * The default implementation is a NO-OP.
-	 */
-	protected void populatePort() {
-		// NO-OP
 	}
 
 	// @Override
@@ -784,13 +693,15 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	}
 
 	@Override
-	public void recycle() {
+	public final void recycle() {
 		channel = null;
 		errorState = ErrorState.NONE;
 		requestData.recycle();
 		responseData.recycle();
-
+		innerRecycle();
 	}
+
+	protected abstract void innerRecycle();
 
 	@Override
 	public Exception collectCloseException() {

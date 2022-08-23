@@ -18,7 +18,6 @@ package org.apache.coyote.http11;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -40,7 +39,6 @@ import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
-import org.apache.tomcat.util.http.HeaderUtil;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.parser.HttpParser;
 import org.apache.tomcat.util.http.parser.TokenList;
@@ -64,20 +62,12 @@ public class Http11InputBuffer extends RequestAction {
 	 */
 	private static final StringManager sm = StringManager.getManager(Http11InputBuffer.class);
 
-	private static final byte[] CLIENT_PREFACE_START = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
-			.getBytes(StandardCharsets.ISO_8859_1);
-
 	private Http11Processor processor;
 
 	/**
 	 * Associated Coyote request.
 	 */
 	private final RequestData requestData;
-
-	/**
-	 * Headers of the associated request.
-	 */
-	private final MimeHeaders headers;
 
 	/**
 	 * Swallow input ? (in the case of an expectation)
@@ -100,7 +90,7 @@ public class Http11InputBuffer extends RequestAction {
 	/**
 	 * Wrapper that provides access to the underlying socket.
 	 */
-	private SocketChannel channel;
+	// private SocketChannel channel;
 
 	/**
 	 * Underlying input buffer.
@@ -122,11 +112,6 @@ public class Http11InputBuffer extends RequestAction {
 	 * Index of the last active filter.
 	 */
 	private int lastActiveFilter;
-
-	/**
-	 * Known size of the NioChannel read buffer.
-	 */
-	private final int socketReadBufferSize = 0;
 
 	/**
 	 * Tracks how many internal filters are in the filter library so they are
@@ -158,9 +143,9 @@ public class Http11InputBuffer extends RequestAction {
 	// ----------------------------------------------------------- Constructors
 
 	public Http11InputBuffer(Http11Processor processor, HttpParser httpParser) {
+		super(processor);
 		this.processor = processor;
 		this.requestData = processor.getRequestData();
-		headers = requestData.getMimeHeaders();
 		this.httpParser = httpParser;
 
 		filterLibrary = new InputFilter[0];
@@ -299,9 +284,8 @@ public class Http11InputBuffer extends RequestAction {
 	 * Recycle the input buffer. This should be called when closing the connection.
 	 */
 	void recycle() {
-		if (channel != null) {
-			channel.getAppReadBuffer().reset();
-			channel = null;
+		if (((SocketChannel) processor.getChannel()) != null) {
+			((SocketChannel) processor.getChannel()).getAppReadBuffer().reset();
 		}
 		// requestData.recycle();
 
@@ -322,7 +306,7 @@ public class Http11InputBuffer extends RequestAction {
 	void nextRequest() {
 		// requestData.recycle();
 
-		channel.getAppReadBuffer().nextRequest();
+		((SocketChannel) processor.getChannel()).getAppReadBuffer().nextRequest();
 
 		// Recycle filters
 		for (int i = 0; i <= lastActiveFilter; i++) {
@@ -549,7 +533,7 @@ public class Http11InputBuffer extends RequestAction {
 		}
 
 		// Validate host name and extract port if present
-		processor.parseHost(hostValueMB);
+		parseHost(hostValueMB);
 
 		if (!contentDelimitation) {
 			// If there's no content length
@@ -613,7 +597,7 @@ public class Http11InputBuffer extends RequestAction {
 	 */
 	void endRequest() throws IOException {
 
-		BufWrapper byteBuffer = channel.getAppReadBuffer();
+		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 
 		if (swallowInput && (lastActiveFilter != -1)) {
 			int extraBytes = (int) activeFilters[lastActiveFilter].end();
@@ -633,7 +617,7 @@ public class Http11InputBuffer extends RequestAction {
 	 * correspond).
 	 */
 	int available(boolean read) {
-		BufWrapper byteBuffer = channel.getAppReadBuffer();
+		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 
 		int available = byteBuffer.getRemaining();
 		if ((available == 0) && (lastActiveFilter >= 0)) {
@@ -646,8 +630,8 @@ public class Http11InputBuffer extends RequestAction {
 		}
 
 		try {
-			if (channel.hasDataToRead()) {
-				channel.fillAppReadBuffer(false);
+			if (((SocketChannel) processor.getChannel()).hasDataToRead()) {
+				((SocketChannel) processor.getChannel()).fillAppReadBuffer(false);
 				available = byteBuffer.getRemaining();
 			}
 		} catch (IOException ioe) {
@@ -686,7 +670,7 @@ public class Http11InputBuffer extends RequestAction {
 	 * non-blocking reads with the blocking IO connector.
 	 */
 	boolean isFinished() {
-		BufWrapper byteBuffer = channel.getAppReadBuffer();
+		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 
 		if (byteBuffer.hasRemaining()) {
 			// Data to read in the buffer so not finished
@@ -714,7 +698,7 @@ public class Http11InputBuffer extends RequestAction {
 
 	@Override
 	public final void registerReadInterest() {
-		channel.registerReadInterest();
+		((SocketChannel) processor.getChannel()).registerReadInterest();
 	}
 
 	@Override
@@ -731,15 +715,15 @@ public class Http11InputBuffer extends RequestAction {
 	 * populate this from an alternative source should override this method.
 	 */
 	protected void populateRequestAttributeRemoteHost() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.remoteHost().setString(channel.getRemoteHost());
+		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
+			requestData.remoteHost().setString(((SocketChannel) processor.getChannel()).getRemoteHost());
 		}
 	}
 
 	@Override
 	public void actionREQ_HOST_ADDR_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.remoteAddr().setString(channel.getRemoteAddr());
+		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
+			requestData.remoteAddr().setString(((SocketChannel) processor.getChannel()).getRemoteAddr());
 		}
 	}
 
@@ -750,30 +734,42 @@ public class Http11InputBuffer extends RequestAction {
 
 	@Override
 	public void actionREQ_LOCALPORT_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.setLocalPort(channel.getLocalPort());
+		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
+			requestData.setLocalPort(((SocketChannel) processor.getChannel()).getLocalPort());
 		}
 	}
 
 	@Override
 	public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.localAddr().setString(channel.getLocalAddr());
+		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
+			requestData.localAddr().setString(((SocketChannel) processor.getChannel()).getLocalAddr());
 		}
 	}
 
 	@Override
 	public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.localName().setString(channel.getLocalName());
+		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
+			requestData.localName().setString(((SocketChannel) processor.getChannel()).getLocalName());
 		}
 	}
 
 	@Override
 	public void actionREQ_REMOTEPORT_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && channel != null) {
-			requestData.setRemotePort(channel.getRemotePort());
+		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
+			requestData.setRemotePort(((SocketChannel) processor.getChannel()).getRemotePort());
 		}
+	}
+
+	/**
+	 * {@inheritDoc}
+	 * <p>
+	 * This implementation provides the server port from the local port.
+	 */
+	@Override
+	protected void populatePort() {
+		// Ensure the local port field is populated before using it.
+		this.actionREQ_LOCALPORT_ATTRIBUTE();
+		requestData.setServerPort(requestData.getLocalPort());
 	}
 
 	@Override
@@ -790,7 +786,7 @@ public class Http11InputBuffer extends RequestAction {
 	}
 
 	ByteBuffer getLeftover() {
-		BufWrapper byteBuffer = channel.getAppReadBuffer();
+		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 		int available = byteBuffer.getRemaining();
 		if (available > 0) {
 			return ByteBuffer.wrap(byteBuffer.getArray(), byteBuffer.getPosition(), available);
@@ -815,7 +811,7 @@ public class Http11InputBuffer extends RequestAction {
 	 */
 	protected void populateSslRequestAttributes() {
 		try {
-			SSLSupport sslSupport = channel.getSslSupport();
+			SSLSupport sslSupport = ((SocketChannel) processor.getChannel()).getSslSupport();
 			if (sslSupport != null) {
 				Object sslO = sslSupport.getCipherSuite();
 				if (sslO != null) {
@@ -868,7 +864,7 @@ public class Http11InputBuffer extends RequestAction {
 	 */
 	// @Override
 	protected final void sslReHandShake() throws IOException {
-		SSLSupport sslSupport = channel.getSslSupport();
+		SSLSupport sslSupport = ((SocketChannel) processor.getChannel()).getSslSupport();
 		if (sslSupport != null) {
 			// Consume and buffer the request body, so that it does not
 			// interfere with the client's handshake messages
@@ -881,7 +877,7 @@ public class Http11InputBuffer extends RequestAction {
 			 * Outside the try/catch because we want I/O errors during renegotiation to be
 			 * thrown for the caller to handle since they will be fatal to the connection.
 			 */
-			channel.doClientAuth(sslSupport);
+			((SocketChannel) processor.getChannel()).doClientAuth(sslSupport);
 			try {
 				/*
 				 * Errors processing the cert chain do not affect the client connection so they
@@ -899,7 +895,7 @@ public class Http11InputBuffer extends RequestAction {
 
 	void init(SocketChannel channel) {
 
-		this.channel = channel;
+		// this.channel = channel;
 
 	}
 
@@ -929,16 +925,18 @@ public class Http11InputBuffer extends RequestAction {
 
 		@Override
 		public BufWrapper doRead() throws IOException {
-			if (channel.getAppReadBuffer().hasNoRemaining()) {
+			if (((SocketChannel) processor.getChannel()).getAppReadBuffer().hasNoRemaining()) {
 				// The application is reading the HTTP request body which is
 				// always a blocking operation.
-				if (!channel.fillAppReadBuffer(true))
+				if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(true))
 					return null;
 			}
 
-			int length = channel.getAppReadBuffer().getRemaining();
-			BufWrapper bufWrapper = channel.getAppReadBuffer();// .duplicate()
-			// channel.getAppReadBuffer().setPosition(channel.getAppReadBuffer().getLimit());
+			int length = ((SocketChannel) processor.getChannel()).getAppReadBuffer().getRemaining();
+			BufWrapper bufWrapper = ((SocketChannel) processor.getChannel()).getAppReadBuffer();// .duplicate()
+			// ((SocketChannel)
+			// processor.getChannel()).getAppReadBuffer().setPosition(((SocketChannel)
+			// processor.getChannel()).getAppReadBuffer().getLimit());
 			return bufWrapper;
 		}
 

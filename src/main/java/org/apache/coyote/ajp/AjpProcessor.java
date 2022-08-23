@@ -261,7 +261,7 @@ public class AjpProcessor extends AbstractProcessor {
 		// the default (Constants.MAX_PACKET_SIZE)
 		this.outputMaxChunkSize = packetSize - Constants.SEND_HEAD_LEN;
 
-		this.inputReader = new SocketInputReader();
+		this.inputReader = new SocketInputReader(this);
 
 		// inputHandler = inputReader;
 
@@ -336,9 +336,14 @@ public class AjpProcessor extends AbstractProcessor {
 	}
 
 	@Override
+	protected void initChannel(Channel channel) {
+		this.channel = (SocketChannel) channel;
+	}
+
+	@Override
 	public SocketState service(Channel channel) throws IOException {
 		SocketChannel socketChannel = (SocketChannel) channel;
-		this.channel = socketChannel;
+		// this.channel = socketChannel;
 		RequestInfo rp = requestData.getRequestProcessor();
 		rp.setStage(org.apache.coyote.Constants.STAGE_PARSE);
 
@@ -501,12 +506,12 @@ public class AjpProcessor extends AbstractProcessor {
 	}
 
 	@Override
-	public void recycle() {
+	protected void innerRecycle() {
 		Request request = createRequest();
 		Response response = createResponse();
 		request.setResponse(response);
 		getAdapter().checkRecycled(request, response);
-		super.recycle();
+		// super.recycle();
 		channel = null;
 		first = true;
 		endOfStream = false;
@@ -564,34 +569,6 @@ public class AjpProcessor extends AbstractProcessor {
 			read(buf, Constants.H_SIZE, messageLength, true);
 			return true;
 		}
-	}
-
-	/**
-	 * {@inheritDoc}
-	 * <p>
-	 * This implementation populates the server name from the local name provided by
-	 * the AJP message.
-	 */
-	@Override
-	protected void populateHost() {
-		try {
-			requestData.serverName().duplicate(requestData.localName());
-		} catch (IOException e) {
-			responseData.setStatus(400);
-			setErrorState(ErrorState.CLOSE_CLEAN, e);
-		}
-	}
-
-	/**
-	 * {@inheritDoc}
-	 * <p>
-	 * This implementation populates the server port from the local port provided by
-	 * the AJP message.
-	 */
-	@Override
-	protected void populatePort() {
-		// No host information (HTTP/1.0)
-		requestData.setServerPort(requestData.getLocalPort());
 	}
 
 //	@Override
@@ -660,6 +637,10 @@ public class AjpProcessor extends AbstractProcessor {
 		 * bc.getLength()))); empty = true; return
 		 * handler.getBufWrapper().getRemaining(); }
 		 */
+
+		public SocketInputReader(AbstractProcessor processor) {
+			super(processor);
+		}
 
 		/**
 		 * Get more request body data from the web server and store it in the internal
@@ -886,6 +867,34 @@ public class AjpProcessor extends AbstractProcessor {
 			if (getPopulateRequestAttributesFromSocket() && channel != null) {
 				requestData.setRemotePort(channel.getRemotePort());
 			}
+		}
+
+		/**
+		 * {@inheritDoc}
+		 * <p>
+		 * This implementation populates the server name from the local name provided by
+		 * the AJP message.
+		 */
+		@Override
+		protected void populateHost() {
+			try {
+				requestData.serverName().duplicate(requestData.localName());
+			} catch (IOException e) {
+				responseData.setStatus(400);
+				setErrorState(ErrorState.CLOSE_CLEAN, e);
+			}
+		}
+
+		/**
+		 * {@inheritDoc}
+		 * <p>
+		 * This implementation populates the server port from the local port provided by
+		 * the AJP message.
+		 */
+		@Override
+		protected void populatePort() {
+			// No host information (HTTP/1.0)
+			requestData.setServerPort(requestData.getLocalPort());
 		}
 
 		@Override

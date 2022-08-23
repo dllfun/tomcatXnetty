@@ -80,7 +80,7 @@ public class Http11HeadParser {
 	/**
 	 * Wrapper that provides access to the underlying socket.
 	 */
-	private SocketChannel channel;
+	// private SocketChannel channel;
 
 	/**
 	 * Parsing state - used for non blocking parsing so that when more data arrives,
@@ -136,9 +136,8 @@ public class Http11HeadParser {
 	 * Recycle the input buffer. This should be called when closing the connection.
 	 */
 	void recycle() {
-		if (channel != null) {
-			channel.getAppReadBuffer().reset();
-			channel = null;
+		if (((SocketChannel) processor.getChannel()) != null) {
+			((SocketChannel) processor.getChannel()).getAppReadBuffer().reset();
 		}
 		// requestData.recycle();
 
@@ -163,7 +162,7 @@ public class Http11HeadParser {
 	void nextRequest() {
 		// requestData.recycle();
 
-		channel.getAppReadBuffer().nextRequest();
+		((SocketChannel) processor.getChannel()).getAppReadBuffer().nextRequest();
 
 		parsingHeader = true;
 
@@ -194,7 +193,7 @@ public class Http11HeadParser {
 			return true;
 		}
 
-		BufWrapper byteBuffer = channel.getAppReadBuffer();
+		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 		byteBuffer.startParsingHeader(headerBufferSize);
 		byteBuffer.startParsingRequestLine();
 
@@ -208,16 +207,16 @@ public class Http11HeadParser {
 					if (keptAlive) {
 						// Haven't read any request data yet so use the keep-alive
 						// timeout.
-						channel.setReadTimeout(keepAliveTimeout);
+						((SocketChannel) processor.getChannel()).setReadTimeout(keepAliveTimeout);
 					}
-					if (!channel.fillAppReadBuffer(false)) {
+					if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) {
 						// A read is pending, so no longer in initial state
 						parsingRequestLinePhase = 1;
 						return false;
 					}
 					// At least one byte of the request has been received.
 					// Switch to the socket timeout.
-					channel.setReadTimeout(connectionTimeout);
+					((SocketChannel) processor.getChannel()).setReadTimeout(connectionTimeout);
 				}
 				if (!keptAlive && byteBuffer.getPosition() == 0
 						&& byteBuffer.getLimit() >= CLIENT_PREFACE_START.length - 1) {
@@ -268,7 +267,7 @@ public class Http11HeadParser {
 			while (!space) {
 				// Read new bytes if needed
 				if (byteBuffer.hasNoRemaining()) {
-					if (!channel.fillAppReadBuffer(false)) // request line parsing
+					if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) // request line parsing
 						return false;
 				}
 				// Spec says method name is a token followed by a single SP but
@@ -304,7 +303,7 @@ public class Http11HeadParser {
 			while (space) {
 				// Read new bytes if needed
 				if (byteBuffer.hasNoRemaining()) {
-					if (!channel.fillAppReadBuffer(false)) // request line parsing
+					if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) // request line parsing
 						return false;
 				}
 				chr = byteBuffer.getByte();
@@ -327,7 +326,7 @@ public class Http11HeadParser {
 			while (!space) {
 				// Read new bytes if needed
 				if (byteBuffer.hasNoRemaining()) {
-					if (!channel.fillAppReadBuffer(false)) // request line parsing
+					if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) // request line parsing
 						return false;
 				}
 				int pos = byteBuffer.getPosition();
@@ -428,7 +427,7 @@ public class Http11HeadParser {
 			while (space) {
 				// Read new bytes if needed
 				if (byteBuffer.hasNoRemaining()) {
-					if (!channel.fillAppReadBuffer(false)) // request line parsing
+					if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) // request line parsing
 						return false;
 				}
 				byte chr = byteBuffer.getByte();
@@ -451,7 +450,7 @@ public class Http11HeadParser {
 			while (!parsingRequestLineEol) {
 				// Read new bytes if needed
 				if (byteBuffer.hasNoRemaining()) {
-					if (!channel.fillAppReadBuffer(false)) // request line parsing
+					if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) // request line parsing
 						return false;
 				}
 
@@ -507,7 +506,7 @@ public class Http11HeadParser {
 			return true;
 		}
 
-		BufWrapper byteBuffer = channel.getAppReadBuffer();
+		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 		byteBuffer.startParsingHeader(headerBufferSize);
 
 		HeaderParseStatus status = HeaderParseStatus.HAVE_MORE_HEADERS;
@@ -569,9 +568,9 @@ public class Http11HeadParser {
 
 	void init(SocketChannel channel) {
 
-		this.channel = channel;
+		// this.channel = channel;
 
-		this.channel.initAppReadBuffer(headerBufferSize);
+		channel.initAppReadBuffer(headerBufferSize);
 
 		// this.appReadBuffer = channel.getAppReadBuffer();
 
@@ -587,13 +586,13 @@ public class Http11HeadParser {
 	 */
 	private HeaderParseStatus parseHeader() throws IOException {
 
-		BufWrapper byteBuffer = channel.getAppReadBuffer();
+		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 
 		while (headerParsePos == HeaderParsePosition.HEADER_START) {
 
 			// Read new bytes if needed
 			if (byteBuffer.hasNoRemaining()) {
-				if (!channel.fillAppReadBuffer(false)) {// parse header
+				if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) {// parse header
 					headerParsePos = HeaderParsePosition.HEADER_START;
 					return HeaderParseStatus.NEED_MORE_DATA;
 				}
@@ -634,7 +633,7 @@ public class Http11HeadParser {
 
 			// Read new bytes if needed
 			if (byteBuffer.hasNoRemaining()) {
-				if (!channel.fillAppReadBuffer(false)) { // parse header
+				if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) { // parse header
 					return HeaderParseStatus.NEED_MORE_DATA;
 				}
 			}
@@ -694,7 +693,7 @@ public class Http11HeadParser {
 				while (true) {
 					// Read new bytes if needed
 					if (byteBuffer.hasNoRemaining()) {
-						if (!channel.fillAppReadBuffer(false)) {// parse header
+						if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) {// parse header
 							// HEADER_VALUE_START
 							return HeaderParseStatus.NEED_MORE_DATA;
 						}
@@ -716,7 +715,7 @@ public class Http11HeadParser {
 
 					// Read new bytes if needed
 					if (byteBuffer.hasNoRemaining()) {
-						if (!channel.fillAppReadBuffer(false)) {// parse header
+						if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) {// parse header
 							// HEADER_VALUE
 							return HeaderParseStatus.NEED_MORE_DATA;
 						}
@@ -757,7 +756,7 @@ public class Http11HeadParser {
 			}
 			// Read new bytes if needed
 			if (byteBuffer.hasNoRemaining()) {
-				if (!channel.fillAppReadBuffer(false)) {// parse header
+				if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) {// parse header
 					// HEADER_MULTI_LINE
 					return HeaderParseStatus.NEED_MORE_DATA;
 				}
@@ -795,7 +794,7 @@ public class Http11HeadParser {
 	}
 
 	private HeaderParseStatus skipLine() throws IOException {
-		BufWrapper byteBuffer = channel.getAppReadBuffer();
+		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 
 		headerParsePos = HeaderParsePosition.HEADER_SKIPLINE;
 		boolean eol = false;
@@ -805,7 +804,7 @@ public class Http11HeadParser {
 
 			// Read new bytes if needed
 			if (byteBuffer.hasNoRemaining()) {
-				if (!channel.fillAppReadBuffer(false)) {
+				if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) {
 					return HeaderParseStatus.NEED_MORE_DATA;
 				}
 			}

@@ -21,6 +21,7 @@ import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
 import java.util.HashSet;
 import java.util.Set;
+
 import javax.servlet.http.HttpServletResponse;
 
 import org.apache.coyote.AbstractProcessor;
@@ -51,7 +52,6 @@ import org.apache.tomcat.util.http.parser.TokenList;
 import org.apache.tomcat.util.log.UserDataHelper;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SendfileDataBase;
 import org.apache.tomcat.util.net.SendfileKeepAliveState;
 import org.apache.tomcat.util.net.SendfileState;
@@ -499,9 +499,9 @@ public class Http11Processor extends AbstractProcessor {
 	}
 
 	@Override
-	protected final void setChannel(Channel channel) {
+	protected final void initChannel(Channel channel) {
 		SocketChannel socketChannel = (SocketChannel) channel;
-		super.setChannel(channel);
+		// super.setChannel(channel);
 		this.channel = socketChannel;
 		headParser.init(socketChannel);
 		inputBuffer.init(socketChannel);
@@ -573,18 +573,6 @@ public class Http11Processor extends AbstractProcessor {
 	 * Note: populateHost() is not over-ridden. request.serverName() will be set to
 	 * return the default host name by the Mapper.
 	 */
-
-	/**
-	 * {@inheritDoc}
-	 * <p>
-	 * This implementation provides the server port from the local port.
-	 */
-	@Override
-	protected void populatePort() {
-		// Ensure the local port field is populated before using it.
-		inputBuffer.actionREQ_LOCALPORT_ATTRIBUTE();
-		requestData.setServerPort(requestData.getLocalPort());
-	}
 
 	@Override
 	protected boolean flushBufferedWrite() throws IOException {
@@ -778,12 +766,12 @@ public class Http11Processor extends AbstractProcessor {
 	}
 
 	@Override
-	public final void recycle() {
+	protected void innerRecycle() {
 		Request request = createRequest();
 		Response response = createResponse();
 		request.setResponse(response);
 		getAdapter().checkRecycled(request, response);
-		super.recycle();
+		// super.recycle();
 		headParser.recycle();
 		inputBuffer.recycle();
 		outputBuffer.recycle();

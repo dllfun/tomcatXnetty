@@ -47,13 +47,16 @@ class StreamProcessor extends AbstractProcessor {
 
 	private final Http2UpgradeHandler handler;
 	private final Stream stream;
+	private final Http2InputBuffer http2InputBuffer;
 	private final Http2OutputBuffer http2OutputBuffer;
+	private Channel channel;
 
 	StreamProcessor(Http2UpgradeHandler handler, Stream stream, Adapter adapter) {
 		super(handler.getProtocol().getHttp11Protocol(), adapter, stream.getRequestData(), stream.getResponseData());
 		this.handler = handler;
 		this.stream = stream;
 		this.stream.setCurrentProcessor(this);
+		this.http2InputBuffer = new Http2InputBuffer(this, stream, requestData, stream.getInputBuffer());
 		this.http2OutputBuffer = new Http2OutputBuffer(this, stream, responseData, stream.getOutputBuffer());
 		// inputHandler = this.stream.getInputBuffer();
 		setChannel(stream);
@@ -65,12 +68,17 @@ class StreamProcessor extends AbstractProcessor {
 
 	@Override
 	protected Request createRequest() {
-		return new Request(this.requestData, this, stream.getInputBuffer());
+		return new Request(this.requestData, this, http2InputBuffer);
 	}
 
 	@Override
 	protected Response createResponse() {
 		return new Response(this.responseData, this, http2OutputBuffer);
+	}
+
+	@Override
+	protected void initChannel(Channel channel) {
+		this.channel = channel;
 	}
 
 	final void process(SocketEvent event) {
@@ -243,44 +251,9 @@ class StreamProcessor extends AbstractProcessor {
 //	}
 
 	@Override
-	public Exception collectCloseException() {
-		if (!getErrorState().isConnectionIoAllowed()) {
-			ConnectionException ce = new ConnectionException(
-					sm.getString("streamProcessor.error.connection", stream.getConnectionId(), stream.getIdentifier()),
-					Http2Error.INTERNAL_ERROR);
-			return ce;
-		} else if (!getErrorState().isIoAllowed()) {
-			StreamException se = stream.getResetException();
-			if (se == null) {
-				se = new StreamException(
-						sm.getString("streamProcessor.error.stream", stream.getConnectionId(), stream.getIdentifier()),
-						Http2Error.INTERNAL_ERROR, stream.getIdAsInt());
-			}
-			return se;
-		}
-		return null;
-	}
-
-	@Override
-	public final void recycle() {
-		// StreamProcessor instances are not re-used.
-		// Clear fields that can be cleared to aid GC and trigger NPEs if this
-		// is reused
-		setChannel(null);
-	}
-
-	@Override
-	protected final Log getLog() {
-		return log;
-	}
-
-	@Override
-	public final void pause() {
-		// NO-OP. Handled by the Http2UpgradeHandler
-	}
-
-	@Override
 	public final SocketState service(Channel channel) throws IOException {
+
+		setChannel(channel);
 		try {
 			Request request = createRequest();
 			Response response = createResponse();
@@ -373,4 +346,43 @@ class StreamProcessor extends AbstractProcessor {
 			handler.sendStreamReset(se);
 		}
 	}
+
+	@Override
+	public Exception collectCloseException() {
+		if (!getErrorState().isConnectionIoAllowed()) {
+			ConnectionException ce = new ConnectionException(
+					sm.getString("streamProcessor.error.connection", stream.getConnectionId(), stream.getIdentifier()),
+					Http2Error.INTERNAL_ERROR);
+			return ce;
+		} else if (!getErrorState().isIoAllowed()) {
+			StreamException se = stream.getResetException();
+			if (se == null) {
+				se = new StreamException(
+						sm.getString("streamProcessor.error.stream", stream.getConnectionId(), stream.getIdentifier()),
+						Http2Error.INTERNAL_ERROR, stream.getIdAsInt());
+			}
+			return se;
+		}
+		return null;
+	}
+
+	@Override
+	protected void innerRecycle() {
+		// StreamProcessor instances are not re-used.
+		// Clear fields that can be cleared to aid GC and trigger NPEs if this
+		// is reused
+		// super.recycle();
+		channel = null;
+	}
+
+	@Override
+	protected final Log getLog() {
+		return log;
+	}
+
+	@Override
+	public final void pause() {
+		// NO-OP. Handled by the Http2UpgradeHandler
+	}
+
 }

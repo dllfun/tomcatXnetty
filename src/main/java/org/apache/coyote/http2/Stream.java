@@ -30,9 +30,8 @@ import java.util.function.Supplier;
 
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.CloseNowException;
-import org.apache.coyote.ErrorState;
+import org.apache.coyote.InputReader;
 import org.apache.coyote.DispatchHandler.ConcurrencyControlled;
-import org.apache.coyote.RequestAction;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.ResponseData;
 import org.apache.coyote.http11.HttpOutputBuffer;
@@ -543,6 +542,11 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 	}
 
 	@Override
+	public SocketChannel getSocketChannel() {
+		return handler.getChannel();
+	}
+
+	@Override
 	final int getWeight() {
 		return weight;
 	}
@@ -1002,7 +1006,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		}
 	}
 
-	class StreamInputBuffer extends RequestAction {
+	class StreamInputBuffer implements InputReader {
 
 		/*
 		 * Two buffers are required to avoid various multi-threading issues. These
@@ -1146,7 +1150,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 			return ByteBufferWrapper.wrapper(ByteBuffer.wrap(outBuffer, 0, written));
 		}
 
-		@Override
+		// @Override
 		public final boolean isReadyForRead() {
 			ensureBuffersExist();
 
@@ -1167,7 +1171,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 			return (inBuffer == null || inBuffer.position() == 0) && isInputFinished();
 		}
 
-		@Override
+		// @Override
 		public int getAvailable(Object param) {
 			int available = available(Boolean.TRUE.equals(param));
 			// requestData.setAvailable(available);
@@ -1195,85 +1199,6 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		// protected final boolean isRequestBodyFullyRead() {
 		// return stream.getInputBuffer().isRequestBodyFullyRead();
 		// }
-
-		@Override
-		public final void registerReadInterest() {
-			// Should never be called for StreamProcessor as isReadyForRead() is
-			// overridden
-			throw new UnsupportedOperationException();
-		}
-
-		@Override
-		public boolean isTrailerFieldsReady() {
-			return Stream.this.isTrailerFieldsReady();
-		}
-
-		/**
-		 * Populate the remote host request attribute. Processors (e.g. AJP) that
-		 * populate this from an alternative source should override this method.
-		 */
-		protected void populateRequestAttributeRemoteHost() {
-			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
-				requestData.remoteHost().setString(handler.getChannel().getRemoteHost());
-			}
-		}
-
-		@Override
-		public void actionREQ_HOST_ADDR_ATTRIBUTE() {
-			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
-				requestData.remoteAddr().setString(handler.getChannel().getRemoteAddr());
-			}
-		}
-
-		@Override
-		public void actionREQ_HOST_ATTRIBUTE() {
-			populateRequestAttributeRemoteHost();
-		}
-
-		@Override
-		public void actionREQ_LOCALPORT_ATTRIBUTE() {
-			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
-				requestData.setLocalPort(handler.getChannel().getLocalPort());
-			}
-		}
-
-		@Override
-		public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
-			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
-				requestData.localAddr().setString(handler.getChannel().getLocalAddr());
-			}
-		}
-
-		@Override
-		public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
-			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
-				requestData.localName().setString(handler.getChannel().getLocalName());
-			}
-		}
-
-		@Override
-		public void actionREQ_REMOTEPORT_ATTRIBUTE() {
-			if (getPopulateRequestAttributesFromSocket() && handler.getChannel() != null) {
-				requestData.setRemotePort(handler.getChannel().getRemotePort());
-			}
-		}
-
-		@Override
-		public final void setRequestBody(ByteChunk body) {
-			this.insertReplayedBody(body);// stream.getInputBuffer()
-			try {
-				receivedEndOfStream();// stream
-			} catch (ConnectionException e) {
-				// Exception will not be thrown in this case
-			}
-		}
-
-		@Override
-		public final void disableSwallowRequest() {
-			// NO-OP
-			// HTTP/2 has to swallow any input received to ensure that the flow
-			// control windows are correctly tracked.
-		}
 
 		/*
 		 * Called after placing some data in the inBuffer.
@@ -1349,7 +1274,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		 */
 		protected void populateSslRequestAttributes() {
 			try {
-				SSLSupport sslSupport = handler.getChannel().getSslSupport();
+				SSLSupport sslSupport = handler.getChannel().getSslSupport();// Stream.this
 				if (sslSupport != null) {
 					Object sslO = sslSupport.getCipherSuite();
 					if (sslO != null) {
@@ -1378,30 +1303,5 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 			}
 		}
 
-		@Override
-		public void actionREQ_SSL_ATTRIBUTE() {
-			populateSslRequestAttributes();
-		}
-
-		@Override
-		public void actionREQ_SSL_CERTIFICATE() {
-			try {
-				sslReHandShake();
-			} catch (IOException ioe) {
-				((StreamProcessor) currentProcessor).setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
-			}
-		}
-
-		/**
-		 * Processors that can perform a TLS re-handshake (e.g. HTTP/1.1) should
-		 * override this method and implement the re-handshake.
-		 *
-		 * @throws IOException If authentication is required then there will be I/O with
-		 *                     the client and this exception will be thrown if that goes
-		 *                     wrong
-		 */
-		protected void sslReHandShake() throws IOException {
-			// NO-OP
-		}
 	}
 }
