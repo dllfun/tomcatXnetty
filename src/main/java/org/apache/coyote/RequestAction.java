@@ -1,6 +1,5 @@
 package org.apache.coyote;
 
-import org.apache.coyote.http11.Http11Processor;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteChunk;

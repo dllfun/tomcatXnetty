@@ -100,7 +100,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		super(identifier);
 		// this.channel = channel;
 		this.handler = handler;
-		handler.addChild(this);
+		handler.getZero().addChild(this);
 		setWindowSize(handler.getRemoteSettings().getInitialWindowSize());
 		state = new StreamStateMachine(this);
 		if (requestData == null) {
@@ -137,6 +137,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		if (this.requestData.getStartTime() < 0) {
 			this.requestData.setStartTime(System.currentTimeMillis());
 		}
+		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " created");
 	}
 
 	@Override
@@ -538,7 +539,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 
 	@Override
 	final String getConnectionId() {
-		return handler.getConnectionId();
+		return handler.getZero().getConnectionId();
 	}
 
 	@Override
@@ -686,7 +687,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 	}
 
 	final void close(Http2Exception http2Exception) {
-		System.out.println("stream(" + getIdentifier() + ") closed");
+		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ") closed");
 		if (http2Exception instanceof StreamException) {
 			try {
 				StreamException se = (StreamException) http2Exception;
@@ -946,7 +947,8 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 			// Only want to return false if the window size is zero AND we are
 			// already waiting for an allocation.
 			if (getWindowSize() > 0 && allocationManager.isWaitingForStream()
-					|| handler.getWindowSize() > 0 && allocationManager.isWaitingForConnection() || dataLeft) {
+					|| handler.getZero().getWindowSize() > 0 && allocationManager.isWaitingForConnection()
+					|| dataLeft) {
 				return false;
 			} else {
 				return true;

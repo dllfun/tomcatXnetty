@@ -84,12 +84,22 @@ public abstract class AbstractChannel implements Channel {
 	}
 
 	@Override
+	public SSLSupport initSslSupport(String clientCertProvider) {
+		return null;
+	}
+
+	@Override
 	public Object getConnectionID() {
 		return null;
 	}
 
 	@Override
 	public Object getStreamID() {
+		return null;
+	}
+
+	@Override
+	public Object getLock() {
 		return null;
 	}
 

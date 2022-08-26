@@ -39,6 +39,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 */
 	// private volatile SocketBufferHandler socketBufferHandler = null;
 
+	private boolean firstFill = true;
 	/**
 	 * The read buffer.
 	 */
@@ -78,6 +79,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 			appReadBuffer.setProvider(() -> getSocketBufferHandler().getAppReadBuffer());
 			// setAppReadBufHandler(appReadBuffer);
 			// socket.addAppReadBufferExpandListener();
+			firstFill = true;
 		}
 
 	}
@@ -92,13 +94,19 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	@Override
 	public boolean fillAppReadBuffer(boolean block) throws IOException {
 		int nRead = this.read(block, appReadBuffer);
+		boolean success = false;
 		if (nRead > 0) {
-			return true;
+			success = true;
 		} else if (nRead == -1) {
 			throw new EOFException(sm.getString("iib.eof.error"));
 		} else {
-			return false;
+			success = false;
 		}
+		if (!success && firstFill) {
+			System.out.println(getRemotePort() + " 未读取到数据");
+		}
+		firstFill = false;
+		return success;
 	}
 
 	@Override

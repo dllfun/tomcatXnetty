@@ -18,6 +18,7 @@ package org.apache.tomcat.util.net;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
@@ -691,8 +692,14 @@ public class SecureNioChannel extends NioChannel {
 
 		// read from the network
 		int pos = netInBuffer.position();
-		int netread = socketChannel.read(netInBuffer);
-		printInBuffer(pos);
+		int netread = -1;
+		try {
+			netread = socketChannel.read(netInBuffer);
+			printInBuffer(pos);
+		} catch (IOException e) {
+			System.out.println(socketChannel.socket().getPort() + " error when read");
+			throw e;
+		}
 		// did we reach EOF? if so send EOF up one layer.
 		if (netread == -1) {
 			return -1;
@@ -771,8 +778,14 @@ public class SecureNioChannel extends NioChannel {
 
 		// read from the network
 		int pos = netInBuffer.position();
-		int netread = socketChannel.read(netInBuffer);
-		printInBuffer(pos);
+		int netread = -1;
+		try {
+			netread = socketChannel.read(netInBuffer);
+			printInBuffer(pos);
+		} catch (IOException e) {
+			System.out.println(socketChannel.socket().getPort() + " error when read");
+			throw e;
+		}
 		// did we reach EOF? if so send EOF up one layer.
 		if (netread == -1) {
 			return -1;

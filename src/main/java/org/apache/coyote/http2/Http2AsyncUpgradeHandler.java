@@ -105,7 +105,7 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 				ByteBuffer.wrap(localSettings.getSettingsFrameForPending()),
 				ByteBuffer.wrap(createWindowUpdateForSettings()));
 		if (error != null) {
-			String msg = sm.getString("upgradeHandler.sendPrefaceFail", connectionId);
+			String msg = sm.getString("upgradeHandler.sendPrefaceFail", getZero().getConnectionID());
 			if (log.isDebugEnabled()) {
 				log.debug(msg);
 			}
@@ -116,8 +116,8 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 	@Override
 	void sendStreamReset(StreamException se) throws IOException {
 		if (log.isDebugEnabled()) {
-			log.debug(sm.getString("upgradeHandler.rst.debug", connectionId, Integer.toString(se.getStreamId()),
-					se.getError(), se.getMessage()));
+			log.debug(sm.getString("upgradeHandler.rst.debug", getZero().getConnectionID(),
+					Integer.toString(se.getStreamId()), se.getError(), se.getMessage()));
 		}
 		// Write a RST frame
 		byte[] rstFrame = new byte[13];
@@ -184,7 +184,7 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 	@Override
 	void writeBody(Stream stream, ByteBuffer data, int len, boolean finished) throws IOException {
 		if (log.isDebugEnabled()) {
-			log.debug(sm.getString("upgradeHandler.writeBody", connectionId, stream.getIdentifier(),
+			log.debug(sm.getString("upgradeHandler.writeBody", getZero().getConnectionID(), stream.getIdentifier(),
 					Integer.toString(len)));
 		}
 		// Need to check this now since sending end of stream will change this.
@@ -232,11 +232,12 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 	}
 
 	@Override
-	public void settingsEnd(boolean ack) throws IOException {
+	public void receiveSettingsEnd(boolean ack) throws IOException {
 		if (ack) {
 			if (!localSettings.ack()) {
 				// Ack was unexpected
-				log.warn(sm.getString("upgradeHandler.unexpectedAck", connectionId, getIdentifier()));
+				log.warn(sm.getString("upgradeHandler.unexpectedAck", getZero().getConnectionID(),
+						getZero().getIdentifier()));
 			}
 		} else {
 			getChannel().write(BlockingMode.SEMI_BLOCK, protocol.getWriteTimeout(), TimeUnit.MILLISECONDS, null,

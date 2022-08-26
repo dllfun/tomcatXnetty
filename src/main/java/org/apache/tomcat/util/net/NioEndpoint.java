@@ -1328,6 +1328,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("endpoint.debug.registerRead", this));
 			}
+			System.out.println(getRemotePort() + " registerReadInterest");
 			getPoller().add(this, SelectionKey.OP_READ);
 		}
 

@@ -573,6 +573,11 @@ public class Http11OutputBuffer extends ResponseAction {
 		nextRequest();
 		// channel = null;
 		sendfileData = null;
+		if (!headerBuffer.reuseable()) {
+			if (!headerBuffer.released()) {
+				headerBuffer.release();
+			}
+		}
 	}
 
 	/**

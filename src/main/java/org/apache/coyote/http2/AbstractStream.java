@@ -40,7 +40,6 @@ abstract class AbstractStream extends AbstractChannel {
 	private long windowSize = ConnectionSettingsBase.DEFAULT_INITIAL_WINDOW_SIZE;
 
 	AbstractStream(Integer identifier) {
-		System.out.println((identifier == 0 ? "connection" : "stream") + "(" + identifier + ") created");
 		this.identifier = identifier;
 	}
 

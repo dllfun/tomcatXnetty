@@ -338,7 +338,7 @@ class Http2Parser {
 				output.receiveSetting(Setting.valueOf(id), value);
 			}
 		}
-		output.settingsEnd(ack);
+		output.receiveSettingsEnd(ack);
 	}
 
 	/**
@@ -365,7 +365,7 @@ class Http2Parser {
 		} else {
 			buffer.get(payload);
 		}
-		output.pingReceive(payload, Flags.isAck(flags));
+		output.receivePing(payload, Flags.isAck(flags));
 	}
 
 	protected void readGoawayFrame(int payloadSize, ByteBuffer buffer) throws IOException {
@@ -410,7 +410,7 @@ class Http2Parser {
 			}
 		}
 
-		output.incrementWindowSize(streamId, windowSizeIncrement);
+		output.receiveIncWindows(streamId, windowSizeIncrement);
 	}
 
 	protected void readContinuationFrame(int streamId, int flags, int payloadSize, ByteBuffer buffer)
@@ -732,16 +732,16 @@ class Http2Parser {
 		// Settings frames
 		void receiveSetting(Setting setting, long value) throws ConnectionException;
 
-		void settingsEnd(boolean ack) throws IOException;
+		void receiveSettingsEnd(boolean ack) throws IOException;
 
 		// Ping frames
-		void pingReceive(byte[] payload, boolean ack) throws IOException;
+		void receivePing(byte[] payload, boolean ack) throws IOException;
 
 		// Goaway
 		void receiveGoaway(int lastStreamId, long errorCode, String debugData);
 
 		// Window size
-		void incrementWindowSize(int streamId, int increment) throws Http2Exception;
+		void receiveIncWindows(int streamId, int increment) throws Http2Exception;
 
 		// Testing
 		void swallowed(int streamId, FrameType frameType, int flags, int size) throws IOException;

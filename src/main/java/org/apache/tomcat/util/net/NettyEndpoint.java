@@ -536,6 +536,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		public void registerReadInterest() {
 			// System.out.println("registe read");
 			if (!peekIsEmpty()) {
+				System.out.println(getRemotePort() + " processSocket again");
 				endpoint.getHandler().processSocket(this, SocketEvent.OPEN_READ, true);
 			} else {
 				channel.read();
@@ -1017,106 +1018,114 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				netInBuffer = cumulator.cumulate(ctx.alloc(), first ? Unpooled.EMPTY_BUFFER : netInBuffer,
 						(ByteBuf) msg);
 
-				if (handshakeComplete) {
+				while (netInBuffer.isReadable()) {
+					if (handshakeComplete) {
 
-					ByteBuf msg2 = unwrap(nettyChannel, ctx);
-					if (msg2 != null) {
-						ctx.fireChannelRead(msg2);
-					}
-
-				} else {
-
-					if (!sniComplete) {
-						int sniResult = processSNI(nettyChannel, ctx);
-						if (sniResult == 0) {
-							sniComplete = true;
-						} else {
-							// close
-							return;
+						int readerIndex = netInBuffer.readerIndex();
+						ByteBuf unwraped = unwrap(nettyChannel, ctx);
+						if (readerIndex == netInBuffer.readerIndex() || unwraped == null) {
+							break;
 						}
-					}
+						if (unwraped.isReadable()) {
+							ctx.fireChannelRead(unwraped);
+						}
 
-					SSLEngineResult handshake = null;
-					while (!handshakeComplete) {
-						switch (handshakeStatus) {
-						case NOT_HANDSHAKING:
-							// should never happen
-							throw new IOException(sm.getString("channel.nio.ssl.notHandshaking"));
-						case FINISHED:
-							if (NettyEndpoint.this.hasNegotiableProtocols()) {
-								if (nettyChannel.sslEngine instanceof SSLUtil.ProtocolInfo) {
-									nettyChannel.setNegotiatedProtocol(
-											((SSLUtil.ProtocolInfo) nettyChannel.sslEngine).getNegotiatedProtocol());
-								} else if (JreCompat.isAlpnSupported()) {
-									nettyChannel.setNegotiatedProtocol(
-											JreCompat.getInstance().getApplicationProtocol(nettyChannel.sslEngine));
-								}
-							}
-							// we are complete if we have delivered the last package
-							handshakeComplete = true;// !netOutBuffer.hasRemaining();
-							// return 0 if we are complete, otherwise we still have data to write
-							// return handshakeComplete ? 0 : SelectionKey.OP_WRITE;
-						case NEED_WRAP:
-							System.out.println("need wrap");
-							// perform the wrap function
-							try {
-								handshake = handshakeWrap(nettyChannel, ctx);
-							} catch (SSLException e) {
-								handshake = handshakeWrap(nettyChannel, ctx);
-							}
-							if (handshake.getStatus() == Status.OK) {
-								if (handshakeStatus == HandshakeStatus.NEED_TASK) {
-									handshakeStatus = tasks(nettyChannel);
-								}
-							} else if (handshake.getStatus() == Status.CLOSED) {
+					} else {
+
+						if (!sniComplete) {
+							int sniResult = processSNI(nettyChannel, ctx);
+							if (sniResult == 0) {
+								sniComplete = true;
+							} else {
 								// close
 								return;
-							} else {
-								// wrap should always work with our buffers
-								throw new IOException(sm.getString("channel.nio.ssl.unexpectedStatusDuringWrap",
-										handshake.getStatus()));
 							}
-							if (handshakeStatus != HandshakeStatus.NEED_UNWRAP) {// || (!flush(netOutBuffer))
-								// should actually return OP_READ if we have NEED_UNWRAP
-								// return SelectionKey.OP_WRITE;
-								break;
-							} else {
-								if (netInBuffer.readableBytes() == 0) {
-									return;
-								}
-							}
-							// fall down to NEED_UNWRAP on the same call, will result in a
-							// BUFFER_UNDERFLOW if it needs data
-							// $FALL-THROUGH$
-						case NEED_UNWRAP:
-							System.out.println("need unwrap");
-							// perform the unwrap function
-							handshake = handshakeUnwrap(nettyChannel, true);
-							if (handshake.getStatus() == Status.OK) {
-								if (handshakeStatus == HandshakeStatus.NEED_TASK) {
-									handshakeStatus = tasks(nettyChannel);
-								}
-							} else if (handshake.getStatus() == Status.BUFFER_UNDERFLOW) {
-								// read more data, reregister for OP_READ
-								// return SelectionKey.OP_READ;
-								return;
-							} else {
-								throw new IOException(sm.getString("channel.nio.ssl.unexpectedStatusDuringWrap",
-										handshake.getStatus()));
-							}
-							break;
-						case NEED_TASK:
-							handshakeStatus = tasks(nettyChannel);
-							break;
-						default:
-							throw new IllegalStateException(
-									sm.getString("channel.nio.ssl.invalidStatus", handshakeStatus));
 						}
+
+						SSLEngineResult handshake = null;
+						while (!handshakeComplete) {
+							switch (handshakeStatus) {
+							case NOT_HANDSHAKING:
+								// should never happen
+								throw new IOException(sm.getString("channel.nio.ssl.notHandshaking"));
+							case FINISHED:
+								System.out.println(nettyChannel.getRemotePort() + " finished");
+								if (NettyEndpoint.this.hasNegotiableProtocols()) {
+									if (nettyChannel.sslEngine instanceof SSLUtil.ProtocolInfo) {
+										nettyChannel
+												.setNegotiatedProtocol(((SSLUtil.ProtocolInfo) nettyChannel.sslEngine)
+														.getNegotiatedProtocol());
+									} else if (JreCompat.isAlpnSupported()) {
+										nettyChannel.setNegotiatedProtocol(
+												JreCompat.getInstance().getApplicationProtocol(nettyChannel.sslEngine));
+									}
+								}
+								// we are complete if we have delivered the last package
+								handshakeComplete = true;// !netOutBuffer.hasRemaining();
+								// return 0 if we are complete, otherwise we still have data to write
+								// return handshakeComplete ? 0 : SelectionKey.OP_WRITE;
+								break;
+							case NEED_WRAP:
+								System.out.println(nettyChannel.getRemotePort() + " need wrap");
+								// perform the wrap function
+								try {
+									handshake = handshakeWrap(nettyChannel, ctx);
+								} catch (SSLException e) {
+									handshake = handshakeWrap(nettyChannel, ctx);
+								}
+								if (handshake.getStatus() == Status.OK) {
+									if (handshakeStatus == HandshakeStatus.NEED_TASK) {
+										handshakeStatus = tasks(nettyChannel);
+									}
+								} else if (handshake.getStatus() == Status.CLOSED) {
+									// close
+									return;
+								} else {
+									// wrap should always work with our buffers
+									throw new IOException(sm.getString("channel.nio.ssl.unexpectedStatusDuringWrap",
+											handshake.getStatus()));
+								}
+								if (handshakeStatus != HandshakeStatus.NEED_UNWRAP) {// || (!flush(netOutBuffer))
+									// should actually return OP_READ if we have NEED_UNWRAP
+									// return SelectionKey.OP_WRITE;
+									break;
+								} else {
+									if (netInBuffer.readableBytes() == 0) {
+										return;
+									}
+								}
+								// fall down to NEED_UNWRAP on the same call, will result in a
+								// BUFFER_UNDERFLOW if it needs data
+								// $FALL-THROUGH$
+							case NEED_UNWRAP:
+								System.out.println(nettyChannel.getRemotePort() + " need unwrap");
+								// perform the unwrap function
+								handshake = handshakeUnwrap(nettyChannel, true);
+								if (handshake.getStatus() == Status.OK) {
+									if (handshakeStatus == HandshakeStatus.NEED_TASK) {
+										handshakeStatus = tasks(nettyChannel);
+									}
+								} else if (handshake.getStatus() == Status.BUFFER_UNDERFLOW) {
+									// read more data, reregister for OP_READ
+									// return SelectionKey.OP_READ;
+									return;
+								} else {
+									throw new IOException(sm.getString("channel.nio.ssl.unexpectedStatusDuringWrap",
+											handshake.getStatus()));
+								}
+								break;
+							case NEED_TASK:
+								handshakeStatus = tasks(nettyChannel);
+								break;
+							default:
+								throw new IllegalStateException(
+										sm.getString("channel.nio.ssl.invalidStatus", handshakeStatus));
+							}
+						}
+						// Handshake is complete if this point is reached
+
 					}
-					// Handshake is complete if this point is reached
-
 				}
-
 			} else {
 				ctx.fireChannelRead(msg);
 			}
@@ -1133,7 +1142,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		 * @throws IOException If an I/O error occurs during the SNI processing
 		 */
 		private int processSNI(NettyChannel nettyChannel, ChannelHandlerContext ctx) throws IOException {
-			System.out.println("processSNI start");
+			System.out.println(nettyChannel.getRemotePort() + " processSNI start");
 			// Read some data into the network input buffer so we can peek at it.
 			if (netInBuffer.readableBytes() == 0) {
 				// Reached end of stream before SNI could be processed.
@@ -1155,6 +1164,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			case COMPLETE:
 				hostName = extractor.getSNIValue();
 				clientRequestedApplicationProtocols = extractor.getClientRequestedApplicationProtocols();
+				System.out.println(nettyChannel.getRemotePort() + " protocols: " + clientRequestedApplicationProtocols);
 				//$FALL-THROUGH$ to set the client requested ciphers
 			case NOT_PRESENT:
 				clientRequestedCiphers = extractor.getClientRequestedCiphers();
@@ -1180,7 +1190,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			// Initiate handshake
 			nettyChannel.sslEngine.beginHandshake();
 			handshakeStatus = nettyChannel.sslEngine.getHandshakeStatus();
-			System.out.println("processSNI end");
+			System.out.println(nettyChannel.getRemotePort() + " processSNI end");
 			return 0;
 		}
 
@@ -1358,6 +1368,14 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		}
 
 		@Override
+		public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+			if (netInBuffer != null) {
+				netInBuffer.release();
+			}
+			super.channelUnregistered(ctx);
+		}
+
+		@Override
 		public boolean isSharable() {
 			return false;
 		}
@@ -1369,17 +1387,17 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		@Override
 		public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
 			// TODO Auto-generated method stub
-			System.out.println(ctx.channel().toString() + " " + "channelRegistered");
 			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
+			System.out.println(nettyChannel.getRemotePort() + " " + "channelRegistered");
 			super.channelRegistered(ctx);
 		}
 
 		@Override
 		public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
 			// TODO Auto-generated method stub
-			System.out.println(ctx.channel().toString() + " " + "channelUnregistered");
 			NettyChannel nettyChannel = removeChannel((SocketChannel) ctx.channel());
 			if (nettyChannel != null) {
+				System.out.println(nettyChannel.getRemotePort() + " " + "channelUnregistered");
 				nettyChannel.releaseBuf();
 			} else {
 				System.out.println(ctx.channel());
@@ -1390,17 +1408,16 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		@Override
 		public void channelActive(ChannelHandlerContext ctx) throws Exception {
 			// TODO Auto-generated method stub
-			System.out.println(ctx.channel().toString() + " " + "channelActive");
 			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
+			System.out.println(nettyChannel.getRemotePort() + " " + "channelActive");
 			super.channelActive(ctx);
 		}
 
 		@Override
 		public void channelInactive(ChannelHandlerContext ctx) throws Exception {
 			// TODO Auto-generated method stub
-			System.out.println(ctx.channel().toString() + " " + "channelInactive");
 			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
-
+			System.out.println(nettyChannel.getRemotePort() + " " + "channelInactive");
 			if (nettyChannel.needDispatch()) {
 				NettyEndpoint.this.getHandler().processSocket(nettyChannel, SocketEvent.OPEN_READ, true);
 			}
@@ -1417,7 +1434,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				nettyChannel.offer(byteBuf);
 
 				if (nettyChannel.needDispatch()) {
-					System.out.println(ctx.channel().toString() + " " + "processSocketRead");
+					System.out.println(nettyChannel.getRemotePort() + " " + "processSocketRead");
 					NettyEndpoint.this.getHandler().processSocket(nettyChannel, SocketEvent.OPEN_READ, true);
 				}
 
@@ -1436,27 +1453,27 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		@Override
 		public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
 			// TODO Auto-generated method stub
-			System.out.println(ctx.channel().toString() + " " + "userEventTriggered");
 			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
+			System.out.println(nettyChannel.getRemotePort() + " " + "userEventTriggered");
 			super.userEventTriggered(ctx, evt);
 		}
 
 		@Override
 		public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
 			// TODO Auto-generated method stub
-			System.out.println(ctx.channel().toString() + " " + "channelWritabilityChanged");
 			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
+			System.out.println(nettyChannel.getRemotePort() + " " + "channelWritabilityChanged");
 			super.channelWritabilityChanged(ctx);
 		}
 
 		@Override
 		public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
 			// TODO Auto-generated method stub
-			System.out.println(ctx.channel().toString() + " " + "exceptionCaught");
 			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
+			System.out.println(nettyChannel.getRemotePort() + " " + "exceptionCaught");
 			cause.printStackTrace();
 			NettyEndpoint.this.getHandler().processSocket(nettyChannel, SocketEvent.ERROR, true);
-			super.exceptionCaught(ctx, cause);
+			// super.exceptionCaught(ctx, cause);
 		}
 
 		@Override
@@ -1472,7 +1489,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
 			// TODO Auto-generated method stub
 			countUpOrAwaitConnection();
-			System.out.println("收到连接");
+			// System.out.println("收到连接" + msg);
 			super.channelRead(ctx, msg);
 		}
 
