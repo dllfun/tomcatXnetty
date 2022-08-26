@@ -214,7 +214,7 @@ public class StreamZero extends AbstractStream {
 
 	@Override
 	public boolean isClosed() {
-		return handler.getChannel().isClosed();
+		return connectionState.getAndSet(ConnectionState.CLOSED) == ConnectionState.CLOSED;
 	}
 
 	@Override
@@ -235,11 +235,11 @@ public class StreamZero extends AbstractStream {
 			// longer required (also notifies any threads waiting for allocations).
 			stream.receiveReset(Http2Error.CANCEL.getCode());
 		}
-		try {
-			handler.getChannel().close();
-		} catch (Exception e) {
-			log.debug(sm.getString("upgradeHandler.socketCloseFailed"), e);
-		}
+//		try {
+//			handler.getChannel().close();//will closed by processor
+//		} catch (Exception e) {
+//			log.debug(sm.getString("upgradeHandler.socketCloseFailed"), e);
+//		}
 		System.out.println("conn(" + connectionId + ")" + " closed");
 	}
 

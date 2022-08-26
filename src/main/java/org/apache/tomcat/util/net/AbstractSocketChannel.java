@@ -52,8 +52,8 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	private volatile long writeTimeout = -1;
 
 	private volatile int keepAliveLeft = 100;
-	private volatile boolean upgraded = false;
-	private boolean secure = false;
+	// private volatile boolean upgraded = false;
+	// private boolean secure = false;
 	private String negotiatedProtocol = null;
 
 	/*
@@ -87,7 +87,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	}
 
 	// @Override
-	public E getSocket() {
+	public final E getSocket() {
 		return socket;
 	}
 
@@ -96,7 +96,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 		return this;
 	}
 
-	protected void reset(E closedSocket) {
+	protected final void reset(E closedSocket) {
 		this.socket = closedSocket;
 	}
 
@@ -104,30 +104,30 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 		return endpoint;
 	}
 
-	public boolean isUpgraded() {
-		return upgraded;
-	}
+	// public boolean isUpgraded() {
+	// return upgraded;
+	// }
+
+	// @Override
+	// public void setUpgraded(boolean upgraded) {
+	// this.upgraded = upgraded;
+	// }
+
+	// public final boolean isSecure() {
+	// return secure;
+	// }
+
+	// public final void setSecure(boolean secure) {
+	// this.secure = secure;
+	// }
 
 	@Override
-	public void setUpgraded(boolean upgraded) {
-		this.upgraded = upgraded;
-	}
-
-	public boolean isSecure() {
-		return secure;
-	}
-
-	public void setSecure(boolean secure) {
-		this.secure = secure;
-	}
-
-	@Override
-	public String getNegotiatedProtocol() {
+	public final String getNegotiatedProtocol() {
 		return negotiatedProtocol;
 	}
 
 	@Override
-	public void setNegotiatedProtocol(String negotiatedProtocol) {
+	public final void setNegotiatedProtocol(String negotiatedProtocol) {
 		this.negotiatedProtocol = negotiatedProtocol;
 	}
 
@@ -138,7 +138,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 *                    infinite timeout.
 	 */
 	@Override
-	public void setReadTimeout(long readTimeout) {
+	public final void setReadTimeout(long readTimeout) {
 		if (readTimeout > 0) {
 			this.readTimeout = readTimeout;
 		} else {
@@ -147,7 +147,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	}
 
 	@Override
-	public long getReadTimeout() {
+	public final long getReadTimeout() {
 		return this.readTimeout;
 	}
 
@@ -158,7 +158,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 *                     indicates an infinite timeout.
 	 */
 	@Override
-	public void setWriteTimeout(long writeTimeout) {
+	public final void setWriteTimeout(long writeTimeout) {
 		if (writeTimeout > 0) {
 			this.writeTimeout = writeTimeout;
 		} else {
@@ -166,21 +166,21 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 		}
 	}
 
-	public long getWriteTimeout() {
+	public final long getWriteTimeout() {
 		return this.writeTimeout;
 	}
 
-	public void setKeepAliveLeft(int keepAliveLeft) {
+	public final void setKeepAliveLeft(int keepAliveLeft) {
 		this.keepAliveLeft = keepAliveLeft;
 	}
 
 	@Override
-	public int decrementKeepAlive() {
+	public final int decrementKeepAlive() {
 		return (--keepAliveLeft);
 	}
 
 	@Override
-	public String getRemoteHost() {
+	public final String getRemoteHost() {
 		if (remoteHost == null) {
 			populateRemoteHost();
 		}
@@ -190,7 +190,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	protected abstract void populateRemoteHost();
 
 	@Override
-	public String getRemoteAddr() {
+	public final String getRemoteAddr() {
 		if (remoteAddr == null) {
 			populateRemoteAddr();
 		}
@@ -200,7 +200,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	protected abstract void populateRemoteAddr();
 
 	@Override
-	public int getRemotePort() {
+	public final int getRemotePort() {
 		if (remotePort == -1) {
 			populateRemotePort();
 		}
@@ -210,7 +210,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	protected abstract void populateRemotePort();
 
 	@Override
-	public String getLocalName() {
+	public final String getLocalName() {
 		if (localName == null) {
 			populateLocalName();
 		}
@@ -220,7 +220,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	protected abstract void populateLocalName();
 
 	@Override
-	public String getLocalAddr() {
+	public final String getLocalAddr() {
 		if (localAddr == null) {
 			populateLocalAddr();
 		}
@@ -230,7 +230,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	protected abstract void populateLocalAddr();
 
 	@Override
-	public int getLocalPort() {
+	public final int getLocalPort() {
 		if (localPort == -1) {
 			populateLocalPort();
 		}
@@ -258,6 +258,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 		if (closed.compareAndSet(false, true)) {
 			try {
 				if (getCurrentProcessor() != null) {
+					System.err.println(getRemotePort() + " getCurrentProcessor() != null");
 					if (getEndpoint().getHandler().getProtocol() != null) {
 						getEndpoint().getHandler().getProtocol().release(this);
 					}
@@ -289,7 +290,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 * @return true if the wrapper has been closed
 	 */
 	@Override
-	public boolean isClosed() {
+	public final boolean isClosed() {
 		return closed.get();
 	}
 

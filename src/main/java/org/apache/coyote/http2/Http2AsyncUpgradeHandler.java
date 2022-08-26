@@ -31,6 +31,8 @@ import javax.servlet.http.WebConnection;
 import org.apache.coyote.Adapter;
 import org.apache.coyote.ProtocolException;
 import org.apache.coyote.RequestData;
+import org.apache.coyote.http2.Http2UpgradeHandler.InputHandlerImpl;
+import org.apache.coyote.http2.Http2UpgradeHandler.OutputHandlerImpl;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.net.SendfileState;
 import org.apache.tomcat.util.net.SocketChannel;
@@ -45,6 +47,8 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 	private final Object headerWriteLock = new Object();
 	private Throwable error = null;
 	private IOException applicationIOE = null;
+	private final InputHandlerImpl inputHandler = new InputHandlerImpl();
+	private final OutputHandlerAsyncImpl outputHandler = new OutputHandlerAsyncImpl();
 
 	public Http2AsyncUpgradeHandler(Http2Protocol protocol, Adapter adapter, RequestData requestData) {
 		super(protocol, adapter, requestData);
@@ -76,7 +80,7 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 
 	@Override
 	protected Http2Parser createParser(String connectionId) {
-		return new Http2AsyncParser(connectionId, this, this, getChannel(), this);
+		return new Http2AsyncParser(connectionId, inputHandler, outputHandler, getChannel(), this);
 	}
 
 	@Override
@@ -195,9 +199,6 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 		if (finished) {
 			header[4] = FLAG_END_OF_STREAM;
 			stream.sentEndOfStream();
-			if (!stream.isActive()) {
-				setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
-			}
 		}
 		if (writeable) {
 			ByteUtil.set31Bits(header, 5, stream.getIdAsInt());
@@ -207,6 +208,11 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 					SocketChannel.COMPLETE_WRITE, applicationErrorCompletion, ByteBuffer.wrap(header), data);
 			data.limit(orgLimit);
 			handleAsyncException();
+		}
+		if (finished) {
+			if (!stream.isActive()) {
+				setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
+			}
 		}
 	}
 
@@ -228,21 +234,6 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 		ByteUtil.set31Bits(frame2, 5, stream.getIdAsInt());
 		getChannel().write(BlockingMode.SEMI_BLOCK, protocol.getWriteTimeout(), TimeUnit.MILLISECONDS, null,
 				SocketChannel.COMPLETE_WRITE, errorCompletion, ByteBuffer.wrap(frame), ByteBuffer.wrap(frame2));
-		handleAsyncException();
-	}
-
-	@Override
-	public void receiveSettingsEnd(boolean ack) throws IOException {
-		if (ack) {
-			if (!localSettings.ack()) {
-				// Ack was unexpected
-				log.warn(sm.getString("upgradeHandler.unexpectedAck", getZero().getConnectionID(),
-						getZero().getIdentifier()));
-			}
-		} else {
-			getChannel().write(BlockingMode.SEMI_BLOCK, protocol.getWriteTimeout(), TimeUnit.MILLISECONDS, null,
-					SocketChannel.COMPLETE_WRITE, errorCompletion, ByteBuffer.wrap(SETTINGS_ACK));
-		}
 		handleAsyncException();
 	}
 
@@ -278,7 +269,7 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 				return SendfileState.ERROR;
 			}
 			// Actually perform the write
-			int frameSize = Integer.min(getMaxFrameSize(), sendfile.connectionReservation);
+			int frameSize = Integer.min(localSettings.getMaxFrameSize(), sendfile.connectionReservation);
 			boolean finished = (frameSize == sendfile.left)
 					&& sendfile.stream.getResponseData().getTrailerFields() == null;
 
@@ -312,6 +303,25 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 		}
 	}
 
+	protected class OutputHandlerAsyncImpl extends OutputHandlerImpl {
+
+		@Override
+		public void receiveSettingsEnd(boolean ack) throws IOException {
+			if (ack) {
+				if (!localSettings.ack()) {
+					// Ack was unexpected
+					log.warn(sm.getString("upgradeHandler.unexpectedAck", getZero().getConnectionID(),
+							getZero().getIdentifier()));
+				}
+			} else {
+				getChannel().write(BlockingMode.SEMI_BLOCK, protocol.getWriteTimeout(), TimeUnit.MILLISECONDS, null,
+						SocketChannel.COMPLETE_WRITE, errorCompletion, ByteBuffer.wrap(SETTINGS_ACK));
+			}
+			handleAsyncException();
+		}
+
+	}
+
 	protected class SendfileCompletionHandler implements CompletionHandler<Long, SendfileData> {
 		@Override
 		public void completed(Long nBytes, SendfileData sendfile) {
@@ -342,7 +352,7 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 				failed(e, sendfile);
 				return;
 			}
-			int frameSize = Integer.min(getMaxFrameSize(), sendfile.streamReservation);
+			int frameSize = Integer.min(localSettings.getMaxFrameSize(), sendfile.streamReservation);
 			boolean finished = (frameSize == sendfile.left)
 					&& sendfile.stream.getResponseData().getTrailerFields() == null;
 

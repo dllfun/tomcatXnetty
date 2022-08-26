@@ -89,6 +89,10 @@ public interface Endpoint<S> {
 
 	public void setHandler(Handler handler);
 
+	public void setThreadPriority(int threadPriority);
+
+	public void setDaemon(boolean b);
+
 	public SocketProperties getSocketProperties();
 
 	public boolean setProperty(String name, String value);
@@ -127,6 +131,10 @@ public interface Endpoint<S> {
 
 	public void setAcceptCount(int acceptCount);
 
+	public void setAcceptorThreadPriority(int acceptorThreadPriority);
+
+	public int getAcceptorThreadPriority();
+
 	public boolean getTcpNoDelay();
 
 	public void setTcpNoDelay(boolean tcpNoDelay);
@@ -164,10 +172,6 @@ public interface Endpoint<S> {
 	public void setConnectionTimeout(int soTimeout);
 
 	public long getConnectionCount();
-
-	public void setAcceptorThreadPriority(int acceptorThreadPriority);
-
-	public int getAcceptorThreadPriority();
 
 	public void setName(String name);
 

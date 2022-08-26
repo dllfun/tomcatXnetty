@@ -142,7 +142,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 
 	@Override
 	public Object getLock() {
-		return currentProcessor;
+		return getCurrentProcessor();
 	}
 
 	@Override
@@ -1211,11 +1211,11 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 					log.debug(sm.getString("stream.inputBuffer.dispatch"));
 				}
 				readInterest = false;
-				((AbstractProcessor) currentProcessor).actionDISPATCH_READ();
+				((AbstractProcessor) getCurrentProcessor()).actionDISPATCH_READ();
 				// Always need to dispatch since this thread is processing
 				// the incoming connection and streams are processed on their
 				// own.
-				((AbstractProcessor) currentProcessor).actionDISPATCH_EXECUTE();
+				((AbstractProcessor) getCurrentProcessor()).actionDISPATCH_EXECUTE();
 				return true;
 			} else {
 				if (log.isDebugEnabled()) {

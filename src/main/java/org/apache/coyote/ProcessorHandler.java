@@ -209,7 +209,7 @@ public class ProcessorHandler implements Handler {
 						}
 						socketChannel.unRead(leftOverInput);
 						// Mark the connection as upgraded
-						socketChannel.setUpgraded(true);
+						// socketChannel.setUpgraded(true);
 						// Associate with the processor with the connection
 						socketChannel.setCurrentProcessor(processor);
 						// Initialise the upgrade handler (which may trigger

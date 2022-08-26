@@ -37,10 +37,10 @@ import javax.management.MBeanRegistrationException;
 import javax.management.MBeanServer;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
+
 import org.apache.coyote.http11.Http11Processor;
 import org.apache.coyote.http11.upgrade.UpgradeProcessorInternal;
 import org.apache.juli.logging.Log;
-import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.collections.SynchronizedStack;
 import org.apache.tomcat.util.modeler.Registry;
 import org.apache.tomcat.util.net.Channel;
@@ -131,35 +131,6 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 
 	public Handler getHandler() {
 		return handler;
-	}
-
-	/**
-	 * Generic property setter used by the digester. Other code should not need to
-	 * use this. The digester will only use this method if it can't find a more
-	 * specific setter. That means the property belongs to the Endpoint, the
-	 * ServerSocketFactory or some other lower level component. This method ensures
-	 * that it is visible to both.
-	 *
-	 * @param name  The name of the property to set
-	 * @param value The value, in string form, to set for the property
-	 *
-	 * @return <code>true</code> if the property was set successfully, otherwise
-	 *         <code>false</code>
-	 */
-	public boolean setProperty(String name, String value) {
-		return endpoint.setProperty(name, value);
-	}
-
-	/**
-	 * Generic property getter used by the digester. Other code should not need to
-	 * use this.
-	 *
-	 * @param name The name of the property to get
-	 *
-	 * @return The value of the property converted to a string
-	 */
-	public String getProperty(String name) {
-		return endpoint.getProperty(name);
 	}
 
 	// ------------------------------- Properties managed by the ProtocolHandler
@@ -267,11 +238,6 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		return false;
 	}
 
-	@Override
-	public boolean isSendfileSupported() {
-		return endpoint.getUseSendfile();
-	}
-
 	// ---------------------- Properties that are passed through to the EndPoint
 
 	@Override
@@ -330,14 +296,6 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 	}
 
-	public int getMaxConnections() {
-		return endpoint.getMaxConnections();
-	}
-
-	public void setMaxConnections(int maxConnections) {
-		endpoint.setMaxConnections(maxConnections);
-	}
-
 	private int minSpareThreads = 10;
 
 	@Override
@@ -369,12 +327,13 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	/**
 	 * Priority of the worker threads.
 	 */
-	protected int threadPriority = Thread.NORM_PRIORITY;
+	private int threadPriority = Thread.NORM_PRIORITY;
 
 	@Override
 	public final void setThreadPriority(int threadPriority) {
 		// Can't change this once the executor has started
 		this.threadPriority = threadPriority;
+		this.endpoint.setThreadPriority(threadPriority);
 	}
 
 	@Override
@@ -409,6 +368,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 
 	public final void setDaemon(boolean b) {
 		daemon = b;
+		this.endpoint.setDaemon(b);
 	}
 
 	public final boolean getDaemon() {
@@ -488,28 +448,78 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 	}
 
+	@Override
+	public boolean isSendfileSupported() {
+		return this.endpoint.getUseSendfile();
+	}
+
+	/**
+	 * Generic property setter used by the digester. Other code should not need to
+	 * use this. The digester will only use this method if it can't find a more
+	 * specific setter. That means the property belongs to the Endpoint, the
+	 * ServerSocketFactory or some other lower level component. This method ensures
+	 * that it is visible to both.
+	 *
+	 * @param name  The name of the property to set
+	 * @param value The value, in string form, to set for the property
+	 *
+	 * @return <code>true</code> if the property was set successfully, otherwise
+	 *         <code>false</code>
+	 */
+	public boolean setProperty(String name, String value) {
+		return this.endpoint.setProperty(name, value);
+	}
+
+	/**
+	 * Generic property getter used by the digester. Other code should not need to
+	 * use this.
+	 *
+	 * @param name The name of the property to get
+	 *
+	 * @return The value of the property converted to a string
+	 */
+	public String getProperty(String name) {
+		return this.endpoint.getProperty(name);
+	}
+
+	public int getMaxConnections() {
+		return this.endpoint.getMaxConnections();
+	}
+
+	public void setMaxConnections(int maxConnections) {
+		this.endpoint.setMaxConnections(maxConnections);
+	}
+
 	public int getAcceptCount() {
-		return endpoint.getAcceptCount();
+		return this.endpoint.getAcceptCount();
 	}
 
 	public void setAcceptCount(int acceptCount) {
-		endpoint.setAcceptCount(acceptCount);
+		this.endpoint.setAcceptCount(acceptCount);
+	}
+
+	public void setAcceptorThreadPriority(int threadPriority) {
+		this.endpoint.setAcceptorThreadPriority(threadPriority);
+	}
+
+	public int getAcceptorThreadPriority() {
+		return this.endpoint.getAcceptorThreadPriority();
 	}
 
 	public boolean getTcpNoDelay() {
-		return endpoint.getTcpNoDelay();
+		return this.endpoint.getTcpNoDelay();
 	}
 
 	public void setTcpNoDelay(boolean tcpNoDelay) {
-		endpoint.setTcpNoDelay(tcpNoDelay);
+		this.endpoint.setTcpNoDelay(tcpNoDelay);
 	}
 
 	public int getConnectionLinger() {
-		return endpoint.getConnectionLinger();
+		return this.endpoint.getConnectionLinger();
 	}
 
 	public void setConnectionLinger(int connectionLinger) {
-		endpoint.setConnectionLinger(connectionLinger);
+		this.endpoint.setConnectionLinger(connectionLinger);
 	}
 
 	/**
@@ -519,43 +529,43 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	 * @return The timeout in milliseconds
 	 */
 	public int getKeepAliveTimeout() {
-		return endpoint.getKeepAliveTimeout();
+		return this.endpoint.getKeepAliveTimeout();
 	}
 
 	public void setKeepAliveTimeout(int keepAliveTimeout) {
-		endpoint.setKeepAliveTimeout(keepAliveTimeout);
+		this.endpoint.setKeepAliveTimeout(keepAliveTimeout);
 	}
 
 	public InetAddress getAddress() {
-		return endpoint.getAddress();
+		return this.endpoint.getAddress();
 	}
 
 	public void setAddress(InetAddress ia) {
-		endpoint.setAddress(ia);
+		this.endpoint.setAddress(ia);
 	}
 
 	public int getPort() {
-		return endpoint.getPort();
+		return this.endpoint.getPort();
 	}
 
 	public void setPort(int port) {
-		endpoint.setPort(port);
+		this.endpoint.setPort(port);
 	}
 
 	public int getPortOffset() {
-		return endpoint.getPortOffset();
+		return this.endpoint.getPortOffset();
 	}
 
 	public void setPortOffset(int portOffset) {
-		endpoint.setPortOffset(portOffset);
+		this.endpoint.setPortOffset(portOffset);
 	}
 
 	public int getPortWithOffset() {
-		return endpoint.getPortWithOffset();
+		return this.endpoint.getPortWithOffset();
 	}
 
 	public int getLocalPort() {
-		return endpoint.getLocalPort();
+		return this.endpoint.getLocalPort();
 	}
 
 	/*
@@ -563,15 +573,15 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	 * for that data to arrive before closing the connection.
 	 */
 	public int getConnectionTimeout() {
-		return endpoint.getConnectionTimeout();
+		return this.endpoint.getConnectionTimeout();
 	}
 
 	public void setConnectionTimeout(int timeout) {
-		endpoint.setConnectionTimeout(timeout);
+		this.endpoint.setConnectionTimeout(timeout);
 	}
 
 	public long getConnectionCount() {
-		return endpoint.getConnectionCount();
+		return this.endpoint.getConnectionCount();
 	}
 
 	/**
@@ -595,14 +605,6 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	@Deprecated
 	public int getAcceptorThreadCount() {
 		return 1;
-	}
-
-	public void setAcceptorThreadPriority(int threadPriority) {
-		endpoint.setAcceptorThreadPriority(threadPriority);
-	}
-
-	public int getAcceptorThreadPriority() {
-		return endpoint.getAcceptorThreadPriority();
 	}
 
 	// ---------------------------------------------------------- Public methods
@@ -666,7 +668,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	// ----------------------------------------------- Accessors for sub-classes
 
 	protected final Endpoint<S> getEndpoint() {
-		return endpoint;
+		return this.endpoint;
 	}
 
 	// protected final Handler<S> getHandler() {
@@ -826,10 +828,10 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 
 		String endpointName = getName();
-		endpoint.setName(endpointName.substring(1, endpointName.length() - 1));
-		endpoint.setDomain(domain);
+		this.endpoint.setName(endpointName.substring(1, endpointName.length() - 1));
+		this.endpoint.setDomain(domain);
 
-		endpoint.init();
+		this.endpoint.init();
 	}
 
 	@Override
@@ -843,7 +845,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		if (getExecutor() == null) {
 			createExecutor();
 		}
-		endpoint.start();
+		this.endpoint.start();
 		monitorFuture = getUtilityExecutor().scheduleWithFixedDelay(new Runnable() {
 			@Override
 			public void run() {
@@ -895,7 +897,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 
 		stopAsyncTimeout();
-		endpoint.pause();
+		this.endpoint.pause();
 
 		/*
 		 * Inform all the processors associated with current connections that the
@@ -906,7 +908,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		 * Note that even if the endpoint is resumed, there is (currently) no API to
 		 * inform the Processors of this.
 		 */
-		for (SocketChannel channel : endpoint.getConnections()) {
+		for (SocketChannel channel : this.endpoint.getConnections()) {
 			Processor processor = (Processor) channel.getCurrentProcessor();
 			if (processor != null) {
 				processor.pause();
@@ -915,7 +917,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	}
 
 	public boolean isPaused() {
-		return endpoint.isPaused();
+		return this.endpoint.isPaused();
 	}
 
 	@Override
@@ -924,7 +926,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 			getLog().info(sm.getString("abstractProtocolHandler.resume", getName()));
 		}
 
-		endpoint.resume();
+		this.endpoint.resume();
 		startAsyncTimeout();
 	}
 
@@ -945,7 +947,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 			processor.timeoutAsync(-1);
 		}
 
-		endpoint.stop();
+		this.endpoint.stop();
 
 		shutdownExecutor();
 
@@ -960,7 +962,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		}
 
 		try {
-			endpoint.destroy();
+			this.endpoint.destroy();
 		} finally {
 			if (oname != null) {
 				if (mserver == null) {
@@ -985,7 +987,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 
 	@Override
 	public void closeServerSocketGraceful() {
-		endpoint.closeServerSocketGraceful();
+		this.endpoint.closeServerSocketGraceful();
 	}
 
 	private void logPortOffset() {
@@ -1196,140 +1198,6 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 			super.clear();
 			size.set(0);
 		}
-	}
-
-	public class ParseInIoHandler implements Handler {
-
-		private Handler next;
-
-		public ParseInIoHandler(Handler next) {
-			super();
-			this.next = next;
-		}
-
-		@Override
-		public AbstractProtocol getProtocol() {
-			// TODO Auto-generated method stub
-			return null;
-		}
-
-		@Override
-		public void processSocket(Channel channel, SocketEvent event, boolean dispatch) {
-			if (channel == null) {
-				// Nothing to do. Socket has been closed.
-				return;
-			}
-			if (channel instanceof SocketChannel) {
-				SocketChannel socketChannel = (SocketChannel) channel;
-
-				if (getLog().isDebugEnabled()) {
-					getLog().debug(sm.getString("abstractConnectionHandler.process", channel, event));// .getSocket()
-				}
-
-				// S socket = channel.getSocket();
-
-				Processor processor = (Processor) socketChannel.getCurrentProcessor();
-				if (getLog().isDebugEnabled()) {
-					getLog().debug(sm.getString("abstractConnectionHandler.connectionsGet", processor, channel));// socket
-				}
-
-				// Timeouts are calculated on a dedicated thread and then
-				// dispatched. Because of delays in the dispatch process, the
-				// timeout may no longer be required. Check here and avoid
-				// unnecessary processing.
-				if (SocketEvent.TIMEOUT == event && (processor == null || !processor.isAsync() && !processor.isUpgrade()
-						|| processor.isAsync() && !processor.checkAsyncTimeoutGeneration())) {
-					// This is effectively a NO-OP
-					next.processSocket(channel, event, dispatch);
-					return;
-				}
-
-				if (processor != null) {
-					// Make sure an async timeout doesn't fire
-					// removeWaitingProcessor(processor);
-				} else if (event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
-					// Nothing to do. Endpoint requested a close and there is no
-					// longer a processor associated with this socket.
-					next.processSocket(channel, event, dispatch);
-					return;
-				}
-
-				boolean dispatched = false;
-				try {
-					if (processor == null) {
-						String negotiatedProtocol = socketChannel.getNegotiatedProtocol();
-						// OpenSSL typically returns null whereas JSSE typically
-						// returns "" when no protocol is negotiated
-						if (negotiatedProtocol != null && negotiatedProtocol.length() > 0) {
-							dispatched = true;
-							next.processSocket(channel, event, dispatch);
-							return;
-						}
-					}
-					if (processor == null) {
-						processor = recycledProcessors.pop();
-						if (getLog().isDebugEnabled()) {
-							getLog().debug(sm.getString("abstractConnectionHandler.processorPop", processor));
-						}
-					}
-					if (processor == null) {
-						processor = createProcessor();
-						register(processor);
-						if (getLog().isDebugEnabled()) {
-							getLog().debug(sm.getString("abstractConnectionHandler.processorCreate", processor));
-						}
-					}
-
-					if (channel.getSslSupport() == null) {
-						channel.setSslSupport(socketChannel.initSslSupport(getClientCertProvider()));
-					}
-
-					// Associate the processor with the connection
-					socketChannel.setCurrentProcessor(processor);
-
-					if (processor.processInIoThread(socketChannel, event)) {
-						dispatched = true;
-						next.processSocket(channel, event, dispatch);
-					}
-
-				} catch (java.net.SocketException e) {
-					// SocketExceptions are normal
-					getLog().debug(sm.getString("abstractConnectionHandler.socketexception.debug"), e);
-				} catch (java.io.IOException e) {
-					// IOExceptions are normal
-					getLog().debug(sm.getString("abstractConnectionHandler.ioexception.debug"), e);
-				} catch (ProtocolException e) {
-					// Protocol exceptions normally mean the client sent invalid or
-					// incomplete data.
-					getLog().debug(sm.getString("abstractConnectionHandler.protocolexception.debug"), e);
-				}
-				// Future developers: if you discover any other
-				// rare-but-nonfatal exceptions, catch them here, and log as
-				// above.
-				catch (OutOfMemoryError oome) {
-					// Try and handle this here to give Tomcat a chance to close the
-					// connection and prevent clients waiting until they time out.
-					// Worst case, it isn't recoverable and the attempt at logging
-					// will trigger another OOME.
-					getLog().error(sm.getString("abstractConnectionHandler.oome"), oome);
-				} catch (Throwable e) {
-					ExceptionUtils.handleThrowable(e);
-					// any other exception or error is odd. Here we log it
-					// with "ERROR" level, so it will show up even on
-					// less-than-verbose logs.
-					getLog().error(sm.getString("abstractConnectionHandler.error"), e);
-				}
-
-				// Make sure socket/processor is removed from the list of current
-				// connections
-				if (!dispatched) {
-					next.processSocket(channel, event, dispatch);
-				}
-			} else {
-				next.processSocket(channel, event, dispatch);
-			}
-		}
-
 	}
 
 }

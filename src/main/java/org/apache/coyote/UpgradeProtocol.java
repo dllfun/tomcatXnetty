@@ -17,7 +17,6 @@
 package org.apache.coyote;
 
 import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.SocketChannel;
 
 public interface UpgradeProtocol {

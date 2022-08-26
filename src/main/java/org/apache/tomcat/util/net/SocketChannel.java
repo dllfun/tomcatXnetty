@@ -92,7 +92,7 @@ public interface SocketChannel extends Channel {
 
 	// public void execute(Runnable runnable);
 
-	public void setUpgraded(boolean upgraded);
+	//public void setUpgraded(boolean upgraded);
 
 	public String getNegotiatedProtocol();
 

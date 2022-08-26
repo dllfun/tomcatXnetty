@@ -339,6 +339,37 @@ public abstract class AbstractEndpoint<S, U> implements Endpoint<S> {
 	protected abstract InetSocketAddress getLocalAddress() throws IOException;
 
 	/**
+	 * Priority of the worker threads.
+	 */
+	private int threadPriority = Thread.NORM_PRIORITY;
+
+	@Override
+	public final void setThreadPriority(int threadPriority) {
+		// Can't change this once the executor has started
+		this.threadPriority = threadPriority;
+	}
+
+	public final int getThreadPriority() {
+		return threadPriority;
+	}
+
+	/**
+	 * The default is true - the created threads will be in daemon mode. If set to
+	 * false, the control thread will not be daemon - and will keep the process
+	 * alive.
+	 */
+	private boolean daemon = true;
+
+	@Override
+	public final void setDaemon(boolean b) {
+		daemon = b;
+	}
+
+	public final boolean getDaemon() {
+		return daemon;
+	}
+
+	/**
 	 * Allows the server developer to specify the acceptCount (backlog) that should
 	 * be used for server sockets. By default, this value is 100.
 	 */

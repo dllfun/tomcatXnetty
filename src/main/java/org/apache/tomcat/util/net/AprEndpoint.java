@@ -657,7 +657,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			AprSocketWrapper wrapper = new AprSocketWrapper(socket, this);
 			connections.put(socket, wrapper);
 			wrapper.setKeepAliveLeft(getMaxKeepAliveRequests());
-			wrapper.setSecure(isSSLEnabled());
+			// wrapper.setSecure(isSSLEnabled());
 			wrapper.setReadTimeout(getConnectionTimeout());
 			wrapper.setWriteTimeout(getConnectionTimeout());
 			if (getHandler().getProtocol() != null) {
@@ -1009,10 +1009,8 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 
 		protected void start() {
 			pollerThread = new Thread(poller, getName() + "-Poller");
-			if (getHandler().getProtocol() != null) {
-				pollerThread.setPriority(getHandler().getProtocol().getThreadPriority());
-			}
-			pollerThread.setDaemon(true);
+			pollerThread.setPriority(getThreadPriority());
+			pollerThread.setDaemon(getDaemon());
 			pollerThread.start();
 		}
 
@@ -1567,10 +1565,8 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 
 		protected void start() {
 			sendfileThread = new Thread(sendfile, getName() + "-Sendfile");
-			if (getHandler().getProtocol() != null) {
-				sendfileThread.setPriority(getHandler().getProtocol().getThreadPriority());
-			}
-			sendfileThread.setDaemon(true);
+			sendfileThread.setPriority(getThreadPriority());
+			sendfileThread.setDaemon(getDaemon());
 			sendfileThread.start();
 		}
 

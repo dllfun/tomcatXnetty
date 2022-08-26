@@ -19,6 +19,7 @@ package org.apache.coyote.http11;
 import java.nio.channels.CancelledKeyException;
 import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.DispatchHandler;
+import org.apache.coyote.ParseInIoHandler;
 import org.apache.coyote.ProcessorHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -48,7 +49,7 @@ public class Http11NettyProtocol extends AbstractHttp11JsseProtocol<Channel> {
 		Handler processorHandler = new ProcessorHandler(this);
 		Handler nettyHandler = new NettyHandler(processorHandler);
 		Handler dispatchHandler = new DispatchHandler(nettyHandler, this);
-		Handler parseInIoHandler = new ParseInIoHandler(dispatchHandler);
+		Handler parseInIoHandler = new ParseInIoHandler(dispatchHandler, this);
 		setHandler(parseInIoHandler);
 
 		endpoint.setHandler(parseInIoHandler);

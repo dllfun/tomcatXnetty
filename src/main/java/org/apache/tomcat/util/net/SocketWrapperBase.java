@@ -30,8 +30,6 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 	protected static final StringManager sm = StringManager.getManager(SocketWrapperBase.class);
 
-	private E socket;
-
 	private final SocketWrapperBaseEndpoint<E, ?> endpoint;
 
 	/**
@@ -63,7 +61,6 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 	public SocketWrapperBase(E socket, SocketWrapperBaseEndpoint<E, ?> endpoint) {
 		super(socket, endpoint);
-		this.socket = socket;
 		this.endpoint = endpoint;
 	}
 

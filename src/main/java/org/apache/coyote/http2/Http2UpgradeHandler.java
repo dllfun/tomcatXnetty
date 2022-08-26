@@ -68,7 +68,7 @@ import org.apache.tomcat.util.res.StringManager;
  * enabled Connector element in server.xml to enable HTTP/2 support.</li>
  * </ul>
  */
-class Http2UpgradeHandler implements InternalHttpUpgradeHandler, Input, Output {
+class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 
 	protected static final Log log = LogFactory.getLog(Http2UpgradeHandler.class);
 	protected static final StringManager sm = StringManager.getManager(Http2UpgradeHandler.class);
@@ -132,6 +132,8 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler, Input, Output {
 	private final AtomicLong overheadCount = new AtomicLong(-10);
 	private volatile int lastNonFinalDataPayload;
 	private volatile int lastWindowUpdate;
+	private final InputHandlerImpl inputHandler = new InputHandlerImpl();
+	private final OutputHandlerImpl outputHandler = new OutputHandlerImpl();
 	protected final ConcurrencyControlled controlled = new ConcurrencyControlled() {
 
 		@Override
@@ -160,8 +162,7 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler, Input, Output {
 			}
 			StreamRunnable streamRunnable = null;
 			synchronized (streamConcurrency) {
-				decreaseStreamConcurrency();
-				if (getStreamConcurrency() < protocol.getMaxConcurrentStreamExecution()) {
+				if (streamConcurrency.decrementAndGet() < protocol.getMaxConcurrentStreamExecution()) {
 					streamRunnable = queuedRunnable.poll();
 				}
 			}
@@ -207,6 +208,10 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler, Input, Output {
 
 	protected PingManager getPingManager() {
 		return new PingManager();
+	}
+
+	protected Http2Parser createParser(String connectionId) {
+		return new Http2Parser(connectionId, inputHandler, outputHandler);
 	}
 
 	@Override
@@ -289,10 +294,6 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler, Input, Output {
 		}
 	}
 
-	protected Http2Parser createParser(String connectionId) {
-		return new Http2Parser(connectionId, this, this);
-	}
-
 	protected void processStreamOnContainerThread(Stream stream) {
 		StreamProcessor streamProcessor = new StreamProcessor(this, stream, adapter);
 		// streamProcessor.setSslSupport(sslSupport);
@@ -302,19 +303,19 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler, Input, Output {
 		// SocketEvent.OPEN_READ);
 	}
 
-	void processStreamOnContainerThread(Stream stream, StreamProcessor streamProcessor, SocketEvent event) {
-		if (streamConcurrency == null) {
-			protocol.getHttp11Protocol().getHandler().processSocket(stream, event, true);// .execute(streamRunnable);
-		} else {
-			if (getStreamConcurrency() < protocol.getMaxConcurrentStreamExecution()) {
-				increaseStreamConcurrency();
-				protocol.getHttp11Protocol().getHandler().processSocket(stream, event, true);// getExecutor().execute(streamRunnable)
-			} else {
-				StreamRunnable streamRunnable = new StreamRunnable(stream, streamProcessor, event);
-				queuedRunnable.offer(streamRunnable);
-			}
-		}
-	}
+//	void processStreamOnContainerThread(Stream stream, StreamProcessor streamProcessor, SocketEvent event) {
+//		if (streamConcurrency == null) {
+//			protocol.getHttp11Protocol().getHandler().processSocket(stream, event, true);// .execute(streamRunnable);
+//		} else {
+//			if (getStreamConcurrency() < protocol.getMaxConcurrentStreamExecution()) {
+//				increaseStreamConcurrency();
+//				protocol.getHttp11Protocol().getHandler().processSocket(stream, event, true);// getExecutor().execute(streamRunnable)
+//			} else {
+//				StreamRunnable streamRunnable = new StreamRunnable(stream, streamProcessor, event);
+//				queuedRunnable.offer(streamRunnable);
+//			}
+//		}
+//	}
 
 	@Override
 	public void setChannel(SocketChannel channel) {
@@ -516,22 +517,6 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler, Input, Output {
 			}
 		}
 	}
-
-	private int increaseStreamConcurrency() {
-		return streamConcurrency.incrementAndGet();
-	}
-
-	private int decreaseStreamConcurrency() {
-		return streamConcurrency.decrementAndGet();
-	}
-
-	private int getStreamConcurrency() {
-		return streamConcurrency.get();
-	}
-
-//	void executeQueuedStream() {
-
-//	}
 
 	int reserveWindowSize(Stream stream, int reservation, boolean block) throws IOException {
 		// Need to be holding the stream lock so releaseBacklog() can't notify
@@ -955,6 +940,13 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler, Input, Output {
 		return new DefaultHeaderFrameBuffers(initialPayloadSize);
 	}
 
+	protected HpackDecoder getHpackDecoder() {
+		if (hpackDecoder == null) {
+			hpackDecoder = new HpackDecoder(localSettings.getHeaderTableSize());
+		}
+		return hpackDecoder;
+	}
+
 	protected HpackEncoder getHpackEncoder() {
 		if (hpackEncoder == null) {
 			hpackEncoder = new HpackEncoder();
@@ -980,9 +972,6 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler, Input, Output {
 		if (finished) {
 			header[4] = FLAG_END_OF_STREAM;
 			stream.sentEndOfStream();
-			if (!stream.isActive()) {
-				setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
-			}
 		}
 		if (writeable) {
 			ByteUtil.set31Bits(header, 5, stream.getIdAsInt());
@@ -997,6 +986,11 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler, Input, Output {
 				} catch (IOException ioe) {
 					handleAppInitiatedIOException(ioe);
 				}
+			}
+		}
+		if (finished) {
+			if (!stream.isActive()) {
+				setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
 			}
 		}
 	}
@@ -1099,333 +1093,345 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler, Input, Output {
 
 	// ----------------------------------------------- Http2Parser.Input methods
 
-	@Override
-	public boolean fill(boolean block, byte[] data, int offset, int length) throws IOException {
-		int len = length;
-		int pos = offset;
-		boolean nextReadBlock = block;
-		int thisRead = 0;
+	protected class InputHandlerImpl implements Input {
 
-		while (len > 0) {
-			thisRead = channel.read(nextReadBlock, data, pos, len);
-			if (thisRead == 0) {
-				if (nextReadBlock) {
-					// Should never happen
-					throw new IllegalStateException();
+		protected InputHandlerImpl() {
+
+		}
+
+		@Override
+		public boolean fill(boolean block, byte[] data, int offset, int length) throws IOException {
+			int len = length;
+			int pos = offset;
+			boolean nextReadBlock = block;
+			int thisRead = 0;
+
+			while (len > 0) {
+				thisRead = channel.read(nextReadBlock, data, pos, len);
+				if (thisRead == 0) {
+					if (nextReadBlock) {
+						// Should never happen
+						throw new IllegalStateException();
+					} else {
+						return false;
+					}
+				} else if (thisRead == -1) {
+					if (zero.getConnectionState().get().isNewStreamAllowed()) {
+						throw new EOFException();
+					} else {
+						return false;
+					}
 				} else {
-					return false;
+					pos += thisRead;
+					len -= thisRead;
+					nextReadBlock = true;
 				}
-			} else if (thisRead == -1) {
-				if (zero.getConnectionState().get().isNewStreamAllowed()) {
-					throw new EOFException();
-				} else {
-					return false;
-				}
-			} else {
-				pos += thisRead;
-				len -= thisRead;
-				nextReadBlock = true;
 			}
+
+			return true;
 		}
 
-		return true;
-	}
-
-	@Override
-	public int getMaxFrameSize() {
-		return localSettings.getMaxFrameSize();
-	}
-
-	// ---------------------------------------------- Http2Parser.Output methods
-
-	@Override
-	public HpackDecoder getHpackDecoder() {
-		if (hpackDecoder == null) {
-			hpackDecoder = new HpackDecoder(localSettings.getHeaderTableSize());
-		}
-		return hpackDecoder;
-	}
-
-	@Override
-	public ByteBuffer startRequestBodyFrame(int streamId, int payloadSize, boolean endOfStream) throws Http2Exception {
-		// DATA frames reduce the overhead count ...
-		reduceOverheadCount();
-
-		// .. but lots of small payloads are inefficient so that will increase
-		// the overhead count unless it is the final DATA frame where small
-		// payloads are expected.
-
-		// See also https://bz.apache.org/bugzilla/show_bug.cgi?id=63690
-		// The buffering behaviour of some clients means that small data frames
-		// are much more frequent (roughly 1 in 20) than expected. Use an
-		// average over two frames to avoid false positives.
-		if (!endOfStream) {
-			int overheadThreshold = protocol.getOverheadDataThreshold();
-			int average = (lastNonFinalDataPayload >> 1) + (payloadSize >> 1);
-			lastNonFinalDataPayload = payloadSize;
-			// Avoid division by zero
-			if (average == 0) {
-				average = 1;
-			}
-			if (average < overheadThreshold) {
-				overheadCount.addAndGet(overheadThreshold / average);
-			}
+		@Override
+		public int getMaxFrameSize() {
+			return localSettings.getMaxFrameSize();
 		}
 
-		Stream stream = zero.getStream(streamId, true);
-		stream.checkState(FrameType.DATA);
-		stream.receivedData(payloadSize);
-		return stream.getInputByteBuffer();
 	}
 
-	@Override
-	public void endRequestBodyFrame(int streamId) throws Http2Exception {
-		Stream stream = zero.getStream(streamId, true);
-		stream.getInputBuffer().onDataAvailable();
-	}
+	protected class OutputHandlerImpl implements Output {
 
-	@Override
-	public void receivedEndOfStream(int streamId) throws ConnectionException {
-		Stream stream = zero.getStream(streamId, zero.getConnectionState().get().isNewStreamAllowed());
-		if (stream != null) {
-			stream.receivedEndOfStream();
-			if (!stream.isActive()) {
-				setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
-			}
+		// ---------------------------------------------- Http2Parser.Output methods
+
+		@Override
+		public HpackDecoder getHpackDecoder() {
+			return Http2UpgradeHandler.this.getHpackDecoder();
 		}
-	}
 
-	@Override
-	public void swallowedPadding(int streamId, int paddingLength) throws ConnectionException, IOException {
-		Stream stream = zero.getStream(streamId, true);
-		// +1 is for the payload byte used to define the padding length
-		writeWindowUpdate(stream, paddingLength + 1, false);
-	}
-
-	@Override
-	public HeaderEmitter headersStart(int streamId, boolean headersEndStream) throws Http2Exception, IOException {
-
-		// Check the pause state before processing headers since the pause state
-		// determines if a new stream is created or if this stream is ignored.
-		checkPauseState();
-
-		if (zero.getConnectionState().get().isNewStreamAllowed()) {
-			Stream stream = zero.getStream(streamId, false);
-			if (stream == null) {
-				stream = zero.createRemoteStream(streamId);
-			}
-			if (streamId < maxActiveRemoteStreamId) {
-				throw new ConnectionException(sm.getString("upgradeHandler.stream.old", Integer.valueOf(streamId),
-						Integer.valueOf(maxActiveRemoteStreamId)), Http2Error.PROTOCOL_ERROR);
-			}
-			stream.checkState(FrameType.HEADERS);
-			stream.receivedStartOfHeaders(headersEndStream);
-			closeIdleStreams(streamId);
-			if (localSettings.getMaxConcurrentStreams() < activeRemoteStreamCount.incrementAndGet()) {
-				setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
-				// Ignoring maxConcurrentStreams increases the overhead count
-				increaseOverheadCount();
-				throw new StreamException(
-						sm.getString("upgradeHandler.tooManyRemoteStreams",
-								Long.toString(localSettings.getMaxConcurrentStreams())),
-						Http2Error.REFUSED_STREAM, streamId);
-			}
-			// Valid new stream reduces the overhead count
+		@Override
+		public ByteBuffer startRequestBodyFrame(int streamId, int payloadSize, boolean endOfStream)
+				throws Http2Exception {
+			// DATA frames reduce the overhead count ...
 			reduceOverheadCount();
-			return stream;
-		} else {
-			if (log.isDebugEnabled()) {
-				log.debug(sm.getString("upgradeHandler.noNewStreams", zero.getConnectionId(),
-						Integer.toString(streamId)));
-			}
-			reduceOverheadCount();
-			// Stateless so a static can be used to save on GC
-			return HEADER_SINK;
-		}
-	}
 
-	private void closeIdleStreams(int newMaxActiveRemoteStreamId) {
-		for (Entry<Integer, Stream> entry : zero.getStreams().entrySet()) {
-			if (entry.getKey().intValue() > maxActiveRemoteStreamId
-					&& entry.getKey().intValue() < newMaxActiveRemoteStreamId) {
-				entry.getValue().closeIfIdle();
-			}
-		}
-		maxActiveRemoteStreamId = newMaxActiveRemoteStreamId;
-	}
+			// .. but lots of small payloads are inefficient so that will increase
+			// the overhead count unless it is the final DATA frame where small
+			// payloads are expected.
 
-	@Override
-	public void reprioritise(int streamId, int parentStreamId, boolean exclusive, int weight) throws Http2Exception {
-		if (streamId == parentStreamId) {
-			throw new ConnectionException(sm.getString("upgradeHandler.dependency.invalid", zero.getConnectionId(),
-					Integer.valueOf(streamId)), Http2Error.PROTOCOL_ERROR);
-		}
-
-		increaseOverheadCount();
-
-		Stream stream = zero.getStream(streamId, false);
-		if (stream == null) {
-			stream = zero.createRemoteStream(streamId);
-		}
-		stream.checkState(FrameType.PRIORITY);
-		AbstractStream parentStream = zero.getStream(parentStreamId, false);
-		if (parentStream == null) {
-			parentStream = zero;
-		}
-		stream.rePrioritise(parentStream, exclusive, weight);
-	}
-
-	@Override
-	public void headersContinue(int payloadSize, boolean endOfHeaders) {
-		// Generally, continuation frames don't impact the overhead count but if
-		// they are small and the frame isn't the final header frame then that
-		// is indicative of an abusive client
-		if (!endOfHeaders) {
-			int overheadThreshold = getProtocol().getOverheadContinuationThreshold();
-			if (payloadSize < overheadThreshold) {
-				if (payloadSize == 0) {
-					// Avoid division by zero
-					overheadCount.addAndGet(overheadThreshold);
-				} else {
-					overheadCount.addAndGet(overheadThreshold / payloadSize);
+			// See also https://bz.apache.org/bugzilla/show_bug.cgi?id=63690
+			// The buffering behaviour of some clients means that small data frames
+			// are much more frequent (roughly 1 in 20) than expected. Use an
+			// average over two frames to avoid false positives.
+			if (!endOfStream) {
+				int overheadThreshold = protocol.getOverheadDataThreshold();
+				int average = (lastNonFinalDataPayload >> 1) + (payloadSize >> 1);
+				lastNonFinalDataPayload = payloadSize;
+				// Avoid division by zero
+				if (average == 0) {
+					average = 1;
 				}
-			}
-		}
-	}
-
-	@Override
-	public void headersEnd(int streamId) throws ConnectionException {
-		Stream stream = zero.getStream(streamId, zero.getConnectionState().get().isNewStreamAllowed());
-		if (stream != null) {
-			setMaxProcessedStream(streamId);
-			if (stream.isActive()) {
-				if (stream.receivedEndOfHeaders()) {
-					processStreamOnContainerThread(stream);
-				}
-			}
-		}
-	}
-
-	private void setMaxProcessedStream(int streamId) {
-		if (maxProcessedStreamId < streamId) {
-			maxProcessedStreamId = streamId;
-		}
-	}
-
-	@Override
-	public void receiveReset(int streamId, long errorCode) throws Http2Exception {
-		Stream stream = zero.getStream(streamId, true);
-		stream.checkState(FrameType.RST);
-		stream.receiveReset(errorCode);
-	}
-
-	@Override
-	public void receiveSetting(Setting setting, long value) throws ConnectionException {
-
-		increaseOverheadCount();
-
-		// Possible with empty settings frame
-		if (setting == null) {
-			return;
-		}
-
-		// Special handling required
-		if (setting == Setting.INITIAL_WINDOW_SIZE) {
-			long oldValue = remoteSettings.getInitialWindowSize();
-			// Do this first in case new value is invalid
-			remoteSettings.set(setting, value);
-			int diff = (int) (value - oldValue);
-			for (Stream stream : zero.getStreams().values()) {
-				try {
-					stream.incrementWindowSize(diff);
-				} catch (Http2Exception h2e) {
-					stream.close(new StreamException(sm.getString("upgradeHandler.windowSizeTooBig",
-							zero.getConnectionId(), stream.getIdentifier()), h2e.getError(), stream.getIdAsInt()));
-				}
-			}
-		} else {
-			remoteSettings.set(setting, value);
-		}
-	}
-
-	@Override
-	public void receiveSettingsEnd(boolean ack) throws IOException {
-		if (ack) {
-			if (!localSettings.ack()) {
-				// Ack was unexpected
-				log.warn(sm.getString("upgradeHandler.unexpectedAck", zero.getConnectionId(), zero.getIdentifier()));
-			}
-		} else {
-			synchronized (channel) {
-				channel.write(true, SETTINGS_ACK, 0, SETTINGS_ACK.length);
-				channel.flush(true);
-			}
-		}
-	}
-
-	@Override
-	public void receivePing(byte[] payload, boolean ack) throws IOException {
-		if (!ack) {
-			increaseOverheadCount();
-		}
-		pingManager.receivePing(payload, ack);
-	}
-
-	@Override
-	public void receiveGoaway(int lastStreamId, long errorCode, String debugData) {
-		if (log.isDebugEnabled()) {
-			log.debug(sm.getString("upgradeHandler.goaway.debug", zero.getConnectionId(),
-					Integer.toString(lastStreamId), Long.toHexString(errorCode), debugData));
-		}
-		zero.close();
-	}
-
-	@Override
-	public void receiveIncWindows(int streamId, int increment) throws Http2Exception {
-		// See also https://bz.apache.org/bugzilla/show_bug.cgi?id=63690
-		// The buffering behaviour of some clients means that small data frames
-		// are much more frequent (roughly 1 in 20) than expected. Some clients
-		// issue a Window update for every DATA frame so a similar pattern may
-		// be observed. Use an average over two frames to avoid false positives.
-
-		int average = (lastWindowUpdate >> 1) + (increment >> 1);
-		int overheadThreshold = protocol.getOverheadWindowUpdateThreshold();
-		lastWindowUpdate = increment;
-		// Avoid division by zero
-		if (average == 0) {
-			average = 1;
-		}
-
-		if (streamId == 0) {
-			// Check for small increments which are inefficient
-			if (average < overheadThreshold) {
-				// The smaller the increment, the larger the overhead
-				overheadCount.addAndGet(overheadThreshold / average);
-			}
-
-			incrementWindowSize(increment);
-		} else {
-			Stream stream = zero.getStream(streamId, true);
-
-			// Check for small increments which are inefficient
-			if (average < overheadThreshold) {
-				// For Streams, client might only release the minimum so check
-				// against current demand
-				BacklogTracker tracker = backLogStreams.get(stream);
-				if (tracker == null || increment < tracker.getRemainingReservation()) {
-					// The smaller the increment, the larger the overhead
+				if (average < overheadThreshold) {
 					overheadCount.addAndGet(overheadThreshold / average);
 				}
 			}
 
-			stream.checkState(FrameType.WINDOW_UPDATE);
-			stream.incrementWindowSize(increment);
+			Stream stream = zero.getStream(streamId, true);
+			stream.checkState(FrameType.DATA);
+			stream.receivedData(payloadSize);
+			return stream.getInputByteBuffer();
 		}
-	}
 
-	@Override
-	public void swallowed(int streamId, FrameType frameType, int flags, int size) throws IOException {
-		// NO-OP.
+		@Override
+		public void endRequestBodyFrame(int streamId) throws Http2Exception {
+			Stream stream = zero.getStream(streamId, true);
+			stream.getInputBuffer().onDataAvailable();
+		}
+
+		@Override
+		public void receivedEndOfStream(int streamId) throws ConnectionException {
+			Stream stream = zero.getStream(streamId, zero.getConnectionState().get().isNewStreamAllowed());
+			if (stream != null) {
+				stream.receivedEndOfStream();
+				if (!stream.isActive()) {
+					setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
+				}
+			}
+		}
+
+		@Override
+		public void swallowedPadding(int streamId, int paddingLength) throws ConnectionException, IOException {
+			Stream stream = zero.getStream(streamId, true);
+			// +1 is for the payload byte used to define the padding length
+			writeWindowUpdate(stream, paddingLength + 1, false);
+		}
+
+		@Override
+		public HeaderEmitter headersStart(int streamId, boolean headersEndStream) throws Http2Exception, IOException {
+
+			// Check the pause state before processing headers since the pause state
+			// determines if a new stream is created or if this stream is ignored.
+			checkPauseState();
+
+			if (zero.getConnectionState().get().isNewStreamAllowed()) {
+				Stream stream = zero.getStream(streamId, false);
+				if (stream == null) {
+					stream = zero.createRemoteStream(streamId);
+				}
+				if (streamId < maxActiveRemoteStreamId) {
+					throw new ConnectionException(sm.getString("upgradeHandler.stream.old", Integer.valueOf(streamId),
+							Integer.valueOf(maxActiveRemoteStreamId)), Http2Error.PROTOCOL_ERROR);
+				}
+				stream.checkState(FrameType.HEADERS);
+				stream.receivedStartOfHeaders(headersEndStream);
+				closeIdleStreams(streamId);
+				if (localSettings.getMaxConcurrentStreams() < activeRemoteStreamCount.incrementAndGet()) {
+					setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
+					// Ignoring maxConcurrentStreams increases the overhead count
+					increaseOverheadCount();
+					throw new StreamException(
+							sm.getString("upgradeHandler.tooManyRemoteStreams",
+									Long.toString(localSettings.getMaxConcurrentStreams())),
+							Http2Error.REFUSED_STREAM, streamId);
+				}
+				// Valid new stream reduces the overhead count
+				reduceOverheadCount();
+				return stream;
+			} else {
+				if (log.isDebugEnabled()) {
+					log.debug(sm.getString("upgradeHandler.noNewStreams", zero.getConnectionId(),
+							Integer.toString(streamId)));
+				}
+				reduceOverheadCount();
+				// Stateless so a static can be used to save on GC
+				return HEADER_SINK;
+			}
+		}
+
+		private void closeIdleStreams(int newMaxActiveRemoteStreamId) {
+			for (Entry<Integer, Stream> entry : zero.getStreams().entrySet()) {
+				if (entry.getKey().intValue() > maxActiveRemoteStreamId
+						&& entry.getKey().intValue() < newMaxActiveRemoteStreamId) {
+					entry.getValue().closeIfIdle();
+				}
+			}
+			maxActiveRemoteStreamId = newMaxActiveRemoteStreamId;
+		}
+
+		@Override
+		public void reprioritise(int streamId, int parentStreamId, boolean exclusive, int weight)
+				throws Http2Exception {
+			if (streamId == parentStreamId) {
+				throw new ConnectionException(sm.getString("upgradeHandler.dependency.invalid", zero.getConnectionId(),
+						Integer.valueOf(streamId)), Http2Error.PROTOCOL_ERROR);
+			}
+
+			increaseOverheadCount();
+
+			Stream stream = zero.getStream(streamId, false);
+			if (stream == null) {
+				stream = zero.createRemoteStream(streamId);
+			}
+			stream.checkState(FrameType.PRIORITY);
+			AbstractStream parentStream = zero.getStream(parentStreamId, false);
+			if (parentStream == null) {
+				parentStream = zero;
+			}
+			stream.rePrioritise(parentStream, exclusive, weight);
+		}
+
+		@Override
+		public void headersContinue(int payloadSize, boolean endOfHeaders) {
+			// Generally, continuation frames don't impact the overhead count but if
+			// they are small and the frame isn't the final header frame then that
+			// is indicative of an abusive client
+			if (!endOfHeaders) {
+				int overheadThreshold = getProtocol().getOverheadContinuationThreshold();
+				if (payloadSize < overheadThreshold) {
+					if (payloadSize == 0) {
+						// Avoid division by zero
+						overheadCount.addAndGet(overheadThreshold);
+					} else {
+						overheadCount.addAndGet(overheadThreshold / payloadSize);
+					}
+				}
+			}
+		}
+
+		@Override
+		public void headersEnd(int streamId) throws ConnectionException {
+			Stream stream = zero.getStream(streamId, zero.getConnectionState().get().isNewStreamAllowed());
+			if (stream != null) {
+				setMaxProcessedStream(streamId);
+				if (stream.isActive()) {
+					if (stream.receivedEndOfHeaders()) {
+						processStreamOnContainerThread(stream);
+					}
+				}
+			}
+		}
+
+		private void setMaxProcessedStream(int streamId) {
+			if (maxProcessedStreamId < streamId) {
+				maxProcessedStreamId = streamId;
+			}
+		}
+
+		@Override
+		public void receiveReset(int streamId, long errorCode) throws Http2Exception {
+			Stream stream = zero.getStream(streamId, true);
+			stream.checkState(FrameType.RST);
+			stream.receiveReset(errorCode);
+		}
+
+		@Override
+		public void receiveSetting(Setting setting, long value) throws ConnectionException {
+
+			increaseOverheadCount();
+
+			// Possible with empty settings frame
+			if (setting == null) {
+				return;
+			}
+
+			// Special handling required
+			if (setting == Setting.INITIAL_WINDOW_SIZE) {
+				long oldValue = remoteSettings.getInitialWindowSize();
+				// Do this first in case new value is invalid
+				remoteSettings.set(setting, value);
+				int diff = (int) (value - oldValue);
+				for (Stream stream : zero.getStreams().values()) {
+					try {
+						stream.incrementWindowSize(diff);
+					} catch (Http2Exception h2e) {
+						stream.close(new StreamException(sm.getString("upgradeHandler.windowSizeTooBig",
+								zero.getConnectionId(), stream.getIdentifier()), h2e.getError(), stream.getIdAsInt()));
+					}
+				}
+			} else {
+				remoteSettings.set(setting, value);
+			}
+		}
+
+		@Override
+		public void receiveSettingsEnd(boolean ack) throws IOException {
+			if (ack) {
+				if (!localSettings.ack()) {
+					// Ack was unexpected
+					log.warn(
+							sm.getString("upgradeHandler.unexpectedAck", zero.getConnectionId(), zero.getIdentifier()));
+				}
+			} else {
+				synchronized (channel) {
+					channel.write(true, SETTINGS_ACK, 0, SETTINGS_ACK.length);
+					channel.flush(true);
+				}
+			}
+		}
+
+		@Override
+		public void receivePing(byte[] payload, boolean ack) throws IOException {
+			if (!ack) {
+				increaseOverheadCount();
+			}
+			pingManager.receivePing(payload, ack);
+		}
+
+		@Override
+		public void receiveGoaway(int lastStreamId, long errorCode, String debugData) {
+			if (log.isDebugEnabled()) {
+				log.debug(sm.getString("upgradeHandler.goaway.debug", zero.getConnectionId(),
+						Integer.toString(lastStreamId), Long.toHexString(errorCode), debugData));
+			}
+			zero.close();
+		}
+
+		@Override
+		public void receiveIncWindows(int streamId, int increment) throws Http2Exception {
+			// See also https://bz.apache.org/bugzilla/show_bug.cgi?id=63690
+			// The buffering behaviour of some clients means that small data frames
+			// are much more frequent (roughly 1 in 20) than expected. Some clients
+			// issue a Window update for every DATA frame so a similar pattern may
+			// be observed. Use an average over two frames to avoid false positives.
+
+			int average = (lastWindowUpdate >> 1) + (increment >> 1);
+			int overheadThreshold = protocol.getOverheadWindowUpdateThreshold();
+			lastWindowUpdate = increment;
+			// Avoid division by zero
+			if (average == 0) {
+				average = 1;
+			}
+
+			if (streamId == 0) {
+				// Check for small increments which are inefficient
+				if (average < overheadThreshold) {
+					// The smaller the increment, the larger the overhead
+					overheadCount.addAndGet(overheadThreshold / average);
+				}
+
+				incrementWindowSize(increment);
+			} else {
+				Stream stream = zero.getStream(streamId, true);
+
+				// Check for small increments which are inefficient
+				if (average < overheadThreshold) {
+					// For Streams, client might only release the minimum so check
+					// against current demand
+					BacklogTracker tracker = backLogStreams.get(stream);
+					if (tracker == null || increment < tracker.getRemainingReservation()) {
+						// The smaller the increment, the larger the overhead
+						overheadCount.addAndGet(overheadThreshold / average);
+					}
+				}
+
+				stream.checkState(FrameType.WINDOW_UPDATE);
+				stream.incrementWindowSize(increment);
+			}
+		}
+
+		@Override
+		public void swallowed(int streamId, FrameType frameType, int flags, int size) throws IOException {
+			// NO-OP.
+		}
+
 	}
 
 	protected class PingManager {
