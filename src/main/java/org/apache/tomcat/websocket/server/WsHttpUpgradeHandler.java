@@ -51,7 +51,6 @@ public class WsHttpUpgradeHandler implements InternalHttpUpgradeHandler {
 
 	private final ClassLoader applicationClassLoader;
 
-	private AbstractProtocol<?> protocol;
 	private SocketChannel channel;
 
 	private Endpoint endpoint;

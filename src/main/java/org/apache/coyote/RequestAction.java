@@ -1,11 +1,17 @@
 package org.apache.coyote;
 
+import java.io.IOException;
+import java.util.Arrays;
+
+import org.apache.coyote.http11.Constants;
+import org.apache.coyote.http11.InputFilter;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.parser.Host;
 import org.apache.tomcat.util.log.UserDataHelper;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 public abstract class RequestAction implements InputReader {
@@ -16,14 +22,205 @@ public abstract class RequestAction implements InputReader {
 
 	private final AbstractProcessor processor;
 
-	private RequestData requestData;
+	// private RequestData requestData;
 
 	// Used to avoid useless B2C conversion on the host name.
 	private char[] hostNameC = new char[0];
 
+	/**
+	 * Filter library. Note: Filter[Constants.CHUNKED_FILTER] is always the
+	 * "chunked" filter.
+	 */
+	private InputFilter[] filterLibrary;
+
+	/**
+	 * Active filters (in order).
+	 */
+	private InputFilter[] activeFilters;
+
+	/**
+	 * Index of the last active filter.
+	 */
+	private int lastActiveFilter;
+
+	/**
+	 * Tracks how many internal filters are in the filter library so they are
+	 * skipped when looking for pluggable filters.
+	 */
+	private int pluggableFilterIndex = Integer.MAX_VALUE;
+
+	/**
+	 * Swallow input ? (in the case of an expectation)
+	 */
+	private boolean swallowInput;
+
 	public RequestAction(AbstractProcessor processor) {
 		this.processor = processor;
-		this.requestData = processor.requestData;
+		// this.requestData = processor.requestData;
+		filterLibrary = new InputFilter[0];
+		activeFilters = new InputFilter[0];
+		lastActiveFilter = -1;
+		swallowInput = true;
+	}
+
+	/**
+	 * Set the swallow input flag.
+	 */
+	public void setSwallowInput(boolean swallowInput) {
+		this.swallowInput = swallowInput;
+	}
+
+	/**
+	 * Add an input filter to the filter library.
+	 *
+	 * @throws NullPointerException if the supplied filter is null
+	 */
+	public final void addFilter(InputFilter filter) {
+
+		if (filter == null) {
+			throw new NullPointerException(sm.getString("iib.filter.npe"));
+		}
+
+		for (int i = 0; i < filterLibrary.length; i++) {
+			if (filterLibrary[i].getId() == filter.getId()) {
+				throw new IllegalArgumentException("id=" + filter.getId() + " already exist");
+			}
+			if (filterLibrary[i].getEncodingName() != null && filter.getEncodingName() != null) {
+				if (filterLibrary[i].getEncodingName().toString().equals(filter.getEncodingName().toString())) {
+					throw new IllegalArgumentException("encodingName=" + filter.getEncodingName() + " already exist");
+				}
+			}
+		}
+
+		InputFilter[] newFilterLibrary = Arrays.copyOf(filterLibrary, filterLibrary.length + 1);
+		newFilterLibrary[filterLibrary.length] = filter;
+		filterLibrary = newFilterLibrary;
+
+		activeFilters = new InputFilter[filterLibrary.length];
+	}
+
+	public final InputFilter getFilterById(int id) {
+		for (int i = 0; i < filterLibrary.length; i++) {
+			if (filterLibrary[i].getId() == id) {
+				return filterLibrary[i];
+			}
+		}
+		return null;
+	}
+
+	public final InputFilter getFilterByEncodingName(String encodingName) {
+		for (int i = pluggableFilterIndex; i < filterLibrary.length; i++) {
+			if (filterLibrary[i].getEncodingName() != null && encodingName != null) {
+				if (filterLibrary[i].getEncodingName().toString().equals(encodingName)) {
+					return filterLibrary[i];
+				}
+			}
+		}
+		return null;
+	}
+
+	protected final void resetPluggableFilterIndex() {
+		pluggableFilterIndex = this.getFilters().length;
+	}
+
+	/**
+	 * Get filters.
+	 */
+	private InputFilter[] getFilters() {
+		return filterLibrary;
+	}
+
+//	public int getLastActiveFilter() {
+//		return lastActiveFilter;
+//	}
+	/**
+	 * Add an input filter to the filter library.
+	 */
+	public final void addActiveFilter(int id) {
+
+		InputFilter filter = null;
+		for (int i = 0; i < filterLibrary.length; i++) {
+			if (filterLibrary[i].getId() == id) {
+				filter = filterLibrary[i];
+			}
+		}
+
+		if (lastActiveFilter == -1) {
+			filter.setBuffer(getBaseInputReader());
+		} else {
+			for (int i = 0; i <= lastActiveFilter; i++) {
+				if (activeFilters[i] == filter)
+					return;
+			}
+			filter.setBuffer(activeFilters[lastActiveFilter]);
+		}
+
+		activeFilters[++lastActiveFilter] = filter;
+
+		filter.setRequest(processor.requestData);
+	}
+
+	public final boolean hasActiveFilters() {
+		return lastActiveFilter != -1;
+	}
+
+	public final InputFilter getLastActiveFilter() {
+		if (lastActiveFilter >= 0) {
+			return activeFilters[lastActiveFilter];
+		}
+		return null;
+	}
+
+	public final int getActiveFiltersCount() {
+		return activeFilters.length;
+	}
+
+	public final InputFilter getActiveFilter(int index) {
+		if (lastActiveFilter >= 0 && index <= lastActiveFilter) {
+			return activeFilters[index];
+		}
+		return null;
+	}
+
+	public boolean isSwallowInput() {
+		return swallowInput;
+	}
+
+	protected abstract InputReader getBaseInputReader();
+
+	@Override
+	public BufWrapper doRead() throws IOException {
+		if (lastActiveFilter == -1)
+			return getBaseInputReader().doRead();
+		else
+			return activeFilters[lastActiveFilter].doRead();
+	}
+
+	protected final boolean isChunking() {
+		for (int i = 0; i < lastActiveFilter; i++) {
+			if (activeFilters[i] == filterLibrary[Constants.CHUNKED_FILTER]) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	protected final int swallowInput() throws IOException {
+		int extraBytes = 0;
+		if (swallowInput && (lastActiveFilter != -1)) {
+			extraBytes = (int) activeFilters[lastActiveFilter].end();
+		}
+		return extraBytes;
+	}
+
+	protected final int getAvailableInFilters() {
+		int available = 0;
+		if ((hasActiveFilters())) {
+			for (int i = 0; (available == 0) && (i < getActiveFiltersCount()); i++) {
+				available = getActiveFilter(i).available();
+			}
+		}
+		return available;
 	}
 
 	public abstract int getAvailable(Object param);
@@ -74,7 +271,7 @@ public abstract class RequestAction implements InputReader {
 			return;
 		} else if (valueMB.getLength() == 0) {
 			// Empty Host header so set sever name to empty string
-			requestData.serverName().setString("");
+			processor.requestData.serverName().setString("");
 			populatePort();
 			return;
 		}
@@ -97,13 +294,13 @@ public abstract class RequestAction implements InputReader {
 				for (int i = colonPos + 1; i < valueL; i++) {
 					char c = (char) valueB[i + valueS];
 					if (c < '0' || c > '9') {
-						requestData.getResponseData().setStatus(400);
+						processor.requestData.getResponseData().setStatus(400);
 						processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
 						return;
 					}
 					port = port * 10 + c - '0';
 				}
-				requestData.setServerPort(port);
+				processor.requestData.setServerPort(port);
 
 				// Only need to copy the host name up to the :
 				valueL = colonPos;
@@ -113,7 +310,7 @@ public abstract class RequestAction implements InputReader {
 			for (int i = 0; i < valueL; i++) {
 				hostNameC[i] = (char) valueB[i + valueS];
 			}
-			requestData.serverName().setChars(hostNameC, 0, valueL);
+			processor.requestData.serverName().setChars(hostNameC, 0, valueL);
 
 		} catch (IllegalArgumentException e) {
 			// IllegalArgumentException indicates that the host name is invalid
@@ -132,7 +329,7 @@ public abstract class RequestAction implements InputReader {
 				}
 			}
 
-			requestData.getResponseData().setStatus(400);
+			processor.requestData.getResponseData().setStatus(400);
 			processor.setErrorState(ErrorState.CLOSE_CLEAN, e);
 		}
 	}
@@ -157,6 +354,15 @@ public abstract class RequestAction implements InputReader {
 	 */
 	protected void populatePort() {
 		// NO-OP
+	}
+
+	protected void resetFilters() {
+		for (int i = 0; i <= lastActiveFilter; i++) {
+			activeFilters[i].recycle();
+		}
+
+		lastActiveFilter = -1;
+		swallowInput = true;
 	}
 
 }

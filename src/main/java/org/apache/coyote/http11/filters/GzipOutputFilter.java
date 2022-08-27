@@ -23,6 +23,7 @@ import java.util.zip.GZIPOutputStream;
 
 import org.apache.coyote.Response;
 import org.apache.coyote.ResponseData;
+import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
 import org.apache.juli.logging.Log;
@@ -55,6 +56,11 @@ public class GzipOutputFilter implements OutputFilter {
 	protected final OutputStream fakeOutputStream = new FakeOutputStream();
 
 	// --------------------------------------------------- OutputBuffer Methods
+
+	@Override
+	public int getId() {
+		return Constants.GZIP_FILTER;
+	}
 
 	@Override
 	public int doWrite(ByteBuffer chunk) throws IOException {

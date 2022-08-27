@@ -36,11 +36,13 @@ import javax.servlet.http.HttpServletResponse;
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.Adapter;
 import org.apache.coyote.ErrorState;
+import org.apache.coyote.InputReader;
 import org.apache.coyote.Request;
 import org.apache.coyote.RequestAction;
 import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
 import org.apache.coyote.ResponseAction;
+import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
@@ -641,6 +643,11 @@ public class AjpProcessor extends AbstractProcessor {
 
 		public SocketInputReader(AbstractProcessor processor) {
 			super(processor);
+		}
+
+		@Override
+		protected InputReader getBaseInputReader() {
+			return this;
 		}
 
 		/**
@@ -1247,6 +1254,11 @@ public class AjpProcessor extends AbstractProcessor {
 			super(processor);
 		}
 
+		@Override
+		protected HttpOutputBuffer getBaseOutputBuffer() {
+			return this;
+		}
+
 		private void writeData(ByteBuffer chunk) throws IOException {
 			boolean blocking = (requestData.getAsyncStateMachine().getWriteListener() == null);
 
@@ -1415,55 +1427,21 @@ public class AjpProcessor extends AbstractProcessor {
 			channel.flush(true);
 		}
 
-		@Override
-		public void commit(boolean finished) {
-			if (!responseData.isCommitted()) {
-				responseData.setCommitted(true);
-				try {
-					// Validate and write response headers
-					prepareResponse(finished);
-				} catch (IOException e) {
-					handleIOException(e);
-				}
-			}
-		}
-
-		@Override
-		public void close() {
-			commit(true);
-			try {
-				finishResponse();
-			} catch (IOException e) {
-				handleIOException(e);
-			}
-		}
-
-		@Override
-		public void sendAck() {
-			ack();
-		}
-
 		// @Override
 		protected final void ack() {
 			// NO-OP for AJP
 		}
 
 		@Override
-		public void clientFlush() {
-			commit(false);
-			try {
-				flush();
-			} catch (IOException e) {
-				handleIOException(e);
-				responseData.setErrorException(e);
-			}
+		public void end() throws IOException {
+			// NO-OP for AJP
 		}
 
 		/**
 		 * Callback to write data from the buffer.
 		 */
-		// @Override
-		protected final void flush() throws IOException {
+		@Override
+		public final void flush() throws IOException {
 			// Calling code should ensure that there is no data in the buffers for
 			// non-blocking writes.
 			// TODO Validate the assertion above

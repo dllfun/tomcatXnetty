@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import org.apache.coyote.ResponseData;
+import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
 import org.apache.tomcat.util.buf.HexUtils;
@@ -88,6 +89,11 @@ public class ChunkedOutputFilter implements OutputFilter {
 	}
 
 	// --------------------------------------------------- OutputBuffer Methods
+
+	@Override
+	public int getId() {
+		return Constants.CHUNKED_FILTER;
+	}
 
 	@Override
 	public int doWrite(ByteBuffer chunk) throws IOException {

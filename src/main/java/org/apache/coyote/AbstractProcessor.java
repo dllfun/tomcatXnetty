@@ -145,6 +145,26 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		return errorState;
 	}
 
+	// @Override
+	public void isError(AtomicBoolean param) {
+		param.set(getErrorState().isError());
+	}
+
+	// @Override
+	public void isIoAllowed(AtomicBoolean param) {
+		param.set(getErrorState().isIoAllowed());
+	}
+
+	public void handleIOException(IOException ioe) {
+		if (ioe instanceof CloseNowException) {
+			// Close the channel but keep the connection open
+			setErrorState(ErrorState.CLOSE_NOW, ioe);
+		} else {
+			// Close the connection and all channels within that connection
+			setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
+		}
+	}
+
 	/**
 	 * Set the socket wrapper being used.
 	 * 
@@ -280,6 +300,36 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 
 		return state;
 	}
+
+	/**
+	 * Flush any pending writes. Used during non-blocking writes to flush any
+	 * remaining data from a previous incomplete write.
+	 *
+	 * @return <code>true</code> if data remains to be flushed at the end of method
+	 *
+	 * @throws IOException If an I/O error occurs while attempting to flush the data
+	 */
+	protected abstract boolean flushBufferedWrite() throws IOException;
+
+	/**
+	 * Perform any necessary processing for a non-blocking read before dispatching
+	 * to the adapter.
+	 */
+	protected void dispatchNonBlockingRead() {
+		requestData.getAsyncStateMachine().asyncOperation();
+	}
+
+	/**
+	 * Perform any necessary clean-up processing if the dispatch resulted in the
+	 * completion of processing for the current request.
+	 *
+	 * @return The state to return for the socket once the clean-up for the current
+	 *         request has completed
+	 *
+	 * @throws IOException If an I/O error occurs while attempting to end the
+	 *                     request
+	 */
+	protected abstract SocketState dispatchEndRequest() throws IOException;
 
 	// @Override
 	// public final void action(ActionCode actionCode, Object param) {
@@ -559,16 +609,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	// }
 
 	// @Override
-	public void isError(AtomicBoolean param) {
-		param.set(getErrorState().isError());
-	}
-
-	// @Override
-	public void isIoAllowed(AtomicBoolean param) {
-		param.set(getErrorState().isIoAllowed());
-	}
-
-	// @Override
 	// public void disableSwallowInput() {
 
 	// }
@@ -604,9 +644,53 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		executeDispatches();
 	}
 
+	protected void executeDispatches() {
+		Channel channel = getChannel();
+		Iterator<DispatchType> dispatches = getIteratorAndClearDispatches();
+		if (channel != null) {
+			synchronized (channel) {
+				/*
+				 * This method is called when non-blocking IO is initiated by defining a read
+				 * and/or write listener in a non-container thread. It is called once the
+				 * non-container thread completes so that the first calls to onWritePossible()
+				 * and/or onDataAvailable() as appropriate are made by the container.
+				 *
+				 * Processing the dispatches requires (for APR/native at least) that the socket
+				 * has been added to the waitingRequests queue. This may not have occurred by
+				 * the time that the non-container thread completes triggering the call to this
+				 * method. Therefore, the coded syncs on the SocketWrapper as the container
+				 * thread that initiated this non-container thread holds a lock on the
+				 * SocketWrapper. The container thread will add the socket to the
+				 * waitingRequests queue before releasing the lock on the channel. Therefore, by
+				 * obtaining the lock on channel before processing the dispatches, we can be
+				 * sure that the socket has been added to the waitingRequests queue.
+				 */
+				while (dispatches != null && dispatches.hasNext()) {
+					DispatchType dispatchType = dispatches.next();
+					protocol.getHandler().processSocket(channel, dispatchType.getSocketStatus(), false);
+				}
+			}
+		}
+	}
+
 	// @Override
 	public void actionUPGRADE(UpgradeToken param) {
 		doHttpUpgrade(param);
+	}
+
+	/**
+	 * Process an HTTP upgrade. Processors that support HTTP upgrade should override
+	 * this method and process the provided token.
+	 *
+	 * @param upgradeToken Contains all the information necessary for the Processor
+	 *                     to process the upgrade
+	 *
+	 * @throws UnsupportedOperationException if the protocol does not support HTTP
+	 *                                       upgrade
+	 */
+	protected void doHttpUpgrade(UpgradeToken upgradeToken) {
+		// Should never happen
+		throw new UnsupportedOperationException(sm.getString("abstractProcessor.httpupgrade.notsupported"));
 	}
 
 	// @Override
@@ -615,9 +699,33 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		result.set(isPushSupported());
 	}
 
+	/**
+	 * Protocols that support push should override this method and return {@code
+	 * true}.
+	 *
+	 * @return {@code true} if push is supported by this processor, otherwise
+	 *         {@code false}.
+	 */
+	protected boolean isPushSupported() {
+		return false;
+	}
+
 	// @Override
 	public void actionPUSH_REQUEST(RequestData param) {
 		doPush(param);
+	}
+
+	/**
+	 * Process a push. Processors that support push should override this method and
+	 * process the provided token.
+	 *
+	 * @param pushTarget Contains all the information necessary for the Processor to
+	 *                   process the push request
+	 *
+	 * @throws UnsupportedOperationException if the protocol does not support push
+	 */
+	protected void doPush(RequestData pushTarget) {
+		throw new UnsupportedOperationException(sm.getString("abstractProcessor.pushrequest.notsupported"));
 	}
 
 	// @Override
@@ -625,24 +733,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 //		AtomicBoolean result = param;
 //		result.set(isTrailerFieldsSupported());
 //	}
-
-	public void handleIOException(IOException ioe) {
-		if (ioe instanceof CloseNowException) {
-			// Close the channel but keep the connection open
-			setErrorState(ErrorState.CLOSE_NOW, ioe);
-		} else {
-			// Close the connection and all channels within that connection
-			setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
-		}
-	}
-
-	/**
-	 * Perform any necessary processing for a non-blocking read before dispatching
-	 * to the adapter.
-	 */
-	protected void dispatchNonBlockingRead() {
-		requestData.getAsyncStateMachine().asyncOperation();
-	}
 
 	/**
 	 * {@inheritDoc}
@@ -730,35 +820,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 
 //	protected abstract boolean isReadyForWrite();
 
-	protected void executeDispatches() {
-		Channel channel = getChannel();
-		Iterator<DispatchType> dispatches = getIteratorAndClearDispatches();
-		if (channel != null) {
-			synchronized (channel) {
-				/*
-				 * This method is called when non-blocking IO is initiated by defining a read
-				 * and/or write listener in a non-container thread. It is called once the
-				 * non-container thread completes so that the first calls to onWritePossible()
-				 * and/or onDataAvailable() as appropriate are made by the container.
-				 *
-				 * Processing the dispatches requires (for APR/native at least) that the socket
-				 * has been added to the waitingRequests queue. This may not have occurred by
-				 * the time that the non-container thread completes triggering the call to this
-				 * method. Therefore, the coded syncs on the SocketWrapper as the container
-				 * thread that initiated this non-container thread holds a lock on the
-				 * SocketWrapper. The container thread will add the socket to the
-				 * waitingRequests queue before releasing the lock on the channel. Therefore, by
-				 * obtaining the lock on channel before processing the dispatches, we can be
-				 * sure that the socket has been added to the waitingRequests queue.
-				 */
-				while (dispatches != null && dispatches.hasNext()) {
-					DispatchType dispatchType = dispatches.next();
-					protocol.getHandler().processSocket(channel, dispatchType.getSocketStatus(), false);
-				}
-			}
-		}
-	}
-
 	/**
 	 * {@inheritDoc} Processors that implement HTTP upgrade must override this
 	 * method and provide the necessary token.
@@ -767,21 +828,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	public UpgradeToken getUpgradeToken() {
 		// Should never reach this code but in case we do...
 		throw new IllegalStateException(sm.getString("abstractProcessor.httpupgrade.notsupported"));
-	}
-
-	/**
-	 * Process an HTTP upgrade. Processors that support HTTP upgrade should override
-	 * this method and process the provided token.
-	 *
-	 * @param upgradeToken Contains all the information necessary for the Processor
-	 *                     to process the upgrade
-	 *
-	 * @throws UnsupportedOperationException if the protocol does not support HTTP
-	 *                                       upgrade
-	 */
-	protected void doHttpUpgrade(UpgradeToken upgradeToken) {
-		// Should never happen
-		throw new UnsupportedOperationException(sm.getString("abstractProcessor.httpupgrade.notsupported"));
 	}
 
 	/**
@@ -803,30 +849,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		return false;
 	}
 
-	/**
-	 * Protocols that support push should override this method and return {@code
-	 * true}.
-	 *
-	 * @return {@code true} if push is supported by this processor, otherwise
-	 *         {@code false}.
-	 */
-	protected boolean isPushSupported() {
-		return false;
-	}
-
-	/**
-	 * Process a push. Processors that support push should override this method and
-	 * process the provided token.
-	 *
-	 * @param pushTarget Contains all the information necessary for the Processor to
-	 *                   process the push request
-	 *
-	 * @throws UnsupportedOperationException if the protocol does not support push
-	 */
-	protected void doPush(RequestData pushTarget) {
-		throw new UnsupportedOperationException(sm.getString("abstractProcessor.pushrequest.notsupported"));
-	}
-
 	// protected abstract boolean isTrailerFieldsReady();
 
 	/**
@@ -839,28 +861,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 //	protected boolean isTrailerFieldsSupported() {
 //		return false;
 //	}
-
-	/**
-	 * Flush any pending writes. Used during non-blocking writes to flush any
-	 * remaining data from a previous incomplete write.
-	 *
-	 * @return <code>true</code> if data remains to be flushed at the end of method
-	 *
-	 * @throws IOException If an I/O error occurs while attempting to flush the data
-	 */
-	protected abstract boolean flushBufferedWrite() throws IOException;
-
-	/**
-	 * Perform any necessary clean-up processing if the dispatch resulted in the
-	 * completion of processing for the current request.
-	 *
-	 * @return The state to return for the socket once the clean-up for the current
-	 *         request has completed
-	 *
-	 * @throws IOException If an I/O error occurs while attempting to end the
-	 *                     request
-	 */
-	protected abstract SocketState dispatchEndRequest() throws IOException;
 
 	@Override
 	protected final void logAccess(Channel channel) throws IOException {

@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 
 import org.apache.coyote.InputReader;
 import org.apache.coyote.RequestData;
+import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.InputFilter;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
@@ -53,6 +54,10 @@ public class VoidInputFilter implements InputFilter {
 	// }
 
 	// ---------------------------------------------------- InputFilter Methods
+	@Override
+	public int getId() {
+		return Constants.VOID_FILTER;
+	}
 
 	@Override
 	public BufWrapper doRead() throws IOException {

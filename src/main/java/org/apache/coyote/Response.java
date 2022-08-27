@@ -111,7 +111,7 @@ public final class Response {
 	// }
 
 	public void actionCOMMIT(boolean finished) {
-		responseAction.commit(false);
+		responseAction.commit(finished);
 	}
 
 	public void actionACK() {

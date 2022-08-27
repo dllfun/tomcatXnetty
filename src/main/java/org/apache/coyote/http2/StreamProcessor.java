@@ -132,8 +132,8 @@ class StreamProcessor extends AbstractProcessor {
 		}
 	}
 
-	final void addOutputFilter(OutputFilter filter) {
-		http2OutputBuffer.addFilter(filter);
+	final void addOutputFilter(int id) {
+		http2OutputBuffer.addActiveFilter(id);
 	}
 
 	// Static so it can be used by Stream to build the MimeHeaders required for
@@ -153,7 +153,8 @@ class StreamProcessor extends AbstractProcessor {
 			// Enable compression. Headers will have been set. Need to configure
 			// output filter at this point.
 			if (stream.getCurrentProcessor() != null) {
-				((StreamProcessor) stream.getCurrentProcessor()).addOutputFilter(new GzipOutputFilter());
+				((StreamProcessor) stream.getCurrentProcessor())
+						.addOutputFilter(org.apache.coyote.http11.Constants.GZIP_FILTER);
 			}
 		}
 

@@ -32,7 +32,6 @@ import javax.servlet.WriteListener;
 import javax.servlet.http.HttpServletResponse;
 
 import org.apache.catalina.Globals;
-import org.apache.coyote.ActionCode;
 import org.apache.coyote.CloseNowException;
 import org.apache.coyote.Response;
 import org.apache.tomcat.util.buf.C2BConverter;

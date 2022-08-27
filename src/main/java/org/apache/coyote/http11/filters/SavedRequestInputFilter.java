@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import org.apache.coyote.InputReader;
+import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.InputFilter;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
@@ -56,6 +57,15 @@ public class SavedRequestInputFilter implements InputFilter {
 	 * 
 	 * return byteBuffer.getRemaining(); }
 	 */
+
+	public void setInput(ByteChunk input) {
+		this.input = input;
+	}
+
+	@Override
+	public int getId() {
+		return Constants.SAVEDREQUEST_FILTER;
+	}
 
 	@Override
 	public BufWrapper doRead() throws IOException {

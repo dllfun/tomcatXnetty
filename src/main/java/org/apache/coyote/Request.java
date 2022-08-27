@@ -17,7 +17,6 @@ import org.apache.tomcat.util.buf.UDecoder;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.Parameters;
 import org.apache.tomcat.util.http.ServerCookies;
-import org.apache.tomcat.util.net.DispatchType;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;

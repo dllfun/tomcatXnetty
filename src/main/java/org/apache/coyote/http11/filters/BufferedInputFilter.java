@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 
 import org.apache.coyote.InputReader;
 import org.apache.coyote.RequestData;
+import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.InputFilter;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
@@ -54,6 +55,11 @@ public class BufferedInputFilter implements InputFilter {
 	}
 
 	// --------------------------------------------------------- Public Methods
+
+	@Override
+	public int getId() {
+		return Constants.BUFFERED_FILTER;
+	}
 
 	/**
 	 * Set the buffering limit. This should be reset every time the buffer is used.

@@ -34,7 +34,10 @@ import org.apache.coyote.RequestAction;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.Response;
 import org.apache.coyote.http11.filters.BufferedInputFilter;
+import org.apache.coyote.http11.filters.ChunkedInputFilter;
+import org.apache.coyote.http11.filters.IdentityInputFilter;
 import org.apache.coyote.http11.filters.SavedRequestInputFilter;
+import org.apache.coyote.http11.filters.VoidInputFilter;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteChunk;
@@ -70,11 +73,6 @@ public class Http11InputBuffer extends RequestAction {
 	private final RequestData requestData;
 
 	/**
-	 * Swallow input ? (in the case of an expectation)
-	 */
-	private boolean swallowInput;
-
-	/**
 	 * The read buffer.
 	 */
 	// private BufWrapper appReadBuffer;
@@ -96,28 +94,6 @@ public class Http11InputBuffer extends RequestAction {
 	 * Underlying input buffer.
 	 */
 	private InputReader channelInputBuffer;
-
-	/**
-	 * Filter library. Note: Filter[Constants.CHUNKED_FILTER] is always the
-	 * "chunked" filter.
-	 */
-	private InputFilter[] filterLibrary;
-
-	/**
-	 * Active filters (in order).
-	 */
-	private InputFilter[] activeFilters;
-
-	/**
-	 * Index of the last active filter.
-	 */
-	private int lastActiveFilter;
-
-	/**
-	 * Tracks how many internal filters are in the filter library so they are
-	 * skipped when looking for pluggable filters.
-	 */
-	private int pluggableFilterIndex = Integer.MAX_VALUE;
 
 	/**
 	 * HTTP/1.1 flag.
@@ -148,72 +124,24 @@ public class Http11InputBuffer extends RequestAction {
 		this.requestData = processor.getRequestData();
 		this.httpParser = httpParser;
 
-		filterLibrary = new InputFilter[0];
-		activeFilters = new InputFilter[0];
-		lastActiveFilter = -1;
-
-		swallowInput = true;
-
 		channelInputBuffer = new SocketInputReader();
+
+		AbstractHttp11Protocol<?> protocol = (AbstractHttp11Protocol<?>) processor.getProtocol();
+
+		// Create and add the identity filters.
+		addFilter(new IdentityInputFilter(protocol.getMaxSwallowSize()));
+		// Create and add the chunked filters.
+		addFilter(new ChunkedInputFilter(protocol.getMaxTrailerSize(), protocol.getAllowedTrailerHeadersInternal(),
+				protocol.getMaxExtensionSize(), protocol.getMaxSwallowSize()));
+		// Create and add the void filters.
+		addFilter(new VoidInputFilter());
+		// Create and add buffered input filter
+		addFilter(new BufferedInputFilter());
+		addFilter(new SavedRequestInputFilter(null));
+		resetPluggableFilterIndex();
 	}
 
 	// ------------------------------------------------------------- Properties
-
-	/**
-	 * Add an input filter to the filter library.
-	 *
-	 * @throws NullPointerException if the supplied filter is null
-	 */
-	void addFilter(InputFilter filter) {
-
-		if (filter == null) {
-			throw new NullPointerException(sm.getString("iib.filter.npe"));
-		}
-
-		InputFilter[] newFilterLibrary = Arrays.copyOf(filterLibrary, filterLibrary.length + 1);
-		newFilterLibrary[filterLibrary.length] = filter;
-		filterLibrary = newFilterLibrary;
-
-		activeFilters = new InputFilter[filterLibrary.length];
-	}
-
-	void resetPluggableFilterIndex() {
-		pluggableFilterIndex = this.getFilters().length;
-	}
-
-	/**
-	 * Get filters.
-	 */
-	InputFilter[] getFilters() {
-		return filterLibrary;
-	}
-
-	/**
-	 * Add an input filter to the filter library.
-	 */
-	void addActiveFilter(InputFilter filter) {
-
-		if (lastActiveFilter == -1) {
-			filter.setBuffer(channelInputBuffer);
-		} else {
-			for (int i = 0; i <= lastActiveFilter; i++) {
-				if (activeFilters[i] == filter)
-					return;
-			}
-			filter.setBuffer(activeFilters[lastActiveFilter]);
-		}
-
-		activeFilters[++lastActiveFilter] = filter;
-
-		filter.setRequest(requestData);
-	}
-
-	/**
-	 * Set the swallow input flag.
-	 */
-	void setSwallowInput(boolean swallowInput) {
-		this.swallowInput = swallowInput;
-	}
 
 	// ---------------------------------------------------- InputBuffer Methods
 
@@ -230,11 +158,8 @@ public class Http11InputBuffer extends RequestAction {
 	// ------------------------------------------------------- Protected Methods
 
 	@Override
-	public BufWrapper doRead() throws IOException {
-		if (lastActiveFilter == -1)
-			return channelInputBuffer.doRead();
-		else
-			return activeFilters[lastActiveFilter].doRead();
+	protected InputReader getBaseInputReader() {
+		return channelInputBuffer;
 	}
 
 	protected void prepareRequestProtocol() {
@@ -289,12 +214,7 @@ public class Http11InputBuffer extends RequestAction {
 		}
 		// requestData.recycle();
 
-		for (int i = 0; i <= lastActiveFilter; i++) {
-			activeFilters[i].recycle();
-		}
-
-		lastActiveFilter = -1;
-		swallowInput = true;
+		resetFilters();
 
 	}
 
@@ -308,15 +228,7 @@ public class Http11InputBuffer extends RequestAction {
 
 		((SocketChannel) processor.getChannel()).getAppReadBuffer().nextRequest();
 
-		// Recycle filters
-		for (int i = 0; i <= lastActiveFilter; i++) {
-			activeFilters[i].recycle();
-		}
-
-		// Reset pointers
-		lastActiveFilter = -1;
-		swallowInput = true;
-
+		resetFilters();
 	}
 
 	/**
@@ -489,7 +401,7 @@ public class Http11InputBuffer extends RequestAction {
 		}
 
 		// Input filter setup
-		InputFilter[] inputFilters = this.getFilters();
+		// InputFilter[] inputFilters = this.getFilters();
 
 		// Parse transfer-encoding header
 		if (http11) {
@@ -499,7 +411,7 @@ public class Http11InputBuffer extends RequestAction {
 				if (TokenList.parseTokenList(headers.values("transfer-encoding"), encodingNames)) {
 					for (String encodingName : encodingNames) {
 						// "identity" codings are ignored
-						this.addInputFilter(inputFilters, encodingName);
+						this.addInputFilter(encodingName);// inputFilters,
 					}
 				} else {
 					// Invalid transfer encoding
@@ -527,7 +439,7 @@ public class Http11InputBuffer extends RequestAction {
 				headers.removeHeader("content-length");
 				requestData.setContentLength(-1);
 			} else {
-				this.addActiveFilter(inputFilters[Constants.IDENTITY_FILTER]);
+				this.addActiveFilter(Constants.IDENTITY_FILTER);
 				contentDelimitation = true;
 			}
 		}
@@ -539,7 +451,7 @@ public class Http11InputBuffer extends RequestAction {
 			// If there's no content length
 			// (broken HTTP/1.0 or HTTP/1.1), assume
 			// the client is not broken and didn't send a body
-			this.addActiveFilter(inputFilters[Constants.VOID_FILTER]);
+			this.addActiveFilter(Constants.VOID_FILTER);
 			contentDelimitation = true;
 		}
 
@@ -555,22 +467,27 @@ public class Http11InputBuffer extends RequestAction {
 	 * Add an input filter to the current request. If the encoding is not supported,
 	 * a 501 response will be returned to the client.
 	 */
-	private void addInputFilter(InputFilter[] inputFilters, String encodingName) {
+	private void addInputFilter(String encodingName) {// InputFilter[] inputFilters,
 
 		// Parsing trims and converts to lower case.
 
 		if (encodingName.equals("identity")) {
 			// Skip
 		} else if (encodingName.equals("chunked")) {
-			this.addActiveFilter(inputFilters[Constants.CHUNKED_FILTER]);
+			this.addActiveFilter(Constants.CHUNKED_FILTER);
 			contentDelimitation = true;
 		} else {
-			for (int i = pluggableFilterIndex; i < inputFilters.length; i++) {
-				if (inputFilters[i].getEncodingName().toString().equals(encodingName)) {
-					this.addActiveFilter(inputFilters[i]);
-					return;
-				}
+			InputFilter filter = getFilterByEncodingName(encodingName);
+			if (filter != null) {
+				this.addActiveFilter(filter.getId());
+				return;
 			}
+//			for (int i = pluggableFilterIndex; i < inputFilters.length; i++) {
+//				if (inputFilters[i].getEncodingName().toString().equals(encodingName)) {
+//					this.addActiveFilter(inputFilters[i]);
+//					return;
+//				}
+//			}
 			// Unsupported transfer encoding
 			// 501 - Unimplemented
 			requestData.getResponseData().setStatus(501);
@@ -598,11 +515,11 @@ public class Http11InputBuffer extends RequestAction {
 	void endRequest() throws IOException {
 
 		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
-
-		if (swallowInput && (lastActiveFilter != -1)) {
-			int extraBytes = (int) activeFilters[lastActiveFilter].end();
+		if (isSwallowInput() && (hasActiveFilters())) {
+			int extraBytes = (int) getLastActiveFilter().end();
 			byteBuffer.setPosition(byteBuffer.getPosition() - extraBytes);
 		}
+
 	}
 
 	@Override
@@ -620,11 +537,14 @@ public class Http11InputBuffer extends RequestAction {
 		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 
 		int available = byteBuffer.getRemaining();
-		if ((available == 0) && (lastActiveFilter >= 0)) {
-			for (int i = 0; (available == 0) && (i <= lastActiveFilter); i++) {
-				available = activeFilters[i].available();
-			}
+		if (available == 0) {
+			available = getAvailableInFilters();
 		}
+//		if ((available == 0) && (hasActiveFilters())) {
+//			for (int i = 0; (available == 0) && (i < getActiveFiltersCount()); i++) {
+//				available = getActiveFilter(i).available();
+//			}
+//		}
 		if (available > 0 || !read) {
 			return available;
 		}
@@ -664,6 +584,15 @@ public class Http11InputBuffer extends RequestAction {
 		return this.isFinished();
 	}
 
+	@Override
+	public boolean isTrailerFieldsReady() {
+		if (this.isChunking()) {
+			return this.isFinished();
+		} else {
+			return true;
+		}
+	}
+
 	/**
 	 * Has all of the request body been read? There are subtle differences between
 	 * this and available() &gt; 0 primarily because of having to handle faking
@@ -687,8 +616,8 @@ public class Http11InputBuffer extends RequestAction {
 
 		// Check the InputFilters
 
-		if (lastActiveFilter >= 0) {
-			return activeFilters[lastActiveFilter].isFinished();
+		if (hasActiveFilters()) {
+			return getLastActiveFilter().isFinished();
 		} else {
 			// No filters. Assume request is not finished. EOF will signal end of
 			// request.
@@ -699,15 +628,6 @@ public class Http11InputBuffer extends RequestAction {
 	@Override
 	public final void registerReadInterest() {
 		((SocketChannel) processor.getChannel()).registerReadInterest();
-	}
-
-	@Override
-	public boolean isTrailerFieldsReady() {
-		if (this.isChunking()) {
-			return this.isFinished();
-		} else {
-			return true;
-		}
 	}
 
 	/**
@@ -774,10 +694,11 @@ public class Http11InputBuffer extends RequestAction {
 
 	@Override
 	public final void setRequestBody(ByteChunk body) {
-		InputFilter savedBody = new SavedRequestInputFilter(body);
+		SavedRequestInputFilter savedBody = (SavedRequestInputFilter) getFilterById(Constants.SAVEDREQUEST_FILTER);// SavedRequestInputFilter(body);
+		savedBody.setInput(body);
 		// Http11InputBuffer internalBuffer = (Http11InputBuffer)
 		// request.getInputBuffer();
-		this.addActiveFilter(savedBody);
+		this.addActiveFilter(savedBody.getId());
 	}
 
 	@Override
@@ -793,15 +714,6 @@ public class Http11InputBuffer extends RequestAction {
 		} else {
 			return null;
 		}
-	}
-
-	boolean isChunking() {
-		for (int i = 0; i < lastActiveFilter; i++) {
-			if (activeFilters[i] == filterLibrary[Constants.CHUNKED_FILTER]) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	/**
@@ -868,10 +780,10 @@ public class Http11InputBuffer extends RequestAction {
 		if (sslSupport != null) {
 			// Consume and buffer the request body, so that it does not
 			// interfere with the client's handshake messages
-			InputFilter[] inputFilters = this.getFilters();
-			((BufferedInputFilter) inputFilters[Constants.BUFFERED_FILTER])
+			// InputFilter[] inputFilters = this.getFilters();
+			((BufferedInputFilter) getFilterById(Constants.BUFFERED_FILTER))
 					.setLimit(((AbstractHttp11Protocol) processor.getProtocol()).getMaxSavePostSize());
-			this.addActiveFilter(inputFilters[Constants.BUFFERED_FILTER]);
+			this.addActiveFilter(Constants.BUFFERED_FILTER);
 
 			/*
 			 * Outside the try/catch because we want I/O errors during renegotiation to be

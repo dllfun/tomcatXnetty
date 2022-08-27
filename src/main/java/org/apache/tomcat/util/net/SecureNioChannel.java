@@ -18,7 +18,6 @@ package org.apache.tomcat.util.net;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.net.InetAddress;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;

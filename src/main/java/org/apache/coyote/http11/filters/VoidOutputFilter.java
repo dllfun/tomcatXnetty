@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 
 import org.apache.coyote.Response;
 import org.apache.coyote.ResponseData;
+import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
 
@@ -39,6 +40,11 @@ public class VoidOutputFilter implements OutputFilter {
 	@Override
 	public int doWrite(ByteBuffer chunk) throws IOException {
 		return chunk.remaining();
+	}
+
+	@Override
+	public int getId() {
+		return Constants.VOID_FILTER;
 	}
 
 	@Override

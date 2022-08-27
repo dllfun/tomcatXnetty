@@ -510,7 +510,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		if (endOfStream) {
 			System.err.println("has bug, never happen");
 		}
-		handler.writeHeaders(this, 0, responseData.getMimeHeaders(), endOfStream, Constants.DEFAULT_HEADERS_FRAME_SIZE);
+		handler.writeHeaders(this, 0, responseData.getMimeHeaders(), finished, Constants.DEFAULT_HEADERS_FRAME_SIZE);
 	}
 
 	final void writeTrailers() throws IOException {

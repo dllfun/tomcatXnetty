@@ -16,7 +16,6 @@
  */
 package org.apache.coyote.http11;
 
-import org.apache.coyote.Response;
 import org.apache.coyote.ResponseData;
 
 /**
@@ -25,6 +24,8 @@ import org.apache.coyote.ResponseData;
  * @author Remy Maucherat
  */
 public interface OutputFilter extends HttpOutputBuffer {
+
+	public int getId();
 
 	/**
 	 * Some filters need additional parameters from the response. All the necessary

@@ -187,6 +187,11 @@ public class ChunkedInputFilter implements InputFilter {
 	// ---------------------------------------------------- InputFilter Methods
 
 	@Override
+	public int getId() {
+		return Constants.CHUNKED_FILTER;
+	}
+
+	@Override
 	public BufWrapper doRead() throws IOException {
 		if (endChunk) {
 			return null;

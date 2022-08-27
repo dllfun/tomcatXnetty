@@ -18,13 +18,11 @@ package org.apache.coyote.http2;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-
 import org.apache.coyote.ErrorState;
 import org.apache.coyote.ResponseAction;
 import org.apache.coyote.ResponseData;
 import org.apache.coyote.http11.HttpOutputBuffer;
-import org.apache.coyote.http11.OutputFilter;
+import org.apache.coyote.http11.filters.GzipOutputFilter;
 import org.apache.coyote.http2.Stream.StreamOutputBuffer;
 import org.apache.tomcat.util.net.SendfileState;
 
@@ -32,7 +30,7 @@ public class Http2OutputBuffer extends ResponseAction {
 
 	private Stream stream;
 	private final ResponseData responseData;
-	private HttpOutputBuffer next;
+	private StreamOutputBuffer streamOutputBuffer;
 	private StreamProcessor processor;
 	private SendfileData sendfileData = null;
 	private SendfileState sendfileState = null;
@@ -43,11 +41,17 @@ public class Http2OutputBuffer extends ResponseAction {
 		this.processor = processor;
 		this.stream = stream;
 		this.responseData = responseData;
-		this.next = streamOutputBuffer;
+		this.streamOutputBuffer = streamOutputBuffer;
+		addFilter(new GzipOutputFilter());
 	}
 
 	public SendfileState getSendfileState() {
 		return sendfileState;
+	}
+
+	@Override
+	protected HttpOutputBuffer getBaseOutputBuffer() {
+		return streamOutputBuffer;
 	}
 
 	/**
@@ -58,24 +62,24 @@ public class Http2OutputBuffer extends ResponseAction {
 	 *
 	 * @param filter The filter to add to the start of the processing chain
 	 */
-	public void addFilter(OutputFilter filter) {
-		filter.setBuffer(next);
-		next = filter;
-	}
+//	public void addFilter(OutputFilter filter) {
+//		filter.setBuffer(next);
+//		next = filter;
+//	}
 
-	@Override
-	public int doWrite(ByteBuffer chunk) throws IOException {
-		// if (!coyoteResponse.isCommitted()) {
-		// stream.getHook().actionCOMMIT();
-		// coyoteResponse.setCommitted(true);
-		// }
-		return next.doWrite(chunk);
-	}
+//	@Override
+//	public int doWrite(ByteBuffer chunk) throws IOException {
+	// if (!coyoteResponse.isCommitted()) {
+	// stream.getHook().actionCOMMIT();
+	// coyoteResponse.setCommitted(true);
+	// }
+//		return next.doWrite(chunk);
+//	}
 
-	@Override
-	public long getBytesWritten() {
-		return next.getBytesWritten();
-	}
+//	@Override
+//	public long getBytesWritten() {
+//		return next.getBytesWritten();
+//	}
 
 	@Override
 	public boolean isTrailerFieldsSupported() {
@@ -105,34 +109,6 @@ public class Http2OutputBuffer extends ResponseAction {
 		}
 	}
 
-	@Override
-	public void commit(boolean finished) {
-		if (!responseData.isCommitted()) {
-			responseData.setCommitted(true);
-			try {
-				// Validate and write response headers
-				prepareResponse(finished);
-			} catch (IOException e) {
-				processor.handleIOException(e);
-			}
-		}
-	}
-
-	@Override
-	public void close() {
-		commit(true);
-		try {
-			finishResponse();
-		} catch (IOException e) {
-			processor.handleIOException(e);
-		}
-	}
-
-	@Override
-	public void sendAck() {
-		ack();
-	}
-
 	// @Override
 	protected final void ack() {
 		if (!responseData.isCommitted() && responseData.getRequestData().hasExpectation()) {
@@ -141,17 +117,6 @@ public class Http2OutputBuffer extends ResponseAction {
 			} catch (IOException ioe) {
 				processor.setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
 			}
-		}
-	}
-
-	@Override
-	public void clientFlush() {
-		commit(false);
-		try {
-			flush();
-		} catch (IOException e) {
-			processor.handleIOException(e);
-			responseData.setErrorException(e);
 		}
 	}
 
@@ -181,13 +146,13 @@ public class Http2OutputBuffer extends ResponseAction {
 	// stream.getOutputBuffer().flush();
 	// }
 
-	// @Override
-	public void end() throws IOException {
-		next.end();
-	}
+//	@Override
+//	public void end() throws IOException {
+//		next.end();
+//	}
 
-	// @Override
-	public void flush() throws IOException {
-		next.flush();
-	}
+//	@Override
+//	public void flush() throws IOException {
+//		next.flush();
+//	}
 }

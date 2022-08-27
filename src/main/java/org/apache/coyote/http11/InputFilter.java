@@ -30,6 +30,8 @@ import org.apache.tomcat.util.buf.ByteChunk;
  */
 public interface InputFilter extends InputReader {
 
+	public int getId();
+
 	/**
 	 * Some filters need additional parameters from the request.
 	 *

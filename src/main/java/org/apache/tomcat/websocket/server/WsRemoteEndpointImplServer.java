@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.channels.CompletionHandler;
+import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -29,10 +30,12 @@ import javax.websocket.SendResult;
 
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BlockingMode;
 import org.apache.tomcat.util.res.StringManager;
+import org.apache.tomcat.util.threads.TaskQueue;
+import org.apache.tomcat.util.threads.TaskThreadFactory;
+import org.apache.tomcat.util.threads.ThreadPoolExecutor;
 import org.apache.tomcat.websocket.Transformation;
 import org.apache.tomcat.websocket.WsRemoteEndpointImplBase;
 
@@ -45,16 +48,20 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 	private static final StringManager sm = StringManager.getManager(WsRemoteEndpointImplServer.class);
 	private final Log log = LogFactory.getLog(WsRemoteEndpointImplServer.class); // must not be static
 
-	private final SocketChannel socketWrapper;
+	private final SocketChannel socketChannel;
 	private final WsWriteTimeout wsWriteTimeout;
 	private volatile SendHandler handler = null;
 	private volatile ByteBuffer[] buffers = null;
+	private Executor executor = null;
 
 	private volatile long timeoutExpiry = -1;
 
-	public WsRemoteEndpointImplServer(SocketChannel socketWrapper, WsServerContainer serverContainer) {
-		this.socketWrapper = socketWrapper;
+	public WsRemoteEndpointImplServer(SocketChannel socketChannel, WsServerContainer serverContainer) {
+		this.socketChannel = socketChannel;
 		this.wsWriteTimeout = serverContainer.getTimeout();
+		TaskQueue taskqueue = new TaskQueue();
+		TaskThreadFactory tf = new TaskThreadFactory("WsRemoteEndpointImplServer-exec", true, Thread.NORM_PRIORITY);
+		this.executor = new ThreadPoolExecutor(2, 10, 60, TimeUnit.SECONDS, taskqueue, tf);
 	}
 
 	@Override
@@ -64,7 +71,7 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 
 	@Override
 	protected void doWrite(SendHandler handler, long blockingWriteTimeoutExpiry, ByteBuffer... buffers) {
-		if (socketWrapper.hasAsyncIO()) {
+		if (socketChannel.hasAsyncIO()) {
 			final boolean block = (blockingWriteTimeoutExpiry != -1);
 			long timeout = -1;
 			if (block) {
@@ -83,7 +90,7 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 					wsWriteTimeout.register(this);
 				}
 			}
-			socketWrapper.write(block ? BlockingMode.BLOCK : BlockingMode.SEMI_BLOCK, timeout, TimeUnit.MILLISECONDS,
+			socketChannel.write(block ? BlockingMode.BLOCK : BlockingMode.SEMI_BLOCK, timeout, TimeUnit.MILLISECONDS,
 					null, SocketChannel.COMPLETE_WRITE_WITH_COMPLETION, new CompletionHandler<Long, Void>() {
 						@Override
 						public void completed(Long result, Void attachment) {
@@ -129,8 +136,8 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 							handler.onResult(sr);
 							return;
 						}
-						socketWrapper.setWriteTimeout(timeout);
-						socketWrapper.write(true, buffer);
+						socketChannel.setWriteTimeout(timeout);
+						socketChannel.write(true, buffer);
 					}
 					long timeout = blockingWriteTimeoutExpiry - System.currentTimeMillis();
 					if (timeout <= 0) {
@@ -138,8 +145,8 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 						handler.onResult(sr);
 						return;
 					}
-					socketWrapper.setWriteTimeout(timeout);
-					socketWrapper.flush(true);
+					socketChannel.setWriteTimeout(timeout);
+					socketChannel.flush(true);
 					handler.onResult(SENDRESULT_OK);
 				} catch (IOException e) {
 					SendResult sr = new SendResult(e);
@@ -159,20 +166,20 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 		}
 		boolean complete = false;
 		try {
-			socketWrapper.flush(false);
+			socketChannel.flush(false);
 			// If this is false there will be a call back when it is true
-			while (socketWrapper.isReadyForWrite()) {
+			while (socketChannel.isReadyForWrite()) {
 				complete = true;
 				for (ByteBuffer buffer : buffers) {
 					if (buffer.hasRemaining()) {
 						complete = false;
-						socketWrapper.write(false, buffer);
+						socketChannel.write(false, buffer);
 						break;
 					}
 				}
 				if (complete) {
-					socketWrapper.flush(false);
-					complete = socketWrapper.isReadyForWrite();
+					socketChannel.flush(false);
+					complete = socketChannel.isReadyForWrite();
 					if (complete) {
 						wsWriteTimeout.unregister(this);
 						clearHandler(null, useDispatch);
@@ -206,13 +213,13 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 			// triggered the write
 			clearHandler(new EOFException(), true);
 		}
-		try {
-			socketWrapper.close();
-		} catch (Exception e) {
-			if (log.isInfoEnabled()) {
-				log.info(sm.getString("wsRemoteEndpointServer.closeFailed"), e);
-			}
-		}
+//		try {
+		// socketChannel.close();//// do not close here,processor will close socket
+//		} catch (Exception e) {
+//			if (log.isInfoEnabled()) {
+//				log.info(sm.getString("wsRemoteEndpointServer.closeFailed"), e);
+//			}
+//		}
 		wsWriteTimeout.unregister(this);
 	}
 
@@ -260,10 +267,8 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 			if (useDispatch) {
 				OnResultRunnable r = new OnResultRunnable(sh, t);
 				try {
-
 					// TODO sss
-					// socketWrapper.execute(r);
-					r.run();
+					this.executor.execute(r);
 				} catch (RejectedExecutionException ree) {
 					// Can't use the executor so call the runnable directly.
 					// This may not be strictly specification compliant in all

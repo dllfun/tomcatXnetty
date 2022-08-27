@@ -26,7 +26,6 @@ import org.apache.coyote.UpgradeToken;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 

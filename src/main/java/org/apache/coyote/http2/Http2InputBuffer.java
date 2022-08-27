@@ -4,17 +4,17 @@ import java.io.IOException;
 
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.ErrorState;
+import org.apache.coyote.InputReader;
 import org.apache.coyote.RequestAction;
 import org.apache.coyote.RequestData;
 import org.apache.coyote.http2.Stream.StreamInputBuffer;
 import org.apache.tomcat.util.buf.ByteChunk;
-import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 
 public class Http2InputBuffer extends RequestAction {
 
 	private AbstractProcessor processor;
 	private Stream stream;
-	private StreamInputBuffer next;
+	private StreamInputBuffer streamInputBuffer;
 	private RequestData requestData;
 
 	public Http2InputBuffer(AbstractProcessor processor, Stream stream, RequestData requestData,
@@ -23,27 +23,42 @@ public class Http2InputBuffer extends RequestAction {
 		this.processor = processor;
 		this.stream = stream;
 		this.requestData = requestData;
-		this.next = streamInputBuffer;
+		this.streamInputBuffer = streamInputBuffer;
 	}
 
 	@Override
-	public BufWrapper doRead() throws IOException {
-		return next.doRead();
+	protected InputReader getBaseInputReader() {
+		return streamInputBuffer;
 	}
+
+//	@Override
+//	public BufWrapper doRead() throws IOException {
+//		return streamInputBuffer.doRead();
+//	}
 
 	@Override
 	public int getAvailable(Object param) {
-		return next.getAvailable(param);
+		int available = getAvailableInFilters();
+		if (available > 0)
+			return available;
+		return streamInputBuffer.getAvailable(param);
 	}
 
 	@Override
 	public boolean isReadyForRead() {
-		return next.isReadyForRead();
+		if (getAvailable(true) > 0) {
+			return true;
+		}
+		return streamInputBuffer.isReadyForRead();
 	}
 
 	@Override
 	public boolean isRequestBodyFullyRead() {
-		return next.isRequestBodyFullyRead();
+		if (hasActiveFilters()) {
+			return getLastActiveFilter().isFinished();
+		} else {
+			return streamInputBuffer.isRequestBodyFullyRead();
+		}
 	}
 
 	@Override
@@ -60,7 +75,7 @@ public class Http2InputBuffer extends RequestAction {
 
 	@Override
 	public final void setRequestBody(ByteChunk body) {
-		next.insertReplayedBody(body);// stream.getInputBuffer()
+		streamInputBuffer.insertReplayedBody(body);// stream.getInputBuffer()
 		try {
 			stream.receivedEndOfStream();// stream
 		} catch (ConnectionException e) {
@@ -127,7 +142,7 @@ public class Http2InputBuffer extends RequestAction {
 
 	@Override
 	public void actionREQ_SSL_ATTRIBUTE() {
-		next.populateSslRequestAttributes();
+		streamInputBuffer.populateSslRequestAttributes();
 	}
 
 	@Override

@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 
 import org.apache.coyote.Response;
 import org.apache.coyote.ResponseData;
+import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
 
@@ -49,6 +50,11 @@ public class IdentityOutputFilter implements OutputFilter {
 	protected HttpOutputBuffer buffer;
 
 	// --------------------------------------------------- OutputBuffer Methods
+
+	@Override
+	public int getId() {
+		return Constants.IDENTITY_FILTER;
+	}
 
 	@Override
 	public int doWrite(ByteBuffer chunk) throws IOException {

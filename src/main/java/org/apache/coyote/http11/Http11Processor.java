@@ -33,14 +33,6 @@ import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
 import org.apache.coyote.UpgradeProtocol;
 import org.apache.coyote.UpgradeToken;
-import org.apache.coyote.http11.filters.BufferedInputFilter;
-import org.apache.coyote.http11.filters.ChunkedInputFilter;
-import org.apache.coyote.http11.filters.ChunkedOutputFilter;
-import org.apache.coyote.http11.filters.GzipOutputFilter;
-import org.apache.coyote.http11.filters.IdentityInputFilter;
-import org.apache.coyote.http11.filters.IdentityOutputFilter;
-import org.apache.coyote.http11.filters.VoidInputFilter;
-import org.apache.coyote.http11.filters.VoidOutputFilter;
 import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -122,28 +114,6 @@ public class Http11Processor extends AbstractProcessor {
 		outputBuffer.setInputBuffer(inputBuffer);
 		// responseData.setOutputBuffer(outputBuffer);
 
-		// Create and add the identity filters.
-		inputBuffer.addFilter(new IdentityInputFilter(protocol.getMaxSwallowSize()));
-		outputBuffer.addFilter(new IdentityOutputFilter());
-
-		// Create and add the chunked filters.
-		inputBuffer.addFilter(
-				new ChunkedInputFilter(protocol.getMaxTrailerSize(), protocol.getAllowedTrailerHeadersInternal(),
-						protocol.getMaxExtensionSize(), protocol.getMaxSwallowSize()));
-		outputBuffer.addFilter(new ChunkedOutputFilter());
-
-		// Create and add the void filters.
-		inputBuffer.addFilter(new VoidInputFilter());
-		outputBuffer.addFilter(new VoidOutputFilter());
-
-		// Create and add buffered input filter
-		inputBuffer.addFilter(new BufferedInputFilter());
-
-		// Create and add the gzip filters.
-		// inputBuffer.addFilter(new GzipInputFilter());
-		outputBuffer.addFilter(new GzipOutputFilter());
-
-		inputBuffer.resetPluggableFilterIndex();
 		// inputHandler = inputBuffer;
 	}
 
@@ -699,7 +669,7 @@ public class Http11Processor extends AbstractProcessor {
 	protected final void doHttpUpgrade(UpgradeToken upgradeToken) {
 		this.upgradeToken = upgradeToken;
 		// Stop further HTTP output
-		outputBuffer.responseFinished = true;
+		outputBuffer.setSwallowResponse();
 	}
 
 	@Override
