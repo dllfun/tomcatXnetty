@@ -972,6 +972,9 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		if (finished) {
 			header[4] = FLAG_END_OF_STREAM;
 			stream.sentEndOfStream();
+			if (!stream.isActive()) {
+				setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
+			}
 		}
 		if (writeable) {
 			ByteUtil.set31Bits(header, 5, stream.getIdAsInt());
@@ -986,11 +989,6 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 				} catch (IOException ioe) {
 					handleAppInitiatedIOException(ioe);
 				}
-			}
-		}
-		if (finished) {
-			if (!stream.isActive()) {
-				setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
 			}
 		}
 	}
@@ -1250,6 +1248,7 @@ class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 			for (Entry<Integer, Stream> entry : zero.getStreams().entrySet()) {
 				if (entry.getKey().intValue() > maxActiveRemoteStreamId
 						&& entry.getKey().intValue() < newMaxActiveRemoteStreamId) {
+					System.err.println("has bug, never happen");
 					entry.getValue().closeIfIdle();
 				}
 			}

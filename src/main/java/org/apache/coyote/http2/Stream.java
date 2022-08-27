@@ -231,6 +231,8 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 	}
 
 	final void receiveReset(long errorCode) {
+		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")"
+				+ " receiveReset errorCode: " + errorCode + " uri:" + requestData.requestURI().toString());
 		if (log.isDebugEnabled()) {
 			log.debug(
 					sm.getString("stream.reset.receive", getConnectionId(), getIdentifier(), Long.toString(errorCode)));
@@ -500,8 +502,14 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		return headerState == HEADER_STATE_REGULAR || headerState == HEADER_STATE_PSEUDO;
 	}
 
-	final void writeHeaders() throws IOException {
+	final void writeHeaders(boolean finished) throws IOException {
+		if (finished) {
+			System.err.println("writeHeaders and finished");
+		}
 		boolean endOfStream = streamOutputBuffer.hasNoBody() && responseData.getTrailerFields() == null;
+		if (endOfStream) {
+			System.err.println("has bug, never happen");
+		}
 		handler.writeHeaders(this, 0, responseData.getMimeHeaders(), endOfStream, Constants.DEFAULT_HEADERS_FRAME_SIZE);
 	}
 
@@ -598,6 +606,8 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 	}
 
 	final void receivedEndOfStream() throws ConnectionException {
+//		System.out.println(
+//				"conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " receivedEndOfStream");
 		if (isContentLengthInconsistent()) {
 			throw new ConnectionException(
 					sm.getString("stream.header.contentLength", getConnectionId(), getIdentifier(),
@@ -904,6 +914,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 				if (closed && !endOfStreamSent) {
 					// Handling this special case here is simpler than trying
 					// to modify the following code to handle it.
+					System.err.println("write empty body for finish");
 					handler.writeBody(Stream.this, buffer, 0, responseData.getTrailerFields() == null);
 				}
 				// Buffer is empty. Nothing to do.

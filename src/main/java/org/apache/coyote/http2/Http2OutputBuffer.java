@@ -88,14 +88,13 @@ public class Http2OutputBuffer extends ResponseAction {
 	}
 
 	@Override
-	public final void prepareResponse() throws IOException {
-		responseData.setCommitted(true);
+	public final void prepareResponse(boolean finished) throws IOException {
 		if (processor.getHandler().hasAsyncIO() && processor.getHandler().getProtocol().getUseSendfile()) {
 			prepareSendfile();
 		}
 		StreamProcessor.prepareHeaders(responseData.getRequestData(), responseData, sendfileData == null,
 				processor.getHandler().getProtocol(), stream);
-		stream.writeHeaders();
+		stream.writeHeaders(finished);
 	}
 
 	@Override
@@ -107,11 +106,12 @@ public class Http2OutputBuffer extends ResponseAction {
 	}
 
 	@Override
-	public void commit() {
+	public void commit(boolean finished) {
 		if (!responseData.isCommitted()) {
+			responseData.setCommitted(true);
 			try {
 				// Validate and write response headers
-				prepareResponse();
+				prepareResponse(finished);
 			} catch (IOException e) {
 				processor.handleIOException(e);
 			}
@@ -120,7 +120,7 @@ public class Http2OutputBuffer extends ResponseAction {
 
 	@Override
 	public void close() {
-		commit();
+		commit(true);
 		try {
 			finishResponse();
 		} catch (IOException e) {
@@ -146,7 +146,7 @@ public class Http2OutputBuffer extends ResponseAction {
 
 	@Override
 	public void clientFlush() {
-		commit();
+		commit(false);
 		try {
 			flush();
 		} catch (IOException e) {

@@ -651,16 +651,17 @@ public class Http11Processor extends AbstractProcessor {
 			}
 		}
 		if (getErrorState().isIoAllowed()) {
-			try {
-				outputBuffer.commit();
-				outputBuffer.finishResponse();
-			} catch (IOException e) {
-				setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
-			} catch (Throwable t) {
-				ExceptionUtils.handleThrowable(t);
-				setErrorState(ErrorState.CLOSE_NOW, t);
-				log.error(sm.getString("http11processor.response.finish"), t);
-			}
+//			try {
+			outputBuffer.close();
+			// outputBuffer.commit();
+			// outputBuffer.finishResponse();
+//			} catch (IOException e) {
+//				setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
+//			} catch (Throwable t) {
+//				ExceptionUtils.handleThrowable(t);
+//				setErrorState(ErrorState.CLOSE_NOW, t);
+//				log.error(sm.getString("http11processor.response.finish"), t);
+//			}
 		}
 	}
 

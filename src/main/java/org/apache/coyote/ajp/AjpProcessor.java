@@ -459,15 +459,16 @@ public class AjpProcessor extends AbstractProcessor {
 
 			// Finish the response if not done yet
 			if (!responseFinished && getErrorState().isIoAllowed()) {
-				try {
-					outputBuffer.commit();
-					outputBuffer.finishResponse();
-				} catch (IOException ioe) {
-					setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
-				} catch (Throwable t) {
-					ExceptionUtils.handleThrowable(t);
-					setErrorState(ErrorState.CLOSE_NOW, t);
-				}
+//				try {
+				outputBuffer.close();
+				// outputBuffer.commit(true);
+				// outputBuffer.finishResponse();
+//				} catch (IOException ioe) {
+//					setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
+//				} catch (Throwable t) {
+//					ExceptionUtils.handleThrowable(t);
+//					setErrorState(ErrorState.CLOSE_NOW, t);
+//				}
 			}
 
 			// If there was an error, make sure the request is counted as
@@ -1274,14 +1275,14 @@ public class AjpProcessor extends AbstractProcessor {
 		@Override
 		public int doWrite(ByteBuffer chunk) throws IOException {
 
-			if (!responseData.isCommitted()) {
-				// Validate and write response headers
-				try {
-					prepareResponse();
-				} catch (IOException e) {
-					setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
-				}
-			}
+//			if (!responseData.isCommitted()) {
+			// Validate and write response headers
+//				try {
+//					prepareResponse(false);
+//				} catch (IOException e) {
+//					setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
+//				}
+//			}
 
 			int len = 0;
 			if (!swallowResponse) {
@@ -1324,9 +1325,7 @@ public class AjpProcessor extends AbstractProcessor {
 		 * as setup the response filters.
 		 */
 		@Override
-		public final void prepareResponse() throws IOException {
-
-			responseData.setCommitted(true);
+		public final void prepareResponse(boolean finished) throws IOException {
 
 			tmpMB.recycle();
 			responseMsgPos = -1;
@@ -1417,11 +1416,12 @@ public class AjpProcessor extends AbstractProcessor {
 		}
 
 		@Override
-		public void commit() {
+		public void commit(boolean finished) {
 			if (!responseData.isCommitted()) {
+				responseData.setCommitted(true);
 				try {
 					// Validate and write response headers
-					prepareResponse();
+					prepareResponse(finished);
 				} catch (IOException e) {
 					handleIOException(e);
 				}
@@ -1430,7 +1430,7 @@ public class AjpProcessor extends AbstractProcessor {
 
 		@Override
 		public void close() {
-			commit();
+			commit(true);
 			try {
 				finishResponse();
 			} catch (IOException e) {
@@ -1450,7 +1450,7 @@ public class AjpProcessor extends AbstractProcessor {
 
 		@Override
 		public void clientFlush() {
-			commit();
+			commit(false);
 			try {
 				flush();
 			} catch (IOException e) {

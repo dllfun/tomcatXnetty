@@ -72,6 +72,7 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 		@Override
 		public void failed(Throwable t, Void attachment) {
 			if (t instanceof IOException) {
+				t.printStackTrace();
 				applicationIOE = (IOException) t;
 			}
 			error = t;
@@ -199,6 +200,9 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 		if (finished) {
 			header[4] = FLAG_END_OF_STREAM;
 			stream.sentEndOfStream();
+			if (!stream.isActive()) {
+				setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
+			}
 		}
 		if (writeable) {
 			ByteUtil.set31Bits(header, 5, stream.getIdAsInt());
@@ -208,11 +212,6 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 					SocketChannel.COMPLETE_WRITE, applicationErrorCompletion, ByteBuffer.wrap(header), data);
 			data.limit(orgLimit);
 			handleAsyncException();
-		}
-		if (finished) {
-			if (!stream.isActive()) {
-				setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
-			}
 		}
 	}
 

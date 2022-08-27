@@ -231,9 +231,9 @@ public class OutputBuffer extends Writer {
 		}
 
 		if (coyoteResponse.getStatus() == HttpServletResponse.SC_SWITCHING_PROTOCOLS) {
-			doFlush(true);
+			doFlush(true, true);
 		} else {
-			doFlush(false);
+			doFlush(true, false);
 		}
 		closed = true;
 
@@ -253,7 +253,7 @@ public class OutputBuffer extends Writer {
 	 */
 	@Override
 	public void flush() throws IOException {
-		doFlush(true);
+		doFlush(false, true);
 	}
 
 	/**
@@ -263,7 +263,7 @@ public class OutputBuffer extends Writer {
 	 *                  flush
 	 * @throws IOException An underlying IOException occurred
 	 */
-	protected void doFlush(boolean realFlush) throws IOException {
+	protected void doFlush(boolean close, boolean realFlush) throws IOException {
 
 		if (suspended) {
 			return;
@@ -272,7 +272,7 @@ public class OutputBuffer extends Writer {
 		try {
 			doFlush = true;
 			if (initial) {
-				coyoteResponse.sendHeaders();
+				coyoteResponse.actionCOMMIT(close && cb.remaining() == 0 && bb.remaining() == 0);
 				initial = false;
 			}
 			if (cb.remaining() > 0) {

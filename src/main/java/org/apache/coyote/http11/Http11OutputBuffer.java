@@ -245,7 +245,7 @@ public class Http11OutputBuffer extends ResponseAction {
 	 * as setup the response filters.
 	 */
 	@Override
-	public final void prepareResponse() throws IOException {
+	public final void prepareResponse(boolean finished) throws IOException {
 
 		AbstractHttp11Protocol protocol = (AbstractHttp11Protocol) processor.getProtocol();
 
@@ -457,11 +457,12 @@ public class Http11OutputBuffer extends ResponseAction {
 	}
 
 	@Override
-	public void commit() {
+	public void commit(boolean finished) {
 		if (!responseData.isCommitted()) {
+			responseData.setCommitted(true);
 			try {
 				// Validate and write response headers
-				prepareResponse();
+				prepareResponse(finished);
 			} catch (IOException e) {
 				processor.handleIOException(e);
 			}
@@ -470,7 +471,7 @@ public class Http11OutputBuffer extends ResponseAction {
 
 	@Override
 	public void close() {
-		commit();
+		commit(true);
 		try {
 			finishResponse();
 		} catch (IOException e) {
@@ -500,7 +501,7 @@ public class Http11OutputBuffer extends ResponseAction {
 
 	@Override
 	public void clientFlush() {
-		commit();
+		commit(true);
 		try {
 			flush();
 		} catch (IOException e) {
@@ -650,7 +651,6 @@ public class Http11OutputBuffer extends ResponseAction {
 	 * @throws IOException an underlying I/O error occurred
 	 */
 	protected void localCommit() throws IOException {
-		responseData.setCommitted(true);
 		checkHeadBufferIfNull();
 		if (headerBuffer.getPosition() > 0) {
 			// Sending the response header buffer

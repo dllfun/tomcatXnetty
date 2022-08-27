@@ -14,7 +14,7 @@ public abstract class ResponseAction implements OutputWriter {
 
 	public abstract boolean isReadyForWrite();
 
-	public abstract void commit();
+	public abstract void commit(boolean finished);
 
 	public abstract void close();
 
@@ -22,7 +22,7 @@ public abstract class ResponseAction implements OutputWriter {
 
 	public abstract void clientFlush();
 
-	public abstract void prepareResponse() throws IOException;
+	public abstract void prepareResponse(boolean finished) throws IOException;
 
 	public abstract void finishResponse() throws IOException;
 

@@ -110,8 +110,8 @@ public final class Response {
 	// }
 	// }
 
-	public void actionCOMMIT() {
-		responseAction.commit();
+	public void actionCOMMIT(boolean finished) {
+		responseAction.commit(false);
 	}
 
 	public void actionACK() {
@@ -175,9 +175,9 @@ public final class Response {
 		return this.responseData.isCommitted();
 	}
 
-	public void setCommitted(boolean v) {
-		this.responseData.setCommitted(v);
-	}
+//	public void setCommitted(boolean v) {
+//		this.responseData.setCommitted(v);
+//	}
 
 	/**
 	 * Return the time the response was committed (based on
@@ -291,10 +291,10 @@ public final class Response {
 	 * implementation needs to notify ContextManager, to allow interceptors to fix
 	 * headers.
 	 */
-	public void sendHeaders() {
-		actionCOMMIT();
-		setCommitted(true);
-	}
+//	public void sendHeaders(boolean finished) {
+//		actionCOMMIT(finished);
+//		setCommitted(true);
+//	}
 
 	// -------------------- I18N --------------------
 
@@ -390,7 +390,7 @@ public final class Response {
 			// Send the connector a request for commit. The connector should
 			// then validate the headers, send them (using sendHeaders) and
 			// set the filters accordingly.
-			responseAction.commit();
+			responseAction.commit(false);
 		}
 		int len = chunk.remaining();
 		responseAction.doWrite(chunk);
