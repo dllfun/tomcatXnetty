@@ -92,7 +92,7 @@ public interface SocketChannel extends Channel {
 
 	// public void execute(Runnable runnable);
 
-	//public void setUpgraded(boolean upgraded);
+	// public void setUpgraded(boolean upgraded);
 
 	public String getNegotiatedProtocol();
 
@@ -118,17 +118,13 @@ public interface SocketChannel extends Channel {
 
 	public int getLocalPort();
 
-	public void registerReadInterest();
-
-	public void registerWriteInterest();
+	public boolean isReadyForRead() throws IOException;
 
 	public boolean hasDataToRead();
 
-	public boolean hasDataToWrite();
+	public void registerReadInterest();
 
-	public boolean isReadyForWrite();
-
-	public boolean canWrite();
+	public void unRead(ByteBuffer returnedInput);
 
 	public int read(boolean block, byte[] b, int off, int len) throws IOException;
 
@@ -136,9 +132,13 @@ public interface SocketChannel extends Channel {
 
 	public int read(boolean block, BufWrapper to) throws IOException;
 
-	public boolean isReadyForRead() throws IOException;
+	public boolean isReadyForWrite();
 
-	public void unRead(ByteBuffer returnedInput);
+	public boolean canWrite();
+
+	public boolean hasDataToWrite();
+
+	public void registerWriteInterest();
 
 	public void write(boolean block, byte[] buf, int off, int len) throws IOException;
 

@@ -109,6 +109,16 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 		filter.setResponse(processor.responseData);
 	}
 
+	public OutputFilter getActiveFilter(int id) {
+		OutputFilter filter = null;
+		for (int i = 0; i <= lastActiveFilter; i++) {
+			if (activeFilters[i].getId() == id) {
+				filter = activeFilters[i];
+			}
+		}
+		return filter;
+	}
+
 	@Override
 	public int doWrite(ByteBuffer chunk) throws IOException {
 
@@ -163,6 +173,15 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 			getBaseOutputBuffer().flush();
 		} else {
 			activeFilters[lastActiveFilter].flush();
+		}
+	}
+
+	@Override
+	public boolean flush(boolean block) throws IOException {
+		if (lastActiveFilter == -1) {
+			return getBaseOutputBuffer().flush(block);
+		} else {
+			return activeFilters[lastActiveFilter].flush(block);
 		}
 	}
 

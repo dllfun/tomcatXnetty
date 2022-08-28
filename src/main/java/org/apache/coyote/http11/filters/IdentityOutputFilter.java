@@ -19,7 +19,6 @@ package org.apache.coyote.http11.filters;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.apache.coyote.Response;
 import org.apache.coyote.ResponseData;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
@@ -115,6 +114,11 @@ public class IdentityOutputFilter implements OutputFilter {
 	public void flush() throws IOException {
 		// No data buffered in this filter. Flush next buffer.
 		buffer.flush();
+	}
+
+	@Override
+	public boolean flush(boolean block) throws IOException {
+		return buffer.flush(block);
 	}
 
 	@Override

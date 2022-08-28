@@ -37,4 +37,13 @@ public interface HttpOutputBuffer extends OutputWriter {
 	 * @throws IOException If an I/O error occurs while flushing
 	 */
 	public void flush() throws IOException;
+
+	/**
+	 * support for non-block
+	 * 
+	 * @param block
+	 * @return
+	 * @throws IOException
+	 */
+	public boolean flush(boolean block) throws IOException;
 }

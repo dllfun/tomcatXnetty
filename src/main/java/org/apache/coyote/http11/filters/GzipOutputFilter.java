@@ -106,6 +106,16 @@ public class GzipOutputFilter implements OutputFilter {
 	}
 
 	@Override
+	public boolean flush(boolean block) throws IOException {
+		if (block) {
+			flush();
+			return false;
+		} else {
+			return buffer.flush(block);
+		}
+	}
+
+	@Override
 	public void setResponse(ResponseData response) {
 		// NOOP: No need for parameters from response in this filter
 	}

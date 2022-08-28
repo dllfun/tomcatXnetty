@@ -119,7 +119,7 @@ public abstract class RequestAction implements InputReader {
 		return null;
 	}
 
-	protected final void resetPluggableFilterIndex() {
+	protected final void markPluggableFilterIndex() {
 		pluggableFilterIndex = this.getFilters().length;
 	}
 

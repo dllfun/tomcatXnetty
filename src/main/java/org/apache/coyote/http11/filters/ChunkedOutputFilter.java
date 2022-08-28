@@ -153,6 +153,11 @@ public class ChunkedOutputFilter implements OutputFilter {
 	}
 
 	@Override
+	public boolean flush(boolean block) throws IOException {
+		return buffer.flush(block);
+	}
+
+	@Override
 	public void end() throws IOException {
 
 		Supplier<Map<String, String>> trailerFieldsSupplier = response.getTrailerFields();

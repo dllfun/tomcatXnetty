@@ -146,6 +146,12 @@ class StreamProcessor extends AbstractProcessor {
 		// Add the pseudo header for status
 		headers.addValue(":status").setString(Integer.toString(statusCode));
 
+		if (stream != null && stream.getCurrentProcessor() != null) {
+			((StreamProcessor) stream.getCurrentProcessor())
+					.addOutputFilter(org.apache.coyote.http11.Constants.FLOWCTRL_FILTER);
+			((StreamProcessor) stream.getCurrentProcessor())
+					.addOutputFilter(org.apache.coyote.http11.Constants.BUFFEREDOUTPUT_FILTER);
+		}
 		// Compression can't be used with sendfile
 		// Need to check for compression (and set headers appropriately) before
 		// adding headers below
@@ -170,9 +176,13 @@ class StreamProcessor extends AbstractProcessor {
 			}
 			// Add a content-length header if a content length has been set unless
 			// the application has already added one
-			long contentLength = responseData.getContentLengthLong();
-			if (contentLength != -1 && headers.getValue("content-length") == null) {
-				headers.addValue("content-length").setLong(contentLength);
+			if (headers.getValue("content-length") == null) {
+				long contentLength = responseData.getContentLengthLong();
+				if (contentLength != -1) {
+					headers.addValue("content-length").setLong(contentLength);
+				}
+			} else {
+				requestData.setContentLength(headers.getValue("content-length").getLong());
 			}
 		} else {
 			if (statusCode == 205) {
@@ -303,7 +313,8 @@ class StreamProcessor extends AbstractProcessor {
 			log.debug(sm.getString("streamProcessor.flushBufferedWrite.entry", stream.getConnectionId(),
 					stream.getIdentifier()));
 		}
-		if (stream.flush(false)) {
+		// TODO check
+		if (http2OutputBuffer.flush(false)) {//
 			// The buffer wasn't fully flushed so re-register the
 			// stream for write. Note this does not go via the
 			// Response since the write registration state at

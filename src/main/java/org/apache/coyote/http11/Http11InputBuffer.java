@@ -19,7 +19,6 @@ package org.apache.coyote.http11;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -138,7 +137,7 @@ public class Http11InputBuffer extends RequestAction {
 		// Create and add buffered input filter
 		addFilter(new BufferedInputFilter());
 		addFilter(new SavedRequestInputFilter(null));
-		resetPluggableFilterIndex();
+		markPluggableFilterIndex();
 	}
 
 	// ------------------------------------------------------------- Properties
@@ -206,39 +205,13 @@ public class Http11InputBuffer extends RequestAction {
 	}
 
 	/**
-	 * Recycle the input buffer. This should be called when closing the connection.
-	 */
-	void recycle() {
-		if (((SocketChannel) processor.getChannel()) != null) {
-			((SocketChannel) processor.getChannel()).getAppReadBuffer().reset();
-		}
-		// requestData.recycle();
-
-		resetFilters();
-
-	}
-
-	/**
-	 * End processing of current HTTP request. Note: All bytes of the current
-	 * request should have been already consumed. This method only resets all the
-	 * pointers so that we are ready to parse the next HTTP request.
-	 */
-	void nextRequest() {
-		// requestData.recycle();
-
-		((SocketChannel) processor.getChannel()).getAppReadBuffer().nextRequest();
-
-		resetFilters();
-	}
-
-	/**
 	 * After reading the request headers, we have to setup the request filters.
 	 */
 	protected void prepareRequest() throws IOException {
 
 		contentDelimitation = false;
 
-		AbstractHttp11Protocol protocol = (AbstractHttp11Protocol) processor.getProtocol();
+		AbstractHttp11Protocol<?> protocol = (AbstractHttp11Protocol<?>) processor.getProtocol();
 
 		if (protocol.isSSLEnabled()) {
 			requestData.scheme().setString("https");
@@ -782,7 +755,7 @@ public class Http11InputBuffer extends RequestAction {
 			// interfere with the client's handshake messages
 			// InputFilter[] inputFilters = this.getFilters();
 			((BufferedInputFilter) getFilterById(Constants.BUFFERED_FILTER))
-					.setLimit(((AbstractHttp11Protocol) processor.getProtocol()).getMaxSavePostSize());
+					.setLimit(((AbstractHttp11Protocol<?>) processor.getProtocol()).getMaxSavePostSize());
 			this.addActiveFilter(Constants.BUFFERED_FILTER);
 
 			/*
@@ -808,6 +781,32 @@ public class Http11InputBuffer extends RequestAction {
 	void init(SocketChannel channel) {
 
 		// this.channel = channel;
+
+	}
+
+	/**
+	 * End processing of current HTTP request. Note: All bytes of the current
+	 * request should have been already consumed. This method only resets all the
+	 * pointers so that we are ready to parse the next HTTP request.
+	 */
+	void nextRequest() {
+		// requestData.recycle();
+
+		((SocketChannel) processor.getChannel()).getAppReadBuffer().nextRequest();
+
+		resetFilters();
+	}
+
+	/**
+	 * Recycle the input buffer. This should be called when closing the connection.
+	 */
+	void recycle() {
+		if (((SocketChannel) processor.getChannel()) != null) {
+			((SocketChannel) processor.getChannel()).getAppReadBuffer().reset();
+		}
+		// requestData.recycle();
+
+		resetFilters();
 
 	}
 

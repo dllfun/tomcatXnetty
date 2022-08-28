@@ -756,5 +756,11 @@ public class Http11OutputBuffer extends ResponseAction {
 		public void flush() throws IOException {
 			((SocketChannel) processor.getChannel()).flush(isBlocking());
 		}
+
+		@Override
+		public boolean flush(boolean block) throws IOException {
+			return ((SocketChannel) processor.getChannel()).flush(isBlocking());
+		}
+
 	}
 }

@@ -70,6 +70,11 @@ public class VoidOutputFilter implements OutputFilter {
 	}
 
 	@Override
+	public boolean flush(boolean block) throws IOException {
+		return this.buffer.flush(block);
+	}
+
+	@Override
 	public void recycle() {
 		buffer = null;
 	}

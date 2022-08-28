@@ -641,9 +641,9 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		return streamOutputBuffer.isReady();
 	}
 
-	public final boolean flush(boolean block) throws IOException {
-		return streamOutputBuffer.flush(block);
-	}
+//	public final boolean flush(boolean block) throws IOException {
+//		return streamOutputBuffer.flush(block);
+//	}
 
 	final StreamInputBuffer getInputBuffer() {
 		return inputBuffer;
@@ -820,7 +820,97 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		}
 	}
 
-	class StreamOutputBuffer implements HttpOutputBuffer, WriteBuffer.Sink {
+	class StreamOutputBuffer implements HttpOutputBuffer {
+
+		// Flag that indicates that data was left over on a previous
+		// non-blocking write. Once set, this flag stays set until all the data
+		// has been written.
+		private volatile long written = 0;
+		private volatile boolean closed = false;
+		private volatile StreamException reset = null;
+		private volatile boolean endOfStreamSent = false;
+
+		private StreamOutputBuffer() {
+
+		}
+
+		/*
+		 * The write methods are synchronized to ensure that only one thread at a time
+		 * is able to access the buffer. Without this protection, a client that
+		 * performed concurrent writes could corrupt the buffer.
+		 */
+
+		@Override
+		public final synchronized int doWrite(ByteBuffer chunk) throws IOException {
+			if (closed) {
+				throw new IllegalStateException(sm.getString("stream.closed", getConnectionId(), getIdentifier()));
+			}
+			// chunk is always fully written
+			int result = chunk.remaining();
+			written += result;
+			long contentLength = requestData.getResponseData().getContentLengthLong();
+			boolean finished = contentLength != -1 && contentLength == written
+					&& responseData.getTrailerFields() == null;
+			handler.writeBody(Stream.this, chunk, result, finished);
+			return result;
+		}
+
+		final synchronized boolean isReady() {
+			// Bug 63682
+			// Only want to return false if the window size is zero AND we are
+			// already waiting for an allocation.
+			if (getWindowSize() > 0 && allocationManager.isWaitingForStream()
+					|| handler.getZero().getWindowSize() > 0 && allocationManager.isWaitingForConnection()) {
+				return false;
+			} else {
+				return true;
+			}
+		}
+
+		@Override
+		public final long getBytesWritten() {
+			return written;
+		}
+
+		@Override
+		public final void end() throws IOException {
+			if (reset != null) {
+				throw new CloseNowException(reset);
+			}
+			if (!closed) {
+				closed = true;
+				// flush(true);
+				if (!endOfStreamSent) {
+					// Handling this special case here is simpler than trying
+					// to modify the following code to handle it.
+					System.err.println("write empty body for finish");
+					handler.writeBody(Stream.this, ByteBuffer.allocate(0), 0, responseData.getTrailerFields() == null);
+				}
+				writeTrailers();
+			}
+		}
+
+		/**
+		 * @return <code>true</code> if it is certain that the associated response has
+		 *         no body.
+		 */
+		final boolean hasNoBody() {
+			return ((written == 0) && closed);
+		}
+
+		@Override
+		public void flush() throws IOException {
+
+		}
+
+		@Override
+		public boolean flush(boolean block) throws IOException {
+			return false;
+		}
+
+	}
+
+	class StreamOutputBufferBak implements HttpOutputBuffer, WriteBuffer.Sink {
 
 		private final ByteBuffer buffer = ByteBuffer.allocate(8 * 1024);
 		private final WriteBuffer writeBuffer = new WriteBuffer(32 * 1024);
@@ -871,7 +961,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 			return result;
 		}
 
-		final synchronized boolean flush(boolean block) throws IOException {
+		public final synchronized boolean flush(boolean block) throws IOException {
 			/*
 			 * Need to ensure that there is exactly one call to flush even when there is no
 			 * data to write. Too few calls (i.e. zero) and the end of stream message is not

@@ -145,6 +145,16 @@ public final class Constants {
 	public static final int SAVEDREQUEST_FILTER = 4;
 
 	/**
+	 * h2 flow controll
+	 */
+	public static final int FLOWCTRL_FILTER = 5;
+
+	/**
+	 * Buffered filter (output)
+	 */
+	public static final int BUFFEREDOUTPUT_FILTER = 6;
+
+	/**
 	 * HTTP/1.0.
 	 */
 	public static final String HTTP_10 = "HTTP/1.0";
