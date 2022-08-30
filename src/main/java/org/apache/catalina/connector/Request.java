@@ -391,7 +391,7 @@ public class Request implements HttpServletRequest {
 
 	private HttpServletRequest applicationRequest = null;
 
-	private volatile Runnable dispatch = null;
+//	private volatile Runnable dispatch = null;
 
 	// --------------------------------------------------------- Public Methods
 
@@ -482,7 +482,7 @@ public class Request implements HttpServletRequest {
 		if (asyncContext != null) {
 			asyncContext.recycle();
 		}
-		dispatch = null;
+		// dispatch = null;
 	}
 
 	protected void recycleSessionInfo() {
@@ -952,7 +952,7 @@ public class Request implements HttpServletRequest {
 	 */
 	@Override
 	public String getContentType() {
-		return coyoteRequest.getContentType();
+		return coyoteRequest.getContentTypeString();
 	}
 
 	/**
@@ -1112,7 +1112,7 @@ public class Request implements HttpServletRequest {
 	 */
 	@Override
 	public String getProtocol() {
-		return coyoteRequest.protocol().toString();
+		return coyoteRequest.getProtocol().toString();
 	}
 
 	/**
@@ -1194,7 +1194,7 @@ public class Request implements HttpServletRequest {
 	public String getRemoteAddr() {
 		if (remoteAddr == null) {
 			coyoteRequest.actionREQ_HOST_ADDR_ATTRIBUTE();
-			remoteAddr = coyoteRequest.remoteAddr().toString();
+			remoteAddr = coyoteRequest.getRemoteAddr().toString();
 		}
 		return remoteAddr;
 	}
@@ -1209,7 +1209,7 @@ public class Request implements HttpServletRequest {
 				remoteHost = getRemoteAddr();
 			} else {
 				coyoteRequest.actionREQ_HOST_ATTRIBUTE();
-				remoteHost = coyoteRequest.remoteHost().toString();
+				remoteHost = coyoteRequest.getRemoteHost().toString();
 			}
 		}
 		return remoteHost;
@@ -1236,7 +1236,7 @@ public class Request implements HttpServletRequest {
 	public String getLocalName() {
 		if (localName == null) {
 			coyoteRequest.actionREQ_LOCAL_NAME_ATTRIBUTE();
-			localName = coyoteRequest.localName().toString();
+			localName = coyoteRequest.getLocalName().toString();
 		}
 		return localName;
 	}
@@ -1249,7 +1249,7 @@ public class Request implements HttpServletRequest {
 	public String getLocalAddr() {
 		if (localAddr == null) {
 			coyoteRequest.actionREQ_LOCAL_ADDR_ATTRIBUTE();
-			localAddr = coyoteRequest.localAddr().toString();
+			localAddr = coyoteRequest.getLocalAddr().toString();
 		}
 		return localAddr;
 	}
@@ -1353,7 +1353,7 @@ public class Request implements HttpServletRequest {
 	 */
 	@Override
 	public String getScheme() {
-		return coyoteRequest.scheme().toString();
+		return coyoteRequest.getScheme().toString();
 	}
 
 	/**
@@ -1361,7 +1361,7 @@ public class Request implements HttpServletRequest {
 	 */
 	@Override
 	public String getServerName() {
-		return coyoteRequest.serverName().toString();
+		return coyoteRequest.getServerName().toString();
 	}
 
 	/**
@@ -1690,39 +1690,39 @@ public class Request implements HttpServletRequest {
 		return asyncContext;
 	}
 
-	public void setDispatch(Runnable dispatch) {
-		this.dispatch = dispatch;
-	}
+//	public void setDispatch(Runnable dispatch) {
+//		this.dispatch = dispatch;
+//	}
 
-	public boolean hasDispatch() {
-		return this.dispatch != null;
-	}
+//	public boolean hasDispatch() {
+//		return this.dispatch != null;
+//	}
 
-	public void doDispatch() throws ServletException, IOException {
-		if (log.isDebugEnabled()) {
-			log.debug("intDispatch");
-		}
-		try {
-			Runnable runnable = dispatch;
-			dispatch = null;
-			runnable.run();
-			// if (!request.isAsync()) {
-			// fireOnComplete();
-			// }
-		} catch (RuntimeException x) {
-			// doInternalComplete(true);
-			if (x.getCause() instanceof ServletException) {
-				throw (ServletException) x.getCause();
-			}
-			if (x.getCause() instanceof IOException) {
-				throw (IOException) x.getCause();
-			}
-			throw new ServletException(x);
-		}
-	}
+//	public void doDispatch() throws ServletException, IOException {
+//		if (log.isDebugEnabled()) {
+//			log.debug("intDispatch");
+//		}
+//		try {
+//			Runnable runnable = dispatch;
+//			dispatch = null;
+//			runnable.run();
+	// if (!request.isAsync()) {
+	// fireOnComplete();
+	// }
+//		} catch (RuntimeException x) {
+	// doInternalComplete(true);
+//			if (x.getCause() instanceof ServletException) {
+//				throw (ServletException) x.getCause();
+//			}
+//			if (x.getCause() instanceof IOException) {
+//				throw (IOException) x.getCause();
+//			}
+//			throw new ServletException(x);
+//		}
+//	}
 
-	public void pushDispatchingState() {
-		coyoteRequest.pushDispatchingState();
+	public Runnable pushDispatchingState() {
+		return coyoteRequest.pushDispatchingState();
 	}
 
 	public void popDispatchingState() {
@@ -1873,7 +1873,7 @@ public class Request implements HttpServletRequest {
 	 * @return the URL decoded request URI
 	 */
 	public String getDecodedRequestURI() {
-		return coyoteRequest.decodedURI().toString();
+		return coyoteRequest.getDecodedURI().toString();
 	}
 
 	/**
@@ -1882,7 +1882,7 @@ public class Request implements HttpServletRequest {
 	 * @return the URL decoded request URI
 	 */
 	public MessageBytes getDecodedRequestURIMB() {
-		return coyoteRequest.decodedURI();
+		return coyoteRequest.getDecodedURI();
 	}
 
 	/**
@@ -1945,7 +1945,7 @@ public class Request implements HttpServletRequest {
 
 	public PushBuilder newPushBuilder(HttpServletRequest request) {
 		AtomicBoolean result = new AtomicBoolean();
-		coyoteRequest.actionIS_PUSH_SUPPORTED(result);
+		coyoteRequest.isPushSupported(result);
 		if (result.get()) {
 			return new ApplicationPushBuilder(this, request);
 		} else {
@@ -1974,7 +1974,7 @@ public class Request implements HttpServletRequest {
 		}
 		UpgradeToken upgradeToken = new UpgradeToken(handler, getContext(), instanceManager);
 
-		coyoteRequest.actionUPGRADE(upgradeToken);
+		coyoteRequest.upgrade(upgradeToken);
 
 		// Output required by RFC2616. Protocol specific headers should have
 		// already been set.
@@ -2223,7 +2223,7 @@ public class Request implements HttpServletRequest {
 	 */
 	@Override
 	public String getMethod() {
-		return coyoteRequest.method().toString();
+		return coyoteRequest.getMethod().toString();
 	}
 
 	/**
@@ -2258,7 +2258,7 @@ public class Request implements HttpServletRequest {
 	 */
 	@Override
 	public String getQueryString() {
-		return coyoteRequest.queryString().toString();
+		return coyoteRequest.getQueryString().toString();
 	}
 
 	/**
@@ -2297,7 +2297,7 @@ public class Request implements HttpServletRequest {
 	 */
 	@Override
 	public String getRequestURI() {
-		return coyoteRequest.requestURI().toString();
+		return coyoteRequest.getRequestURI().toString();
 	}
 
 	@Override
@@ -2585,7 +2585,8 @@ public class Request implements HttpServletRequest {
 	 *         body and all of the request body has been read.
 	 */
 	public boolean isFinished() {
-		return coyoteRequest.isFinished();
+		boolean finished = coyoteRequest.isFinished();
+		return finished;
 	}
 
 	/**
@@ -2596,7 +2597,7 @@ public class Request implements HttpServletRequest {
 	protected void checkSwallowInput() {
 		Context context = getContext();
 		if (context != null && !context.getSwallowAbortedUploads()) {
-			coyoteRequest.actionDISABLE_SWALLOW_INPUT();
+			coyoteRequest.disableSwallowInput();
 		}
 	}
 

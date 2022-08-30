@@ -41,12 +41,13 @@ public class AjpNioProtocol extends AbstractAjpProtocol<NioChannel> {
 
 	public AjpNioProtocol() {
 		super(new NioEndpoint());
+		// TODO remove
+		setSecretRequired(false);
 
 		Handler processorHandler = new ProcessorHandler(this);
 		Handler handShakeHandler = new HandShakeHandler(processorHandler);
 		Handler dispatchHandler = new DispatchHandler(handShakeHandler, this);
 		setHandler(dispatchHandler);
-
 		endpoint.setHandler(dispatchHandler);
 	}
 

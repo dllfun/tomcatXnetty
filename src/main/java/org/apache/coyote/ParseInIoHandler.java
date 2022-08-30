@@ -54,17 +54,17 @@ public class ParseInIoHandler implements Handler {
 			// dispatched. Because of delays in the dispatch process, the
 			// timeout may no longer be required. Check here and avoid
 			// unnecessary processing.
-			if (SocketEvent.TIMEOUT == event && (processor == null || !processor.isAsync() && !processor.isUpgrade()
-					|| processor.isAsync() && !processor.checkAsyncTimeoutGeneration())) {
-				// This is effectively a NO-OP
-				next.processSocket(channel, event, dispatch);
-				return;
-			}
+//			if (SocketEvent.TIMEOUT == event && (processor == null || !processor.isAsync() && !processor.isUpgrade()
+//					|| processor.isAsync() && !processor.checkAsyncTimeoutGeneration())) {
+			// This is effectively a NO-OP
+//				next.processSocket(channel, event, dispatch);
+//				return;
+//			}
 
 			if (processor != null) {
 				// Make sure an async timeout doesn't fire
 				// removeWaitingProcessor(processor);
-			} else if (event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
+			} else if (event == SocketEvent.TIMEOUT || event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
 				// Nothing to do. Endpoint requested a close and there is no
 				// longer a processor associated with this socket.
 				next.processSocket(channel, event, dispatch);
@@ -104,7 +104,7 @@ public class ParseInIoHandler implements Handler {
 				// Associate the processor with the connection
 				socketChannel.setCurrentProcessor(processor);
 
-				if (processor.processInIoThread(socketChannel, event)) {
+				if (processor.processInIoThread(event)) {
 					dispatched = true;
 					next.processSocket(channel, event, dispatch);
 				}

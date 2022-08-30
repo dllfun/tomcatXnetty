@@ -106,7 +106,7 @@ public class ErrorReportValve extends ValveBase {
 				}
 				// Close immediately to signal to the client that something went
 				// wrong
-				response.getCoyoteResponse().actionCLOSE_NOW(request.getAttribute(RequestDispatcher.ERROR_EXCEPTION));
+				response.getCoyoteResponse().closeNow(request.getAttribute(RequestDispatcher.ERROR_EXCEPTION));
 			}
 			return;
 		}
@@ -166,7 +166,7 @@ public class ErrorReportValve extends ValveBase {
 		// If an error has occurred that prevents further I/O, don't waste time
 		// producing an error report that will never be read
 		AtomicBoolean result = new AtomicBoolean(false);
-		response.getCoyoteResponse().actionIS_IO_ALLOWED(result);
+		response.getCoyoteResponse().isProcessorIoAllowed(result);
 		if (!result.get()) {
 			return;
 		}

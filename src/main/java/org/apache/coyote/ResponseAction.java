@@ -33,6 +33,34 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 
 	private AbstractProcessor processor;
 
+	private HttpOutputBuffer channelOutputBuffer = new HttpOutputBuffer() {
+
+		@Override
+		public long getBytesWritten() {
+			return getBytesWrittenToChannel();
+		}
+
+		@Override
+		public int doWrite(ByteBuffer chunk) throws IOException {
+			return doWriteToChannel(chunk);
+		}
+
+		@Override
+		public boolean flush(boolean block) throws IOException {
+			return flushToChannel(block);
+		}
+
+		@Override
+		public void flush() throws IOException {
+			flushToChannel();
+		}
+
+		@Override
+		public void end() throws IOException {
+			endToChannel();
+		}
+	};
+
 	public ResponseAction(AbstractProcessor processor) {
 		this.processor = processor;
 		filterLibrary = new OutputFilter[0];
@@ -70,7 +98,7 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 		return filterLibrary;
 	}
 
-	protected abstract HttpOutputBuffer getBaseOutputBuffer();
+//	protected abstract HttpOutputBuffer getBaseOutputBuffer();
 
 	/**
 	 * Add an output filter to the active filters for the current response.
@@ -95,18 +123,18 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 		}
 
 		if (lastActiveFilter == -1) {
-			filter.setBuffer(getBaseOutputBuffer());
+			filter.setNext(channelOutputBuffer);
 		} else {
 			for (int i = 0; i <= lastActiveFilter; i++) {
 				if (activeFilters[i] == filter)
 					return;
 			}
-			filter.setBuffer(activeFilters[lastActiveFilter]);
+			filter.setNext(activeFilters[lastActiveFilter]);
 		}
 
 		activeFilters[++lastActiveFilter] = filter;
 
-		filter.setResponse(processor.responseData);
+		filter.actived(); // filter.setResponse(processor.exchangeData);
 	}
 
 	public OutputFilter getActiveFilter(int id) {
@@ -120,7 +148,7 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 	}
 
 	@Override
-	public int doWrite(ByteBuffer chunk) throws IOException {
+	public final int doWrite(ByteBuffer chunk) throws IOException {
 
 		// if (!responseData.isCommitted()) {
 		// Send the connector a request for commit. The connector should
@@ -130,20 +158,24 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 		// }
 
 		if (lastActiveFilter == -1) {
-			return getBaseOutputBuffer().doWrite(chunk);
+			return channelOutputBuffer.doWrite(chunk);
 		} else {
 			return activeFilters[lastActiveFilter].doWrite(chunk);
 		}
 	}
 
+	protected abstract int doWriteToChannel(ByteBuffer chunk) throws IOException;
+
 	@Override
-	public long getBytesWritten() {
+	public final long getBytesWritten() {
 		if (lastActiveFilter == -1) {
-			return getBaseOutputBuffer().getBytesWritten();
+			return channelOutputBuffer.getBytesWritten();
 		} else {
 			return activeFilters[lastActiveFilter].getBytesWritten();
 		}
 	}
+
+	protected abstract long getBytesWrittenToChannel();
 
 	public abstract boolean isTrailerFieldsSupported();
 
@@ -151,8 +183,8 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 
 	// @Override
 	public void commit(boolean finished) {
-		if (!processor.responseData.isCommitted()) {
-			processor.responseData.setCommitted(true);
+		if (!processor.exchangeData.isCommitted()) {
+			processor.exchangeData.setCommitted(true);
 			try {
 				// Validate and write response headers
 				prepareResponse(finished);
@@ -168,37 +200,43 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 	 * @throws IOException an underlying I/O error occurred
 	 */
 	@Override
-	public void flush() throws IOException {
+	public final void flush() throws IOException {
 		if (lastActiveFilter == -1) {
-			getBaseOutputBuffer().flush();
+			channelOutputBuffer.flush();
 		} else {
 			activeFilters[lastActiveFilter].flush();
 		}
 	}
 
+	protected abstract void flushToChannel() throws IOException;
+
 	@Override
-	public boolean flush(boolean block) throws IOException {
+	public final boolean flush(boolean block) throws IOException {
 		if (lastActiveFilter == -1) {
-			return getBaseOutputBuffer().flush(block);
+			return channelOutputBuffer.flush(block);
 		} else {
 			return activeFilters[lastActiveFilter].flush(block);
 		}
 	}
 
+	protected abstract boolean flushToChannel(boolean block) throws IOException;
+
 	@Override
-	public void end() throws IOException {
+	public final void end() throws IOException {
 		if (responseFinished) {
 			return;
 		}
 
 		if (lastActiveFilter == -1) {
-			getBaseOutputBuffer().end();
+			channelOutputBuffer.end();
 		} else {
 			activeFilters[lastActiveFilter].end();
 		}
 
 		responseFinished = true;
 	}
+
+	protected abstract void endToChannel() throws IOException;
 
 	// @Override
 	public void setSwallowResponse() {
@@ -238,7 +276,7 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 			flush();
 		} catch (IOException e) {
 			processor.handleIOException(e);
-			processor.responseData.setErrorException(e);
+			processor.exchangeData.setErrorException(e);
 		}
 	}
 

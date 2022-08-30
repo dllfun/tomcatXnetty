@@ -201,8 +201,7 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel {
 	public int available() {
 		int available = availableInThisBuffer();
 		if (available == 0) {
-			int coyoteAvailable = coyoteRequest
-					.actionAVAILABLE(Boolean.valueOf(coyoteRequest.getReadListener() != null));
+			int coyoteAvailable = coyoteRequest.available(Boolean.valueOf(coyoteRequest.getReadListener() != null));
 			available = (coyoteAvailable > 0) ? 1 : 0;
 		}
 		return available;
@@ -230,10 +229,10 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel {
 		// has been finished will register the socket for read interest and that
 		// is not required.
 		if (!coyoteRequest.isFinished() && isReady()) {
-			coyoteRequest.actionDISPATCH_READ();
+			coyoteRequest.dispatchRead();
 			if (!ContainerThreadMarker.isContainerThread()) {
 				// Not on a container thread so need to execute the dispatch
-				coyoteRequest.actionDISPATCH_EXECUTE();
+				coyoteRequest.dispatchExecute();
 			}
 		}
 	}
@@ -264,8 +263,8 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel {
 			// which will eventually lead to a call to onAllDataRead() via a
 			// container thread.
 			if (!ContainerThreadMarker.isContainerThread()) {
-				coyoteRequest.actionDISPATCH_READ();
-				coyoteRequest.actionDISPATCH_EXECUTE();
+				coyoteRequest.dispatchRead();
+				coyoteRequest.dispatchExecute();
 			}
 			return false;
 		}

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.CompletionHandler;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 public interface SocketChannel extends Channel {
 
@@ -72,7 +73,7 @@ public interface SocketChannel extends Channel {
 
 		public ByteBuffer nioBuffer();
 
-		// public BufWrapper duplicate();
+		public BufWrapper duplicate();
 
 		public void startTrace();
 
@@ -104,7 +105,7 @@ public interface SocketChannel extends Channel {
 
 	public void setWriteTimeout(long writeTimeout);
 
-	public int decrementKeepAlive();
+	public int incrementKeepAlive();
 
 	public String getRemoteHost();
 
@@ -117,6 +118,8 @@ public interface SocketChannel extends Channel {
 	public String getLocalAddr();
 
 	public int getLocalPort();
+
+	public int getAvailable();
 
 	public boolean isReadyForRead() throws IOException;
 
@@ -131,6 +134,8 @@ public interface SocketChannel extends Channel {
 	public int read(boolean block, ByteBuffer to) throws IOException;
 
 	public int read(boolean block, BufWrapper to) throws IOException;
+
+	public ReentrantLock getWriteLock();
 
 	public boolean isReadyForWrite();
 

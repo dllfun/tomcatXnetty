@@ -8,6 +8,8 @@ public interface Channel {
 
 	public void setCurrentProcessor(Object currentProcessor);
 
+	public void clearCurrentProcessor();
+
 	public IOException getError();
 
 	public void setError(IOException error);

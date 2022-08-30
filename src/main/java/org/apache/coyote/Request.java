@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.servlet.ReadListener;
+import javax.servlet.RequestDispatcher;
 
 import org.apache.catalina.core.AsyncContextImpl;
 import org.apache.tomcat.util.buf.ByteChunk;
@@ -19,21 +20,22 @@ import org.apache.tomcat.util.http.Parameters;
 import org.apache.tomcat.util.http.ServerCookies;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.net.SocketEvent;
-import org.apache.tomcat.util.res.StringManager;
 
 public final class Request implements InputReader {
 
-	private static final StringManager sm = StringManager.getManager(Request.class);
-
-	private RequestData requestData;
+	private ExchangeData exchangeData;
 	private Response response;
 	private volatile AbstractProcessor processor;
 	private RequestAction requestAction;
+	/**
+	 * Notes.
+	 */
+	private final Object requestNotes[] = new Object[Constants.MAX_NOTES];
 
 	// ----------------------------------------------------------- Constructors
 
-	public Request(RequestData requestData, AbstractProcessor processor, RequestAction requestAction) {
-		this.requestData = requestData;
+	public Request(ExchangeData exchangeData, AbstractProcessor processor, RequestAction requestAction) {
+		this.exchangeData = exchangeData;
 		this.processor = processor;
 		this.requestAction = requestAction;
 	}
@@ -43,21 +45,21 @@ public final class Request implements InputReader {
 	// volatile ReadListener listener;
 
 	public ReadListener getReadListener() {
-		return requestData.getAsyncStateMachine().getReadListener();
+		return processor.getAsyncStateMachine().getReadListener();
 	}
 
 	public void setReadListener(ReadListener listener) {
-		requestData.getAsyncStateMachine().setReadListener(listener);
+		processor.getAsyncStateMachine().setReadListener(listener);
 	}
 
 	public boolean sendAllDataReadEvent() {
-		return this.requestData.sendAllDataReadEvent();
+		return this.exchangeData.sendAllDataReadEvent();
 	}
 
 	// ------------------------------------------------------------- Properties
 
 	public MimeHeaders getMimeHeaders() {
-		return requestData.getMimeHeaders();
+		return exchangeData.getRequestHeaders();
 	}
 
 	public boolean isTrailerFieldsReady() {
@@ -65,37 +67,37 @@ public final class Request implements InputReader {
 	}
 
 	public Map<String, String> getTrailerFields() {
-		return requestData.getTrailerFields();
+		return exchangeData.getTrailerFields();
 	}
 
 	public UDecoder getURLDecoder() {
-		return requestData.getURLDecoder();
+		return exchangeData.getURLDecoder();
 	}
 
 	// -------------------- Request data --------------------
 
-	public MessageBytes scheme() {
-		return requestData.scheme();
+	public MessageBytes getScheme() {
+		return exchangeData.getScheme();
 	}
 
-	public MessageBytes method() {
-		return requestData.method();
+	public MessageBytes getMethod() {
+		return exchangeData.getMethod();
 	}
 
-	public MessageBytes requestURI() {
-		return requestData.requestURI();
+	public MessageBytes getRequestURI() {
+		return exchangeData.getRequestURI();
 	}
 
-	public MessageBytes decodedURI() {
-		return requestData.decodedURI();
+	public MessageBytes getDecodedURI() {
+		return exchangeData.getDecodedURI();
 	}
 
-	public MessageBytes queryString() {
-		return requestData.queryString();
+	public MessageBytes getQueryString() {
+		return exchangeData.getQueryString();
 	}
 
-	public MessageBytes protocol() {
-		return requestData.protocol();
+	public MessageBytes getProtocol() {
+		return exchangeData.getProtocol();
 	}
 
 	/**
@@ -105,48 +107,48 @@ public final class Request implements InputReader {
 	 * @return The buffer holding the server name, if any. Use isNull() to check if
 	 *         there is no value set.
 	 */
-	public MessageBytes serverName() {
-		return requestData.serverName();
+	public MessageBytes getServerName() {
+		return exchangeData.getServerName();
 	}
 
 	public int getServerPort() {
-		return requestData.getServerPort();
+		return exchangeData.getServerPort();
 	}
 
 	public void setServerPort(int serverPort) {
-		this.requestData.setServerPort(serverPort);
+		this.exchangeData.setServerPort(serverPort);
 	}
 
-	public MessageBytes remoteAddr() {
-		return requestData.remoteAddr();
+	public MessageBytes getRemoteAddr() {
+		return exchangeData.getRemoteAddr();
 	}
 
-	public MessageBytes remoteHost() {
-		return requestData.remoteHost();
+	public MessageBytes getRemoteHost() {
+		return exchangeData.getRemoteHost();
 	}
 
-	public MessageBytes localName() {
-		return requestData.localName();
+	public MessageBytes getLocalName() {
+		return exchangeData.getLocalName();
 	}
 
-	public MessageBytes localAddr() {
-		return requestData.localAddr();
+	public MessageBytes getLocalAddr() {
+		return exchangeData.getLocalAddr();
 	}
 
 	public int getRemotePort() {
-		return requestData.getRemotePort();
+		return exchangeData.getRemotePort();
 	}
 
 	public void setRemotePort(int port) {
-		this.requestData.setRemotePort(port);
+		this.exchangeData.setRemotePort(port);
 	}
 
 	public int getLocalPort() {
-		return requestData.getLocalPort();
+		return exchangeData.getLocalPort();
 	}
 
 	public void setLocalPort(int port) {
-		this.requestData.setLocalPort(port);
+		this.exchangeData.setLocalPort(port);
 	}
 
 	// -------------------- encoding/type --------------------
@@ -158,7 +160,7 @@ public final class Request implements InputReader {
 	 *         made to that method try to obtain if from the content type.
 	 */
 	public String getCharacterEncoding() {
-		return requestData.getCharacterEncoding();
+		return exchangeData.getRequestCharacterEncoding();
 	}
 
 	/**
@@ -171,51 +173,51 @@ public final class Request implements InputReader {
 	 *                                      invalid character encoding
 	 */
 	public Charset getCharset() throws UnsupportedEncodingException {
-		return requestData.getCharset();
+		return exchangeData.getRequestCharset();
 	}
 
 	public void setCharset(Charset charset) {
-		this.requestData.setCharset(charset);
+		this.exchangeData.setRequestCharset(charset);
 	}
 
 	public void setContentLength(long len) {
-		this.requestData.setContentLength(len);
+		this.exchangeData.setRequestContentLength(len);
 	}
 
 	public int getContentLength() {
-		return this.requestData.getContentLength();
+		return this.exchangeData.getContentLength();
 	}
 
 	public long getContentLengthLong() {
-		return this.requestData.getContentLengthLong();
+		return this.exchangeData.getRequestContentLengthLong();
 	}
 
-	public String getContentType() {
-		return this.requestData.getContentType();
+	public String getContentTypeString() {
+		return this.exchangeData.getRequestContentTypeString();
 	}
 
 	public void setContentType(String type) {
-		this.requestData.setContentType(type);
+		this.exchangeData.setRequestContentType(type);
 	}
 
-	public MessageBytes contentType() {
-		return this.requestData.contentType();
+	public MessageBytes getContentType() {
+		return this.exchangeData.getRequestContentType();
 	}
 
 	public void setContentType(MessageBytes mb) {
-		this.requestData.setContentType(mb);
+		this.exchangeData.setRequestContentType(mb);
 	}
 
 	public String getHeader(String name) {
-		return this.requestData.getHeader(name);
+		return this.exchangeData.getRequestHeader(name);
 	}
 
 	public void setExpectation(boolean expectation) {
-		this.requestData.setExpectation(expectation);
+		this.exchangeData.setExpectation(expectation);
 	}
 
 	public boolean hasExpectation() {
-		return this.requestData.hasExpectation();
+		return this.exchangeData.hasExpectation();
 	}
 
 	// -------------------- Associated response --------------------
@@ -239,20 +241,20 @@ public final class Request implements InputReader {
 	// }
 	// }
 
-	public int actionAVAILABLE(Object param) {
+	public int available(Object param) {
 		return requestAction.getAvailable(param);
 	}
 
-	public void actionREQ_SET_BODY_REPLAY(ByteChunk param) {
+	public void reqSetBodyReplay(ByteChunk param) {
 		ByteChunk body = param;
 		requestAction.setRequestBody(body);
 	}
 
-	public void actionIS_IO_ALLOWED(AtomicBoolean param) {
+	public void isIoAllowed(AtomicBoolean param) {
 		processor.isIoAllowed(param);
 	}
 
-	public void actionDISABLE_SWALLOW_INPUT() {
+	public void disableSwallowInput() {
 		// Aborted upload or similar.
 		// No point reading the remainder of the request.
 		requestAction.disableSwallowRequest();
@@ -294,22 +296,22 @@ public final class Request implements InputReader {
 
 	// @Override
 	public void asyncPostProcess() {
-		requestData.getAsyncStateMachine().asyncPostProcess();
+		processor.getAsyncStateMachine().asyncPostProcess();
 	}
 
 	// @Override
 	// public void asyncDispatched() {
-	// requestData.getAsyncStateMachine().asyncDispatched();
+	// exchangeData.getAsyncStateMachine().asyncDispatched();
 	// }
 
 	// @Override
 	public void asyncRun(Runnable runnable) {
-		requestData.getAsyncStateMachine().asyncRun(processor.getProtocol().getExecutor(), runnable);
+		processor.getAsyncStateMachine().asyncRun(processor.getProtocol().getExecutor(), runnable);
 	}
 
 	// @Override
-	public void asyncDispatch() {
-		if (requestData.getAsyncStateMachine().asyncDispatch()) {
+	public void asyncDispatch(Runnable dispatcher) {
+		if (processor.getAsyncStateMachine().asyncDispatch(dispatcher)) {
 			// processor.processSocketEvent(SocketEvent.OPEN_READ, true);
 			processor.getProtocol().getHandler().processSocket(processor.getChannel(), SocketEvent.OPEN_READ, true);
 		}
@@ -317,17 +319,17 @@ public final class Request implements InputReader {
 
 	// @Override
 	public void asyncStart(AsyncContextImpl param) {
-		requestData.getAsyncStateMachine().asyncStart(param);
+		processor.getAsyncStateMachine().asyncStart(this, param);
 	}
 
 	public AsyncContextImpl getAsyncContext() {
-		return requestData.getAsyncStateMachine().getAsyncCtxt();
+		return processor.getAsyncStateMachine().getAsyncCtxt();
 	}
 
 	// @Override
 	public void asyncComplete() {
 		processor.clearDispatches();
-		if (requestData.getAsyncStateMachine().asyncComplete()) {
+		if (processor.getAsyncStateMachine().asyncComplete()) {
 			// processor.processSocketEvent(SocketEvent.OPEN_READ, true);
 			processor.getProtocol().getHandler().processSocket(processor.getChannel(), SocketEvent.OPEN_READ, true);
 		}
@@ -335,37 +337,37 @@ public final class Request implements InputReader {
 
 	// @Override
 	public void asyncError() {
-		requestData.getAsyncStateMachine().asyncError();
+		processor.getAsyncStateMachine().asyncError();
 	}
 
 	// @Override
 	public void asyncIsAsync(AtomicBoolean param) {
-		param.set(requestData.getAsyncStateMachine().isAsync());
+		param.set(processor.getAsyncStateMachine().isAsync());
 	}
 
 	// @Override
 	public void asyncIsCompleting(AtomicBoolean param) {
-		param.set(requestData.getAsyncStateMachine().isCompleting());
+		param.set(processor.getAsyncStateMachine().isCompleting());
 	}
 
 	// @Override
 	public void asyncIsDispatching(AtomicBoolean param) {
-		param.set(requestData.getAsyncStateMachine().isAsyncDispatching());
+		param.set(processor.getAsyncStateMachine().isAsyncDispatching());
 	}
 
 	// @Override
 	public void asyncIsError(AtomicBoolean param) {
-		param.set(requestData.getAsyncStateMachine().isAsyncError());
+		param.set(processor.getAsyncStateMachine().isAsyncError());
 	}
 
 	// @Override
 	public void asyncIsStarted(AtomicBoolean param) {
-		param.set(requestData.getAsyncStateMachine().isAsyncStarted());
+		param.set(processor.getAsyncStateMachine().isAsyncStarted());
 	}
 
 	// @Override
 	public void asyncIsTimingOut(AtomicBoolean param) {
-		param.set(requestData.getAsyncStateMachine().isAsyncTimingOut());
+		param.set(processor.getAsyncStateMachine().isAsyncTimingOut());
 	}
 
 	// @Override
@@ -374,25 +376,25 @@ public final class Request implements InputReader {
 			return;
 		}
 		long timeout = param.longValue();
-		requestData.getAsyncStateMachine().setAsyncTimeout(timeout);
+		processor.getAsyncStateMachine().setAsyncTimeout(timeout);
 	}
 
 	// @Override
 	public void asyncTimeout(AtomicBoolean param) {
 		AtomicBoolean result = param;
-		result.set(requestData.getAsyncStateMachine().asyncTimeout());
+		result.set(processor.getAsyncStateMachine().asyncTimeout());
 	}
 
-	public void pushDispatchingState() {
-		requestData.getAsyncStateMachine().pushDispatchingState();
+	public Runnable pushDispatchingState() {
+		return processor.getAsyncStateMachine().pushDispatchingState();
 	}
 
 	public void popDispatchingState() {
-		requestData.getAsyncStateMachine().popDispatchingState();
+		processor.getAsyncStateMachine().popDispatchingState();
 	}
 
 	public boolean hasStackedState() {
-		return requestData.getAsyncStateMachine().hasStackedState();
+		return processor.getAsyncStateMachine().hasStackedState();
 	}
 
 	public void actionREQUEST_BODY_FULLY_READ(AtomicBoolean param) {
@@ -405,28 +407,28 @@ public final class Request implements InputReader {
 		isReady.set(requestAction.isReadyForRead());
 	}
 
-	public void actionDISPATCH_READ() {
-		processor.actionDISPATCH_READ();
+	public void dispatchRead() {
+		processor.dispatchRead();
 	}
 
-	public void actionDISPATCH_WRITE() {
-		processor.actionDISPATCH_WRITE();
+	public void dispatchWrite() {
+		processor.dispatchWrite();
 	}
 
-	public void actionDISPATCH_EXECUTE() {
-		processor.actionDISPATCH_EXECUTE();
+	public void dispatchExecute() {
+		processor.dispatchExecute();
 	}
 
-	public void actionUPGRADE(UpgradeToken param) {
-		processor.actionUPGRADE(param);
+	public void upgrade(UpgradeToken param) {
+		processor.upgrade(param);
 	}
 
-	public void actionIS_PUSH_SUPPORTED(AtomicBoolean param) {
-		processor.actionIS_PUSH_SUPPORTED(param);
+	public void isPushSupported(AtomicBoolean param) {
+		processor.isPushSupported(param);
 	}
 
-	public void actionPUSH_REQUEST(RequestData param) {
-		processor.actionPUSH_REQUEST(param);
+	public void pushRequest(ExchangeData param) {
+		processor.pushRequest(param);
 	}
 
 //	public void actionCONNECTION_ID(AtomicReference<Object> param) {
@@ -452,64 +454,64 @@ public final class Request implements InputReader {
 	// -------------------- Cookies --------------------
 
 	public ServerCookies getCookies() {
-		return this.requestData.getCookies();
+		return this.exchangeData.getCookies();
 	}
 
 	// -------------------- Parameters --------------------
 
 	public Parameters getParameters() {
-		return this.requestData.getParameters();
+		return this.exchangeData.getParameters();
 	}
 
 	public void addPathParameter(String name, String value) {
-		this.requestData.addPathParameter(name, value);
+		this.exchangeData.addPathParameter(name, value);
 	}
 
 	public String getPathParameter(String name) {
-		return this.requestData.getPathParameter(name);
+		return this.exchangeData.getPathParameter(name);
 	}
 
 	// -------------------- Other attributes --------------------
 	// We can use notes for most - need to discuss what is of general interest
 
 	public void setAttribute(String name, Object o) {
-		this.requestData.setAttribute(name, o);
+		this.exchangeData.setAttribute(name, o);
 	}
 
 	public HashMap<String, Object> getAttributes() {
-		return this.requestData.getAttributes();
+		return this.exchangeData.getAttributes();
 	}
 
 	public Object getAttribute(String name) {
-		return this.requestData.getAttribute(name);
+		return this.exchangeData.getAttribute(name);
 	}
 
 	public MessageBytes getRemoteUser() {
-		return this.requestData.getRemoteUser();
+		return this.exchangeData.getRemoteUser();
 	}
 
 	public boolean getRemoteUserNeedsAuthorization() {
-		return this.requestData.getRemoteUserNeedsAuthorization();
+		return this.exchangeData.getRemoteUserNeedsAuthorization();
 	}
 
 	public void setRemoteUserNeedsAuthorization(boolean remoteUserNeedsAuthorization) {
-		this.requestData.setRemoteUserNeedsAuthorization(remoteUserNeedsAuthorization);
+		this.exchangeData.setRemoteUserNeedsAuthorization(remoteUserNeedsAuthorization);
 	}
 
 	public MessageBytes getAuthType() {
-		return this.requestData.getAuthType();
+		return this.exchangeData.getAuthType();
 	}
 
 	// public int getAvailable() {
-	// return this.requestData.getAvailable();
+	// return this.exchangeData.getAvailable();
 	// }
 
 	public boolean getSendfile() {
-		return this.requestData.getSendfile();
+		return this.exchangeData.getSendfile();
 	}
 
 	public void setSendfile(boolean sendfile) {
-		this.requestData.setSendfile(sendfile);
+		this.exchangeData.setSendfile(sendfile);
 	}
 
 	public boolean isFinished() {
@@ -517,7 +519,7 @@ public final class Request implements InputReader {
 	}
 
 	public boolean getSupportsRelativeRedirects() {
-		if (protocol().equals("") || protocol().equals("HTTP/1.0")) {
+		if (getProtocol().equals("") || getProtocol().equals("HTTP/1.0")) {
 			return false;
 		}
 		return true;
@@ -549,18 +551,18 @@ public final class Request implements InputReader {
 	 * @throws IOException If an I/O error occurs during the copy
 	 */
 	// public int doRead(PreInputBuffer handler) throws IOException {
-	// long bytesRead = this.requestData.getBytesRead();
+	// long bytesRead = this.exchangeData.getBytesRead();
 	// int n = inputBuffer.doRead(handler);
 	// if (n > 0) {
 	// bytesRead += n;
 	// }
-	// this.requestData.setBytesRead(bytesRead);
+	// this.exchangeData.setBytesRead(bytesRead);
 	// return n;
 	// }
 
 	@Override
 	public BufWrapper doRead() throws IOException {
-		long bytesRead = this.requestData.getBytesRead();
+		long bytesRead = this.exchangeData.getBytesRead();
 		int n = -1;// inputBuffer.doRead(handler);
 		BufWrapper bufWrapper = requestAction.doRead();
 		if (bufWrapper != null) {
@@ -569,7 +571,7 @@ public final class Request implements InputReader {
 		if (n > 0) {
 			bytesRead += n;
 		}
-		this.requestData.setBytesRead(bytesRead);
+		this.exchangeData.setBytesRead(bytesRead);
 		return bufWrapper;
 	}
 
@@ -577,15 +579,15 @@ public final class Request implements InputReader {
 
 	@Override
 	public String toString() {
-		return "R( " + requestURI().toString() + ")";
+		return "R( " + getRequestURI().toString() + ")";
 	}
 
 	public long getStartTime() {
-		return this.requestData.getStartTime();
+		return this.exchangeData.getStartTime();
 	}
 
 	public void setStartTime(long startTime) {
-		this.requestData.setStartTime(startTime);
+		this.exchangeData.setStartTime(startTime);
 	}
 
 	// -------------------- Per-Request "notes" --------------------
@@ -608,18 +610,18 @@ public final class Request implements InputReader {
 	 * @param value The value to store at that index
 	 */
 	public final void setNote(int pos, Object value) {
-		this.requestData.setNote(pos, value);
+		requestNotes[pos] = value;
 	}
 
 	public final Object getNote(int pos) {
-		return this.requestData.getNote(pos);
+		return requestNotes[pos];
 	}
 
 	// -------------------- Recycling --------------------
 
 	public void recycle() {
 
-		this.requestData.recycle();
+		this.exchangeData.recycle();
 
 		// listener = null;
 		// hook.setReadListener(null);
@@ -628,19 +630,19 @@ public final class Request implements InputReader {
 
 	// -------------------- Info --------------------
 	public void updateCounters() {
-		this.requestData.updateCounters();
+		this.exchangeData.updateCounters();
 	}
 
 	public RequestInfo getRequestProcessor() {
-		return this.requestData.getRequestProcessor();
+		return this.exchangeData.getRequestProcessor();
 	}
 
 	public long getBytesRead() {
-		return this.requestData.getBytesRead();
+		return this.exchangeData.getBytesRead();
 	}
 
 	public boolean isProcessing() {
-		return this.requestData.isProcessing();
+		return this.exchangeData.isProcessing();
 	}
 
 }

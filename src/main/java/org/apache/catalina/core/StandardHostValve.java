@@ -161,7 +161,7 @@ final class StandardHostValve extends ValveBase {
 				// If an error has occurred that prevents further I/O, don't waste time
 				// producing an error report that will never be read
 				AtomicBoolean result = new AtomicBoolean(false);
-				response.getCoyoteResponse().actionIS_IO_ALLOWED(result);
+				response.getCoyoteResponse().isProcessorIoAllowed(result);
 				if (result.get()) {
 					if (t != null) {
 						throwable(request, response, t);

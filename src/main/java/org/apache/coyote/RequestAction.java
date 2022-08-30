@@ -54,6 +54,14 @@ public abstract class RequestAction implements InputReader {
 	 */
 	private boolean swallowInput;
 
+	private InputReader channelInputReader = new InputReader() {
+
+		@Override
+		public BufWrapper doRead() throws IOException {
+			return doReadFromChannel();
+		}
+	};
+
 	public RequestAction(AbstractProcessor processor) {
 		this.processor = processor;
 		// this.requestData = processor.requestData;
@@ -146,18 +154,18 @@ public abstract class RequestAction implements InputReader {
 		}
 
 		if (lastActiveFilter == -1) {
-			filter.setBuffer(getBaseInputReader());
+			filter.setNext(channelInputReader);
 		} else {
 			for (int i = 0; i <= lastActiveFilter; i++) {
 				if (activeFilters[i] == filter)
 					return;
 			}
-			filter.setBuffer(activeFilters[lastActiveFilter]);
+			filter.setNext(activeFilters[lastActiveFilter]);
 		}
 
 		activeFilters[++lastActiveFilter] = filter;
 
-		filter.setRequest(processor.requestData);
+		filter.actived(); // filter.setRequest(processor.exchangeData);
 	}
 
 	public final boolean hasActiveFilters() {
@@ -172,7 +180,7 @@ public abstract class RequestAction implements InputReader {
 	}
 
 	public final int getActiveFiltersCount() {
-		return activeFilters.length;
+		return lastActiveFilter + 1;
 	}
 
 	public final InputFilter getActiveFilter(int index) {
@@ -182,19 +190,21 @@ public abstract class RequestAction implements InputReader {
 		return null;
 	}
 
-	public boolean isSwallowInput() {
+	protected boolean isSwallowInput() {
 		return swallowInput;
 	}
 
-	protected abstract InputReader getBaseInputReader();
+//	protected abstract InputReader getBaseInputReader();
 
 	@Override
-	public BufWrapper doRead() throws IOException {
+	public final BufWrapper doRead() throws IOException {
 		if (lastActiveFilter == -1)
-			return getBaseInputReader().doRead();
+			return channelInputReader.doRead();
 		else
 			return activeFilters[lastActiveFilter].doRead();
 	}
+
+	protected abstract BufWrapper doReadFromChannel() throws IOException;
 
 	protected final boolean isChunking() {
 		for (int i = 0; i < lastActiveFilter; i++) {
@@ -217,6 +227,9 @@ public abstract class RequestAction implements InputReader {
 		int available = 0;
 		if ((hasActiveFilters())) {
 			for (int i = 0; (available == 0) && (i < getActiveFiltersCount()); i++) {
+				if (getActiveFilter(i) == null) {
+					System.out.println();
+				}
 				available = getActiveFilter(i).available();
 			}
 		}
@@ -271,7 +284,7 @@ public abstract class RequestAction implements InputReader {
 			return;
 		} else if (valueMB.getLength() == 0) {
 			// Empty Host header so set sever name to empty string
-			processor.requestData.serverName().setString("");
+			processor.exchangeData.getServerName().setString("");
 			populatePort();
 			return;
 		}
@@ -294,13 +307,13 @@ public abstract class RequestAction implements InputReader {
 				for (int i = colonPos + 1; i < valueL; i++) {
 					char c = (char) valueB[i + valueS];
 					if (c < '0' || c > '9') {
-						processor.requestData.getResponseData().setStatus(400);
+						processor.exchangeData.setStatus(400);
 						processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
 						return;
 					}
 					port = port * 10 + c - '0';
 				}
-				processor.requestData.setServerPort(port);
+				processor.exchangeData.setServerPort(port);
 
 				// Only need to copy the host name up to the :
 				valueL = colonPos;
@@ -310,7 +323,7 @@ public abstract class RequestAction implements InputReader {
 			for (int i = 0; i < valueL; i++) {
 				hostNameC[i] = (char) valueB[i + valueS];
 			}
-			processor.requestData.serverName().setChars(hostNameC, 0, valueL);
+			processor.exchangeData.getServerName().setChars(hostNameC, 0, valueL);
 
 		} catch (IllegalArgumentException e) {
 			// IllegalArgumentException indicates that the host name is invalid
@@ -329,7 +342,7 @@ public abstract class RequestAction implements InputReader {
 				}
 			}
 
-			processor.requestData.getResponseData().setStatus(400);
+			processor.exchangeData.setStatus(400);
 			processor.setErrorState(ErrorState.CLOSE_CLEAN, e);
 		}
 	}

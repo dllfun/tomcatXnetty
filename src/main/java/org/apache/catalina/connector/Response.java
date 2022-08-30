@@ -1037,7 +1037,7 @@ public class Response implements HttpServletResponse {
 
 	@Override
 	public Supplier<Map<String, String>> getTrailerFields() {
-		return getCoyoteResponse().getTrailerFields();
+		return getCoyoteResponse().getTrailerFieldsSupplier();
 	}
 
 	/**
@@ -1136,7 +1136,7 @@ public class Response implements HttpServletResponse {
 			return;
 		}
 
-		getCoyoteResponse().actionACK();
+		getCoyoteResponse().ack();
 	}
 
 	/**

@@ -164,11 +164,11 @@ final class StandardWrapperValve extends ValveBase {
 				if (context.getSwallowOutput()) {
 					try {
 						SystemLogHandler.startCapture();
-						if (request.hasDispatch()) {
-							request.doDispatch();
-						} else {
-							filterChain.doFilter(request.getRequest(), response.getResponse());
-						}
+//						if (request.hasDispatch()) {
+//							request.doDispatch();
+//						} else {
+						filterChain.doFilter(request.getRequest(), response.getResponse());
+//						}
 					} finally {
 						String log = SystemLogHandler.stopCapture();
 						if (log != null && log.length() > 0) {
@@ -176,11 +176,11 @@ final class StandardWrapperValve extends ValveBase {
 						}
 					}
 				} else {
-					if (request.hasDispatch()) {
-						request.doDispatch();
-					} else {
-						filterChain.doFilter(request.getRequest(), response.getResponse());
-					}
+//					if (request.hasDispatch()) {
+//						request.doDispatch();
+//					} else {
+					filterChain.doFilter(request.getRequest(), response.getResponse());
+//					}
 				}
 
 			}

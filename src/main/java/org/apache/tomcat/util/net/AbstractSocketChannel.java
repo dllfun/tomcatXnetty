@@ -28,6 +28,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -51,7 +52,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	private volatile long readTimeout = -1;
 	private volatile long writeTimeout = -1;
 
-	private volatile int keepAliveLeft = 100;
+	private volatile int keepAliveCount = 0;
 	// private volatile boolean upgraded = false;
 	// private boolean secure = false;
 	private String negotiatedProtocol = null;
@@ -73,6 +74,8 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	private volatile OperationState<?> readOperation = null;
 	private final Semaphore writePending;
 	private volatile OperationState<?> writeOperation = null;
+
+	private ReentrantLock writeLock = new ReentrantLock();
 
 	public AbstractSocketChannel(E socket, AbstractEndpoint<E, ?> endpoint) {
 		this.socket = socket;
@@ -170,13 +173,14 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 		return this.writeTimeout;
 	}
 
-	public final void setKeepAliveLeft(int keepAliveLeft) {
-		this.keepAliveLeft = keepAliveLeft;
-	}
+//	public final void setKeepAliveLeft(int keepAliveLeft) {
+//		this.keepAliveLeft = keepAliveLeft;
+//	}
 
 	@Override
-	public final int decrementKeepAlive() {
-		return (--keepAliveLeft);
+	public final int incrementKeepAlive() {
+		System.out.println(this.getRemotePort() + " incrementKeepAlive:" + keepAliveCount);
+		return (++keepAliveCount);
 	}
 
 	@Override
@@ -1071,6 +1075,11 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 
 	protected Semaphore getWritePending() {
 		return writePending;
+	}
+
+	@Override
+	public ReentrantLock getWriteLock() {
+		return writeLock;
 	}
 
 }

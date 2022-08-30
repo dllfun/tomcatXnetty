@@ -42,7 +42,7 @@ public class ProcessorHandler implements Handler {
 			// poller.cancelledKey(socket.getIOChannel().keyFor(poller.getSelector()),
 			// socketWrapper);
 			if (channel != null && !channel.isClosed()) {
-				channel.setCurrentProcessor(null);
+				channel.clearCurrentProcessor();
 				channel.close();
 			}
 		}
@@ -92,8 +92,7 @@ public class ProcessorHandler implements Handler {
 			// dispatched. Because of delays in the dispatch process, the
 			// timeout may no longer be required. Check here and avoid
 			// unnecessary processing.
-			if (SocketEvent.TIMEOUT == event && (!processor.isAsync() && !processor.isUpgrade()
-					|| processor.isAsync() && !processor.checkAsyncTimeoutGeneration())) {
+			if (SocketEvent.TIMEOUT == event && !processor.isIgnoredTimeout()) {
 				// This is effectively a NO-OP
 				return SocketState.OPEN;
 			}
@@ -135,7 +134,7 @@ public class ProcessorHandler implements Handler {
 								log.debug(sm.getString("abstractConnectionHandler.negotiatedProcessor.fail",
 										negotiatedProtocol));
 							}
-							channel.setCurrentProcessor(null);
+							channel.clearCurrentProcessor();
 							channel.close();
 							return SocketState.CLOSED;
 							/*
@@ -172,7 +171,7 @@ public class ProcessorHandler implements Handler {
 
 			do {
 
-				state = processor.process(channel, event);
+				state = processor.process(event);
 
 				if (state == SocketState.UPGRADING) {
 					SocketChannel socketChannel = (SocketChannel) channel;
@@ -193,7 +192,7 @@ public class ProcessorHandler implements Handler {
 							if (log.isDebugEnabled()) {
 								log.debug(sm.getString("abstractConnectionHandler.negotiatedProcessor.fail", "h2c"));
 							}
-							channel.setCurrentProcessor(null);
+							channel.clearCurrentProcessor();
 							channel.close();
 							return SocketState.CLOSED;
 						}
@@ -246,22 +245,20 @@ public class ProcessorHandler implements Handler {
 				}
 			} while (state == SocketState.UPGRADING);
 
-			if (state == SocketState.ASYNC_END) {
-				channel.setCurrentProcessor(null);
-				channel.close();
-				state = SocketState.CLOSED;
-			} else if (state == SocketState.LONG) {
+//			if (state == SocketState.ASYNC_END) {
+//				channel.clearCurrentProcessor();
+//				channel.close();
+//				state = SocketState.CLOSED;
+//			}
+			if (state == SocketState.LONG) {
 				// In the middle of processing a request/response. Keep the
 				// socket associated with the processor. Exact requirements
 				// depend on type of long poll
 				protocol.longPoll(channel, processor);
-				if (processor.isAsync()) {
-					protocol.addWaitingProcessor(processor);
-				}
 			} else if (state == SocketState.OPEN) {
 				// In keep-alive but between requests. OK to recycle
 				// processor. Continue to poll for the next request.
-				channel.setCurrentProcessor(null);
+				channel.clearCurrentProcessor();
 				protocol.release(processor);
 				if (channel instanceof SocketChannel) {
 					((SocketChannel) channel).registerReadInterest();
@@ -293,7 +290,7 @@ public class ProcessorHandler implements Handler {
 				if (closeException != null) {
 					channel.setCloseException(closeException);
 				}
-				channel.setCurrentProcessor(null);
+				channel.clearCurrentProcessor();
 				channel.close();
 				if (processor.isUpgrade()) {
 					UpgradeToken upgradeToken = processor.getUpgradeToken();
@@ -352,7 +349,7 @@ public class ProcessorHandler implements Handler {
 
 		// Make sure socket/processor is removed from the list of current
 		// connections
-		channel.setCurrentProcessor(null);
+		channel.clearCurrentProcessor();
 		channel.close();
 		protocol.release(processor);
 		return SocketState.CLOSED;

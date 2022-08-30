@@ -21,8 +21,6 @@ import java.nio.ByteBuffer;
 
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.SSLSupport;
-import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 
 /**
@@ -30,7 +28,11 @@ import org.apache.tomcat.util.net.SocketEvent;
  */
 public interface Processor {
 
-	boolean processInIoThread(SocketChannel channel, SocketEvent event) throws IOException;
+	void setChannel(Channel channel);
+
+	Channel getChannel();
+
+	boolean processInIoThread(SocketEvent event) throws IOException;
 
 	// void beforeProcess();
 
@@ -49,7 +51,7 @@ public interface Processor {
 	 * @throws IOException If an I/O error occurs during the processing of the
 	 *                     request
 	 */
-	SocketState process(Channel channel, SocketEvent event) throws IOException;
+	SocketState process(SocketEvent event) throws IOException;
 
 	// void afterProcess();
 
@@ -70,7 +72,7 @@ public interface Processor {
 	 */
 	boolean isUpgrade();
 
-	boolean isAsync();
+	// boolean isAsync();
 
 	/**
 	 * Check this processor to see if the timeout has expired and process a timeout
@@ -85,16 +87,24 @@ public interface Processor {
 	 *            If negative, the timeout will always be treated as ifq it has
 	 *            expired.
 	 */
-	void timeoutAsync(long now);
+	void checkTimeout(long now);
+
+	/**
+	 * 
+	 * @return
+	 */
+	boolean isIgnoredTimeout();
 
 	/**
 	 * @return The request associated with this processor.
 	 */
-	RequestData getRequestData();
+	// RequestData getRequestData();
 
-	ResponseData getResponseData();
+	// ResponseData getResponseData();
 
 	// AsyncState getAsyncStateMachine();
+
+	void nextRequest();
 
 	/**
 	 * Recycle the processor, ready for the next request which may be on the same
@@ -136,7 +146,7 @@ public interface Processor {
 	 * @return {@code true} If the async generation has not changed since the async
 	 *         timeout was triggered
 	 */
-	boolean checkAsyncTimeoutGeneration();
+	// boolean checkAsyncTimeoutGeneration();
 
 	Exception collectCloseException();
 

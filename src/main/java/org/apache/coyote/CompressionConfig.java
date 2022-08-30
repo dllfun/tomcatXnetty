@@ -206,13 +206,13 @@ public class CompressionConfig {
 	 * @return {@code true} if compression was enabled for the given response,
 	 *         otherwise {@code false}
 	 */
-	public boolean useCompression(RequestData request, ResponseData response) {
+	public boolean useCompression(ExchangeData exchangeData) {
 		// Check if compression is enabled
 		if (compressionLevel == 0) {
 			return false;
 		}
 
-		MimeHeaders responseHeaders = response.getMimeHeaders();
+		MimeHeaders responseHeaders = exchangeData.getResponseHeaders();
 
 		// Check if content is not already compressed
 		MessageBytes contentEncodingMB = responseHeaders.getValue("Content-Encoding");
@@ -236,7 +236,7 @@ public class CompressionConfig {
 		// If force mode, the length and MIME type checks are skipped
 		if (compressionLevel != 2) {
 			// Check if the response is of sufficient length to trigger the compression
-			long contentLength = response.getContentLengthLong();
+			long contentLength = exchangeData.getResponseContentLengthLong();
 			if (contentLength != -1 && contentLength < compressionMinSize) {
 				return false;
 			}
@@ -244,7 +244,7 @@ public class CompressionConfig {
 			// Check for compatible MIME-TYPE
 			String[] compressibleMimeTypes = getCompressibleMimeTypes();
 			if (compressibleMimeTypes != null
-					&& !startsWithStringArray(compressibleMimeTypes, response.getContentType())) {
+					&& !startsWithStringArray(compressibleMimeTypes, exchangeData.getResponseContentType())) {
 				return false;
 			}
 		}
@@ -266,7 +266,7 @@ public class CompressionConfig {
 		// Check if user-agent supports gzip encoding
 		// Only interested in whether gzip encoding is supported. Other
 		// encodings and weights can be ignored.
-		Enumeration<String> headerValues = request.getMimeHeaders().values("accept-encoding");
+		Enumeration<String> headerValues = exchangeData.getRequestHeaders().values("accept-encoding");
 		boolean foundGzip = false;
 		while (!foundGzip && headerValues.hasMoreElements()) {
 			List<AcceptEncoding> acceptEncodings = null;
@@ -294,7 +294,7 @@ public class CompressionConfig {
 			// Check for incompatible Browser
 			Pattern noCompressionUserAgents = this.noCompressionUserAgents;
 			if (noCompressionUserAgents != null) {
-				MessageBytes userAgentValueMB = request.getMimeHeaders().getValue("user-agent");
+				MessageBytes userAgentValueMB = exchangeData.getRequestHeaders().getValue("user-agent");
 				if (userAgentValueMB != null) {
 					String userAgentValue = userAgentValueMB.toString();
 					if (noCompressionUserAgents.matcher(userAgentValue).matches()) {
@@ -307,7 +307,7 @@ public class CompressionConfig {
 		// All checks have passed. Compression is enabled.
 
 		// Compressed content length is unknown so mark it as such.
-		response.setContentLength(-1);
+		exchangeData.setResponseContentLength(-1);
 		// Configure the content encoding for compressed content
 		responseHeaders.setValue("Content-Encoding").setString("gzip");
 

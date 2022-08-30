@@ -1594,7 +1594,7 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
 
 				// Check whether connection IO is in "not allowed" state
 				AtomicBoolean isIoAllowed = new AtomicBoolean(false);
-				request.getCoyoteRequest().actionIS_IO_ALLOWED(isIoAllowed);
+				request.getCoyoteRequest().isIoAllowed(isIoAllowed);
 				if (!isIoAllowed.get()) {
 					buf.append('X');
 					statusFound = true;

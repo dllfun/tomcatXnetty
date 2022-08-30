@@ -36,8 +36,8 @@ public class RequestInfo {
 
 	// ----------------------------------------------------------- Constructors
 
-	public RequestInfo(RequestData req) {
-		this.req = req;
+	public RequestInfo(ExchangeData exchangeData) {
+		this.exchangeData = exchangeData;
 	}
 
 	public RequestGroupInfo getGlobalProcessor() {
@@ -57,7 +57,7 @@ public class RequestInfo {
 	}
 
 	// ----------------------------------------------------- Instance Variables
-	private final RequestData req;
+	private final ExchangeData exchangeData;
 	private int stage = Constants.STAGE_NEW;
 	private String workerThreadName;
 	private ObjectName rpName;
@@ -66,32 +66,32 @@ public class RequestInfo {
 	// This is useful for long-running requests only
 
 	public String getMethod() {
-		return req.method().toString();
+		return exchangeData.getMethod().toString();
 	}
 
 	public String getCurrentUri() {
-		return req.requestURI().toString();
+		return exchangeData.getRequestURI().toString();
 	}
 
 	public String getCurrentQueryString() {
-		return req.queryString().toString();
+		return exchangeData.getQueryString().toString();
 	}
 
 	public String getProtocol() {
-		return req.protocol().toString();
+		return exchangeData.getProtocol().toString();
 	}
 
 	public String getVirtualHost() {
-		return req.serverName().toString();
+		return exchangeData.getServerName().toString();
 	}
 
 	public int getServerPort() {
-		return req.getServerPort();
+		return exchangeData.getServerPort();
 	}
 
 	public String getRemoteAddr() {
-		// req.action(ActionCode.REQ_HOST_ADDR_ATTRIBUTE, null);
-		return req.remoteAddr().toString();
+		// exchangeData.action(ActionCode.REQ_HOST_ADDR_ATTRIBUTE, null);
+		return exchangeData.getRemoteAddr().toString();
 	}
 
 	/**
@@ -101,7 +101,7 @@ public class RequestInfo {
 	 * @return The remote address for the this connection
 	 */
 	public String getRemoteAddrForwarded() {
-		String remoteAddrProxy = (String) req.getAttribute(Constants.REMOTE_ADDR_ATTRIBUTE);
+		String remoteAddrProxy = (String) exchangeData.getAttribute(Constants.REMOTE_ADDR_ATTRIBUTE);
 		if (remoteAddrProxy == null) {
 			return getRemoteAddr();
 		}
@@ -109,21 +109,21 @@ public class RequestInfo {
 	}
 
 	public int getContentLength() {
-		return req.getContentLength();
+		return exchangeData.getContentLength();
 	}
 
 	public long getRequestBytesReceived() {
-		return req.getBytesRead();
+		return exchangeData.getBytesRead();
 	}
 
 	public long getRequestBytesSent() {
-		return req.getResponseData().getContentWritten();
+		return exchangeData.getBytesWrite();
 	}
 
 	public long getRequestProcessingTime() {
 		// Not perfect, but good enough to avoid returning strange values due to
 		// concurrent updates.
-		long startTime = req.getStartTime();
+		long startTime = exchangeData.getStartTime();
 		if (getStage() == org.apache.coyote.Constants.STAGE_ENDED || startTime < 0) {
 			return 0;
 		} else {
@@ -155,20 +155,20 @@ public class RequestInfo {
 	 * information.
 	 */
 	void updateCounters() {
-		bytesReceived += req.getBytesRead();
-		bytesSent += req.getResponseData().getContentWritten();
+		bytesReceived += exchangeData.getBytesRead();
+		bytesSent += exchangeData.getBytesWrite();
 
 		requestCount++;
-		if (req.getResponseData().getStatus() >= 400)
+		if (exchangeData.getStatus() >= 400)
 			errorCount++;
-		long t0 = req.getStartTime();
+		long t0 = exchangeData.getStartTime();
 		long t1 = System.currentTimeMillis();
 		long time = t1 - t0;
 		this.lastRequestProcessingTime = time;
 		processingTime += time;
 		if (maxTime < time) {
 			maxTime = time;
-			maxRequestUri = req.requestURI().toString();
+			maxRequestUri = exchangeData.getRequestURI().toString();
 		}
 	}
 

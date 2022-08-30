@@ -20,29 +20,35 @@ package org.apache.coyote.http11.filters;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.ExchangeData;
 import org.apache.coyote.InputReader;
+import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.InputFilter;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
 /**
  * Input filter responsible for replaying the request body when restoring the
  * saved request after FORM authentication.
  */
-public class SavedRequestInputFilter implements InputFilter {
+public class SavedRequestInputFilter extends ProcessorComponent implements InputFilter {
 
 	/**
 	 * The original request body.
 	 */
 	protected ByteChunk input = null;
+	ByteBuffer byteBuffer = ByteBuffer.allocate(0);
 
 	/**
 	 * Create a new SavedRequestInputFilter.
 	 *
 	 * @param input The saved request body to be replayed.
 	 */
-	public SavedRequestInputFilter(ByteChunk input) {
+	public SavedRequestInputFilter(AbstractProcessor processor, ByteChunk input) {
+		super(processor);
 		this.input = input;
 	}
 
@@ -60,6 +66,7 @@ public class SavedRequestInputFilter implements InputFilter {
 
 	public void setInput(ByteChunk input) {
 		this.input = input;
+		processor.getExchangeData().setRequestContentLength(input.getLength());
 	}
 
 	@Override
@@ -68,18 +75,29 @@ public class SavedRequestInputFilter implements InputFilter {
 	}
 
 	@Override
+	public void actived() {
+		byteBuffer = ByteBuffer.allocate(8 * 1024);
+	}
+
+	@Override
 	public BufWrapper doRead() throws IOException {
-		// TODO Auto-generated method stub
-		return null;
+		if (input.getOffset() >= input.getEnd()) {
+			return null;
+		}
+
+		byteBuffer.position(byteBuffer.limit()).limit(byteBuffer.capacity());
+		input.subtract(byteBuffer);
+
+		return ByteBufferWrapper.wrapper(byteBuffer);
 	}
 
 	/**
 	 * Set the content length on the request.
 	 */
-	@Override
-	public void setRequest(org.apache.coyote.RequestData request) {
-		request.setContentLength(input.getLength());
-	}
+//	@Override
+//	public void setRequest(ExchangeData exchangeData) {
+
+//	}
 
 	/**
 	 * Make the filter ready to process the next request.
@@ -101,7 +119,7 @@ public class SavedRequestInputFilter implements InputFilter {
 	 * Set the next buffer in the filter pipeline (has no effect).
 	 */
 	@Override
-	public void setBuffer(InputReader buffer) {
+	public void setNext(InputReader next) {
 		// NOOP since this filter will be providing the request body
 	}
 

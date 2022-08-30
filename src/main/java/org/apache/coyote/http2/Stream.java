@@ -17,101 +17,63 @@
 package org.apache.coyote.http2;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.security.AccessController;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
-import java.util.Collections;
 import java.util.Iterator;
-import java.util.Locale;
-import java.util.Map;
-import java.util.function.Supplier;
 
-import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.CloseNowException;
-import org.apache.coyote.InputReader;
 import org.apache.coyote.DispatchHandler.ConcurrencyControlled;
-import org.apache.coyote.RequestData;
-import org.apache.coyote.ResponseData;
-import org.apache.coyote.http11.HttpOutputBuffer;
-import org.apache.coyote.http2.HpackDecoder.HeaderEmitter;
+import org.apache.coyote.ExchangeData;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
-import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.parser.Host;
 import org.apache.tomcat.util.net.AbstractLogicChannel;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
-import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
-import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
-import org.apache.tomcat.util.net.WriteBuffer;
 import org.apache.tomcat.util.res.StringManager;
 
-class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChannel, ConcurrencyControlled {
+public abstract class Stream extends AbstractStream implements AbstractLogicChannel, ConcurrencyControlled {
 
-	private static final Log log = LogFactory.getLog(Stream.class);
-	private static final StringManager sm = StringManager.getManager(Stream.class);
-
-	private static final int HEADER_STATE_START = 0;
-	private static final int HEADER_STATE_PSEUDO = 1;
-	private static final int HEADER_STATE_REGULAR = 2;
-	private static final int HEADER_STATE_TRAILER = 3;
-
-	private static final MimeHeaders ACK_HEADERS;
+	protected static final Log log = LogFactory.getLog(Stream.class);
+	protected static final StringManager sm = StringManager.getManager(Stream.class);
 
 	private static final Integer HTTP_UPGRADE_STREAM = Integer.valueOf(1);
-
-	static {
-		ResponseData response = new ResponseData();
-		response.setStatus(100);
-		StreamProcessor.prepareHeaders(null, response, true, null, null);
-		ACK_HEADERS = response.getMimeHeaders();
-	}
 
 	private volatile int weight = Constants.DEFAULT_WEIGHT;
 	private volatile long contentLengthReceived = 0;
 
-	private final Http2UpgradeHandler handler;
+	protected final Http2UpgradeHandler handler;
 	private final StreamStateMachine state;
-	private final WindowAllocationManager allocationManager = new WindowAllocationManager(this);
+	protected final WindowAllocationManager allocationManager = new WindowAllocationManager(this);
 
-	// State machine would be too much overhead
-	private int headerState = HEADER_STATE_START;
-	private StreamException headerException = null;
 	// TODO: null these when finished to reduce memory used by closed stream
-	private final RequestData requestData;
-	private StringBuilder cookieHeader = null;
-	private final ResponseData responseData = new ResponseData();
-	private final StreamInputBuffer inputBuffer;
-	private final StreamOutputBuffer streamOutputBuffer = new StreamOutputBuffer();
-	// private volatile AbstractProcessor processor;
-	// private final SocketChannel channel;
+	protected final ExchangeData exchangeData;
+//	private final ResponseData responseData = new ResponseData();
+//	private final StreamInputBuffer streamInputBuffer;
+//	protected final StreamOutputBuffer streamOutputBuffer = new StreamOutputBuffer();
 
 	Stream(Integer identifier, Http2UpgradeHandler handler) {
 		this(identifier, handler, null);
 	}
 
-	Stream(Integer identifier, Http2UpgradeHandler handler, RequestData requestData) {
+	Stream(Integer identifier, Http2UpgradeHandler handler, ExchangeData exchangeData) {
 		super(identifier);
 		// this.channel = channel;
 		this.handler = handler;
 		handler.getZero().addChild(this);
 		setWindowSize(handler.getRemoteSettings().getInitialWindowSize());
 		state = new StreamStateMachine(this);
-		if (requestData == null) {
+		if (exchangeData == null) {
 			// HTTP/2 new request
-			this.requestData = new RequestData();
-			this.inputBuffer = new StreamInputBuffer();
+			this.exchangeData = new ExchangeData();
+//			this.streamInputBuffer = new StreamInputBuffer();
 			// this.coyoteRequest.setInputBuffer(inputBuffer);
 		} else {
 			// HTTP/2 Push or HTTP/1.1 upgrade
-			this.requestData = requestData;
-			this.inputBuffer = null;
+			this.exchangeData = exchangeData;
+//			this.streamInputBuffer = null;
 			// Headers have been read by this point
 			state.receivedStartOfHeaders();
 			if (HTTP_UPGRADE_STREAM.equals(identifier)) {
@@ -121,21 +83,21 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 				} catch (IllegalArgumentException iae) {
 					// Something in the headers is invalid
 					// Set correct return status
-					responseData.setStatus(400);
+					exchangeData.setStatus(400);
 					// Set error flag. This triggers error processing rather than
 					// the normal mapping
-					responseData.setError();
+					exchangeData.setError();
 				}
 			}
 			// TODO Assuming the body has been read at this point is not valid
 			state.receivedEndOfStream();
 		}
-		this.requestData.setSendfile(handler.hasAsyncIO() && handler.getProtocol().getUseSendfile());
+		this.exchangeData.setSendfile(handler.hasAsyncIO() && handler.getProtocol().getUseSendfile());
 		// this.coyoteResponse.setOutputBuffer(http2OutputBuffer);
-		this.requestData.setResponseData(responseData);
-		this.requestData.protocol().setString("HTTP/2.0");
-		if (this.requestData.getStartTime() < 0) {
-			this.requestData.setStartTime(System.currentTimeMillis());
+//		this.exchangeData.setResponseData(responseData);
+		this.exchangeData.getProtocol().setString("HTTP/2.0");
+		if (this.exchangeData.getStartTime() < 0) {
+			this.exchangeData.setStartTime(System.currentTimeMillis());
 		}
 		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " created");
 	}
@@ -150,8 +112,12 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		return handler.getChannel().getSslSupport();
 	}
 
+	public Http2UpgradeHandler getHandler() {
+		return handler;
+	}
+
 	private void prepareRequest() {
-		MessageBytes hostValueMB = requestData.getMimeHeaders().getUniqueValue("host");
+		MessageBytes hostValueMB = exchangeData.getRequestHeaders().getUniqueValue("host");
 		if (hostValueMB == null) {
 			throw new IllegalArgumentException();
 		}
@@ -173,7 +139,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 				}
 				port = port * 10 + c - '0';
 			}
-			requestData.setServerPort(port);
+			exchangeData.setServerPort(port);
 
 			// Only need to copy the host name up to the :
 			valueL = colonPos;
@@ -184,7 +150,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		for (int i = 0; i < valueL; i++) {
 			hostNameC[i] = (char) valueB[i + valueS];
 		}
-		requestData.serverName().setChars(hostNameC, 0, valueL);
+		exchangeData.getServerName().setChars(hostNameC, 0, valueL);
 	}
 
 	final void rePrioritise(AbstractStream parent, boolean exclusive, int weight) {
@@ -232,7 +198,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 
 	final void receiveReset(long errorCode) {
 		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")"
-				+ " receiveReset errorCode: " + errorCode + " uri:" + requestData.requestURI().toString());
+				+ " receiveReset errorCode: " + errorCode + " uri:" + exchangeData.getRequestURI().toString());
 		if (log.isDebugEnabled()) {
 			log.debug(
 					sm.getString("stream.reset.receive", getConnectionId(), getIdentifier(), Long.toString(errorCode)));
@@ -240,11 +206,11 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		// Set the new state first since read and write both check this
 		state.receivedReset();
 		// Reads wait internally so need to call a method to break the wait()
-		if (inputBuffer != null) {
-			inputBuffer.receiveReset();
-		}
+		receiveReset();
 		cancelAllocationRequests();
 	}
+
+	protected abstract void receiveReset();
 
 	final void cancelAllocationRequests() {
 		allocationManager.notifyAny();
@@ -267,7 +233,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		}
 	}
 
-	final synchronized int reserveWindowSize(int reservation, boolean block) throws IOException {
+	public final synchronized int reserveWindowSize(int reservation, boolean block) throws IOException {
 		long windowSize = getWindowSize();
 		while (windowSize < 1) {
 			if (!canWrite()) {
@@ -279,7 +245,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 					allocationManager.waitForStream(writeTimeout);
 					windowSize = getWindowSize();
 					if (windowSize == 0) {
-						doWriteTimeout();
+						doStreamCancel(sm.getString("stream.writeTimeout"), Http2Error.ENHANCE_YOUR_CALM);
 					}
 				} catch (InterruptedException e) {
 					// Possible shutdown / rst or similar. Use an IOException to
@@ -302,18 +268,31 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		return allocation;
 	}
 
-	void doWriteTimeout() throws CloseNowException {
-		String msg = sm.getString("stream.writeTimeout");
-		StreamException se = new StreamException(msg, Http2Error.ENHANCE_YOUR_CALM, getIdAsInt());
+	void doStreamCancel(String msg, Http2Error error) throws CloseNowException {
+		StreamException se = new StreamException(msg, error, getIdAsInt());
 		// Prevent the application making further writes
-		streamOutputBuffer.closed = true;
+		cancelStream(se);
 		// Prevent Tomcat's error handling trying to write
-		responseData.setError();
-		responseData.setErrorReported();
+		exchangeData.setError();
+		exchangeData.setErrorReported();
 		// Trigger a reset once control returns to Tomcat
-		streamOutputBuffer.reset = se;
 		throw new CloseNowException(msg, se);
 	}
+
+	protected abstract void cancelStream(StreamException se);
+
+//	void doWriteTimeout() throws CloseNowException {
+//		String msg = sm.getString("stream.writeTimeout");
+//		StreamException se = new StreamException(msg, Http2Error.ENHANCE_YOUR_CALM, getIdAsInt());
+	// Prevent the application making further writes
+//		streamOutputBuffer.closed = true;
+	// Prevent Tomcat's error handling trying to write
+//		exchangeData.setError();
+//		exchangeData.setErrorReported();
+	// Trigger a reset once control returns to Tomcat
+//		streamOutputBuffer.reset = se;
+//		throw new CloseNowException(msg, se);
+//	}
 
 	void waitForConnectionAllocation(long timeout) throws InterruptedException {
 		allocationManager.waitForConnection(timeout);
@@ -328,225 +307,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 	}
 
 	@Override
-	public final void emitHeader(String name, String value) throws HpackException {
-		if (log.isDebugEnabled()) {
-			log.debug(sm.getString("stream.header.debug", getConnectionId(), getIdentifier(), name, value));
-		}
-
-		// Header names must be lower case
-		if (!name.toLowerCase(Locale.US).equals(name)) {
-			throw new HpackException(sm.getString("stream.header.case", getConnectionId(), getIdentifier(), name));
-		}
-
-		if ("connection".equals(name)) {
-			throw new HpackException(sm.getString("stream.header.connection", getConnectionId(), getIdentifier()));
-		}
-
-		if ("te".equals(name)) {
-			if (!"trailers".equals(value)) {
-				throw new HpackException(sm.getString("stream.header.te", getConnectionId(), getIdentifier(), value));
-			}
-		}
-
-		if (headerException != null) {
-			// Don't bother processing the header since the stream is going to
-			// be reset anyway
-			return;
-		}
-
-		if (name.length() == 0) {
-			throw new HpackException(sm.getString("stream.header.empty", getConnectionId(), getIdentifier()));
-		}
-
-		boolean pseudoHeader = name.charAt(0) == ':';
-
-		if (pseudoHeader && headerState != HEADER_STATE_PSEUDO) {
-			headerException = new StreamException(
-					sm.getString("stream.header.unexpectedPseudoHeader", getConnectionId(), getIdentifier(), name),
-					Http2Error.PROTOCOL_ERROR, getIdAsInt());
-			// No need for further processing. The stream will be reset.
-			return;
-		}
-
-		if (headerState == HEADER_STATE_PSEUDO && !pseudoHeader) {
-			headerState = HEADER_STATE_REGULAR;
-		}
-
-		switch (name) {
-		case ":method": {
-			if (requestData.method().isNull()) {
-				requestData.method().setString(value);
-			} else {
-				throw new HpackException(
-						sm.getString("stream.header.duplicate", getConnectionId(), getIdentifier(), ":method"));
-			}
-			break;
-		}
-		case ":scheme": {
-			if (requestData.scheme().isNull()) {
-				requestData.scheme().setString(value);
-			} else {
-				throw new HpackException(
-						sm.getString("stream.header.duplicate", getConnectionId(), getIdentifier(), ":scheme"));
-			}
-			break;
-		}
-		case ":path": {
-			if (!requestData.requestURI().isNull()) {
-				throw new HpackException(
-						sm.getString("stream.header.duplicate", getConnectionId(), getIdentifier(), ":path"));
-			}
-			if (value.length() == 0) {
-				throw new HpackException(sm.getString("stream.header.noPath", getConnectionId(), getIdentifier()));
-			}
-			int queryStart = value.indexOf('?');
-			String uri;
-			if (queryStart == -1) {
-				uri = value;
-			} else {
-				uri = value.substring(0, queryStart);
-				String query = value.substring(queryStart + 1);
-				requestData.queryString().setString(query);
-			}
-			// Bug 61120. Set the URI as bytes rather than String so:
-			// - any path parameters are correctly processed
-			// - the normalization security checks are performed that prevent
-			// directory traversal attacks
-			byte[] uriBytes = uri.getBytes(StandardCharsets.ISO_8859_1);
-			requestData.requestURI().setBytes(uriBytes, 0, uriBytes.length);
-			break;
-		}
-		case ":authority": {
-			if (requestData.serverName().isNull()) {
-				int i;
-				try {
-					i = Host.parse(value);
-				} catch (IllegalArgumentException iae) {
-					// Host value invalid
-					throw new HpackException(sm.getString("stream.header.invalid", getConnectionId(), getIdentifier(),
-							":authority", value));
-				}
-				if (i > -1) {
-					requestData.serverName().setString(value.substring(0, i));
-					requestData.setServerPort(Integer.parseInt(value.substring(i + 1)));
-				} else {
-					requestData.serverName().setString(value);
-				}
-			} else {
-				throw new HpackException(
-						sm.getString("stream.header.duplicate", getConnectionId(), getIdentifier(), ":authority"));
-			}
-			break;
-		}
-		case "cookie": {
-			// Cookie headers need to be concatenated into a single header
-			// See RFC 7540 8.1.2.5
-			if (cookieHeader == null) {
-				cookieHeader = new StringBuilder();
-			} else {
-				cookieHeader.append("; ");
-			}
-			cookieHeader.append(value);
-			break;
-		}
-		default: {
-			if (headerState == HEADER_STATE_TRAILER && !handler.getProtocol().isTrailerHeaderAllowed(name)) {
-				break;
-			}
-			if ("expect".equals(name) && "100-continue".equals(value)) {
-				requestData.setExpectation(true);
-			}
-			if (pseudoHeader) {
-				headerException = new StreamException(
-						sm.getString("stream.header.unknownPseudoHeader", getConnectionId(), getIdentifier(), name),
-						Http2Error.PROTOCOL_ERROR, getIdAsInt());
-			}
-
-			if (headerState == HEADER_STATE_TRAILER) {
-				// HTTP/2 headers are already always lower case
-				requestData.getTrailerFields().put(name, value);
-			} else {
-				requestData.getMimeHeaders().addValue(name).setString(value);
-			}
-		}
-		}
-	}
-
-	@Override
-	public void setHeaderException(StreamException streamException) {
-		if (headerException == null) {
-			headerException = streamException;
-		}
-	}
-
-	@Override
-	public void validateHeaders() throws StreamException {
-		if (headerException == null) {
-			return;
-		}
-
-		throw headerException;
-	}
-
-	final boolean receivedEndOfHeaders() throws ConnectionException {
-		if (requestData.method().isNull() || requestData.scheme().isNull() || requestData.requestURI().isNull()) {
-			throw new ConnectionException(sm.getString("stream.header.required", getConnectionId(), getIdentifier()),
-					Http2Error.PROTOCOL_ERROR);
-		}
-		// Cookie headers need to be concatenated into a single header
-		// See RFC 7540 8.1.2.5
-		// Can only do this once the headers are fully received
-		if (cookieHeader != null) {
-			requestData.getMimeHeaders().addValue("cookie").setString(cookieHeader.toString());
-		}
-		return headerState == HEADER_STATE_REGULAR || headerState == HEADER_STATE_PSEUDO;
-	}
-
-	final void writeHeaders(boolean finished) throws IOException {
-		if (finished) {
-			System.err.println("writeHeaders and finished");
-		}
-		boolean endOfStream = streamOutputBuffer.hasNoBody() && responseData.getTrailerFields() == null;
-		if (endOfStream) {
-			System.err.println("has bug, never happen");
-		}
-		handler.writeHeaders(this, 0, responseData.getMimeHeaders(), finished, Constants.DEFAULT_HEADERS_FRAME_SIZE);
-	}
-
-	final void writeTrailers() throws IOException {
-		Supplier<Map<String, String>> supplier = responseData.getTrailerFields();
-		if (supplier == null) {
-			// No supplier was set, end of stream will already have been sent
-			return;
-		}
-
-		// We can re-use the MimeHeaders from the response since they have
-		// already been processed by the encoder at this point
-		MimeHeaders mimeHeaders = responseData.getMimeHeaders();
-		mimeHeaders.recycle();
-
-		Map<String, String> headerMap = supplier.get();
-		if (headerMap == null) {
-			headerMap = Collections.emptyMap();
-		}
-
-		// Copy the contents of the Map to the MimeHeaders
-		// TODO: Is there benefit in refactoring this? Is MimeHeaders too
-		// heavyweight? Can we reduce the copy/conversions?
-		for (Map.Entry<String, String> headerEntry : headerMap.entrySet()) {
-			MessageBytes mb = mimeHeaders.addValue(headerEntry.getKey());
-			mb.setString(headerEntry.getValue());
-		}
-
-		handler.writeHeaders(this, 0, mimeHeaders, true, Constants.DEFAULT_HEADERS_FRAME_SIZE);
-	}
-
-	final void writeAck() throws IOException {
-		handler.writeHeaders(this, 0, ACK_HEADERS, false, Constants.DEFAULT_HEADERS_ACK_FRAME_SIZE);
-	}
-
-	@Override
-	final String getConnectionId() {
+	public final String getConnectionId() {
 		return handler.getZero().getConnectionId();
 	}
 
@@ -560,43 +321,32 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		return weight;
 	}
 
-	final RequestData getRequestData() {
-		return requestData;
+	final ExchangeData getExchangeData() {
+		return exchangeData;
 	}
 
-	final ResponseData getResponseData() {
-		return responseData;
-	}
-
-	final ByteBuffer getInputByteBuffer() {
-		return inputBuffer.getInBuffer();
-	}
+//	final ResponseData getResponseData() {
+//		return responseData;
+//	}
 
 	final void receivedStartOfHeaders(boolean headersEndStream) throws Http2Exception {
-		if (headerState == HEADER_STATE_START) {
-			headerState = HEADER_STATE_PSEUDO;
-			handler.getHpackDecoder().setMaxHeaderCount(handler.getProtocol().getMaxHeaderCount());
-			handler.getHpackDecoder().setMaxHeaderSize(handler.getProtocol().getMaxHeaderSize());
-		} else if (headerState == HEADER_STATE_PSEUDO || headerState == HEADER_STATE_REGULAR) {
-			// Trailer headers MUST include the end of stream flag
-			if (headersEndStream) {
-				headerState = HEADER_STATE_TRAILER;
-				handler.getHpackDecoder().setMaxHeaderCount(handler.getProtocol().getMaxTrailerCount());
-				handler.getHpackDecoder().setMaxHeaderSize(handler.getProtocol().getMaxTrailerSize());
-			} else {
-				throw new ConnectionException(
-						sm.getString("stream.trailerHeader.noEndOfStream", getConnectionId(), getIdentifier()),
-						Http2Error.PROTOCOL_ERROR);
-			}
-		}
+		receivedStartOfHeadersLocal(headersEndStream);
 		// Parser will catch attempt to send a headers frame after the stream
 		// has closed.
 		state.receivedStartOfHeaders();
 	}
 
+	protected abstract void receivedStartOfHeadersLocal(boolean headersEndStream) throws ConnectionException;
+
+	final boolean receivedEndOfHeaders() throws ConnectionException {
+		return receivedEndOfHeadersLocal();
+	}
+
+	protected abstract boolean receivedEndOfHeadersLocal() throws ConnectionException;
+
 	final void receivedData(int payloadSize) throws ConnectionException {
 		contentLengthReceived += payloadSize;
-		long contentLengthHeader = requestData.getContentLengthLong();
+		long contentLengthHeader = exchangeData.getRequestContentLengthLong();
 		if (contentLengthHeader > -1 && contentLengthReceived > contentLengthHeader) {
 			throw new ConnectionException(
 					sm.getString("stream.header.contentLength", getConnectionId(), getIdentifier(),
@@ -609,19 +359,18 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 //		System.out.println(
 //				"conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " receivedEndOfStream");
 		if (isContentLengthInconsistent()) {
-			throw new ConnectionException(
-					sm.getString("stream.header.contentLength", getConnectionId(), getIdentifier(),
-							Long.valueOf(requestData.getContentLengthLong()), Long.valueOf(contentLengthReceived)),
-					Http2Error.PROTOCOL_ERROR);
+			throw new ConnectionException(sm.getString("stream.header.contentLength", getConnectionId(),
+					getIdentifier(), Long.valueOf(exchangeData.getRequestContentLengthLong()),
+					Long.valueOf(contentLengthReceived)), Http2Error.PROTOCOL_ERROR);
 		}
 		state.receivedEndOfStream();
-		if (inputBuffer != null) {
-			inputBuffer.notifyEof();
-		}
+		notifyEof();
 	}
 
+	protected abstract void notifyEof();
+
 	final boolean isContentLengthInconsistent() {
-		long contentLengthHeader = requestData.getContentLengthLong();
+		long contentLengthHeader = exchangeData.getRequestContentLengthLong();
 		if (contentLengthHeader > -1 && contentLengthReceived != contentLengthHeader) {
 			return true;
 		}
@@ -633,25 +382,11 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 	}
 
 	final void sentEndOfStream() {
-		streamOutputBuffer.endOfStreamSent = true;
+		endOfStreamSent();
 		state.sentEndOfStream();
 	}
 
-	public final boolean isReadyForWrite() {
-		return streamOutputBuffer.isReady();
-	}
-
-//	public final boolean flush(boolean block) throws IOException {
-//		return streamOutputBuffer.flush(block);
-//	}
-
-	final StreamInputBuffer getInputBuffer() {
-		return inputBuffer;
-	}
-
-	final StreamOutputBuffer getOutputBuffer() {
-		return streamOutputBuffer;
-	}
+	protected abstract void endOfStreamSent();
 
 	final void sentPushPromise() {
 		state.sentPushPromise();
@@ -682,6 +417,42 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		return !state.isFrameTypePermitted(FrameType.DATA);
 	}
 
+	/**
+	 * Populate the TLS related request attributes from the {@link SSLSupport}
+	 * instance associated with this processor. Protocols that populate TLS
+	 * attributes from a different source (e.g. AJP) should override this method.
+	 */
+	protected void populateSslRequestAttributes() {
+		try {
+			SSLSupport sslSupport = handler.getChannel().getSslSupport();// Stream.this
+			if (sslSupport != null) {
+				Object sslO = sslSupport.getCipherSuite();
+				if (sslO != null) {
+					exchangeData.setAttribute(SSLSupport.CIPHER_SUITE_KEY, sslO);
+				}
+				sslO = sslSupport.getPeerCertificateChain();
+				if (sslO != null) {
+					exchangeData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
+				}
+				sslO = sslSupport.getKeySize();
+				if (sslO != null) {
+					exchangeData.setAttribute(SSLSupport.KEY_SIZE_KEY, sslO);
+				}
+				sslO = sslSupport.getSessionId();
+				if (sslO != null) {
+					exchangeData.setAttribute(SSLSupport.SESSION_ID_KEY, sslO);
+				}
+				sslO = sslSupport.getProtocol();
+				if (sslO != null) {
+					exchangeData.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, sslO);
+				}
+				exchangeData.setAttribute(SSLSupport.SESSION_MGR, sslSupport);
+			}
+		} catch (Exception e) {
+			log.warn(sm.getString("abstractProcessor.socket.ssl"), e);
+		}
+	}
+
 	@Override
 	public void close() {
 		Throwable t = getCloseException();
@@ -705,7 +476,7 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 					log.debug(sm.getString("stream.reset.send", getConnectionId(), getIdentifier(), se.getError()));
 				}
 				state.sendReset();
-				handler.sendStreamReset(se);
+				handler.getWriter().writeStreamReset(se);
 			} catch (IOException ioe) {
 				ConnectionException ce = new ConnectionException(sm.getString("stream.reset.fail"),
 						Http2Error.PROTOCOL_ERROR);
@@ -717,49 +488,9 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		}
 	}
 
-	final boolean isPushSupported() {
-		return handler.getRemoteSettings().getEnablePush();
-	}
-
-	final void push(RequestData request) throws IOException {
-		// Can only push when supported and from a peer initiated stream
-		if (!isPushSupported() || getIdAsInt() % 2 == 0) {
-			return;
-		}
-		// Set the special HTTP/2 headers
-		request.getMimeHeaders().addValue(":method").duplicate(request.method());
-		request.getMimeHeaders().addValue(":scheme").duplicate(request.scheme());
-		StringBuilder path = new StringBuilder(request.requestURI().toString());
-		if (!request.queryString().isNull()) {
-			path.append('?');
-			path.append(request.queryString().toString());
-		}
-		request.getMimeHeaders().addValue(":path").setString(path.toString());
-
-		// Authority needs to include the port only if a non-standard port is
-		// being used.
-		if (!(request.scheme().equals("http") && request.getServerPort() == 80)
-				&& !(request.scheme().equals("https") && request.getServerPort() == 443)) {
-			request.getMimeHeaders().addValue(":authority")
-					.setString(request.serverName().getString() + ":" + request.getServerPort());
-		} else {
-			request.getMimeHeaders().addValue(":authority").duplicate(request.serverName());
-		}
-
-		push(handler, request, this);
-	}
-
 	boolean isTrailerFieldsReady() {
 		// Once EndOfStream has been received, canRead will be false
 		return !state.canRead();
-	}
-
-	boolean isTrailerFieldsSupported() {
-		return !streamOutputBuffer.endOfStreamSent;
-	}
-
-	StreamException getResetException() {
-		return streamOutputBuffer.reset;
 	}
 
 	@Override
@@ -782,629 +513,62 @@ class Stream extends AbstractStream implements HeaderEmitter, AbstractLogicChann
 		return this.getIdentifier().toString();
 	}
 
-	private static void push(final Http2UpgradeHandler handler, final RequestData request, final Stream stream)
-			throws IOException {
-		if (org.apache.coyote.Constants.IS_SECURITY_ENABLED) {
-			try {
-				AccessController.doPrivileged(new PrivilegedPush(handler, request, stream));
-			} catch (PrivilegedActionException ex) {
-				Exception e = ex.getException();
-				if (e instanceof IOException) {
-					throw (IOException) e;
-				} else {
-					throw new IOException(ex);
-				}
-			}
+//	class StreamOutputBuffer implements HttpOutputBuffer {
+
+//		private StreamOutputBuffer() {
+
+//		}
+
+//	}
+
+//	class StreamInputBuffer implements InputReader, ByteBufferHandler {
+
+	// @Override
+	/*
+	 * public final int doRead(PreInputBuffer applicationBufferHandler) throws
+	 * IOException {
+	 * 
+	 * ensureBuffersExist();
+	 * 
+	 * int written = -1;
+	 * 
+	 * // Ensure that only one thread accesses inBuffer at a time synchronized
+	 * (inBuffer) { boolean canRead = false; while (inBuffer.position() == 0 &&
+	 * (canRead = isActive() && !isInputFinished())) { // Need to block until some
+	 * data is written try { if (log.isDebugEnabled()) {
+	 * log.debug(sm.getString("stream.inputBuffer.empty")); }
+	 * 
+	 * long readTimeout = handler.getProtocol().getStreamReadTimeout(); if
+	 * (readTimeout < 0) { inBuffer.wait(); } else { inBuffer.wait(readTimeout); }
+	 * 
+	 * if (resetReceived) { throw new
+	 * IOException(sm.getString("stream.inputBuffer.reset")); }
+	 * 
+	 * if (inBuffer.position() == 0 && isActive() && !isInputFinished()) { String
+	 * msg = sm.getString("stream.inputBuffer.readTimeout"); StreamException se =
+	 * new StreamException(msg, Http2Error.ENHANCE_YOUR_CALM, getIdAsInt()); //
+	 * Trigger a reset once control returns to Tomcat responseData.setError();
+	 * streamOutputBuffer.reset = se; throw new CloseNowException(msg, se); } }
+	 * catch (InterruptedException e) { // Possible shutdown / rst or similar. Use
+	 * an // IOException to signal to the client that further I/O // isn't possible
+	 * for this Stream. throw new IOException(e); } }
+	 * 
+	 * if (inBuffer.position() > 0) { // Data is available in the inBuffer. Copy it
+	 * to the // outBuffer. inBuffer.flip(); written = inBuffer.remaining(); if
+	 * (log.isDebugEnabled()) { log.debug(sm.getString("stream.inputBuffer.copy",
+	 * Integer.toString(written))); } inBuffer.get(outBuffer, 0, written);
+	 * inBuffer.clear(); } else if (!canRead) { return -1; } else { // Should never
+	 * happen throw new IllegalStateException(); } }
+	 * 
+	 * applicationBufferHandler.setBufWrapper(ByteBufferWrapper.wrapper(ByteBuffer.
+	 * wrap(outBuffer, 0, written)));
+	 * 
+	 * // Increment client-side flow control windows by the number of bytes // read
+	 * handler.writeWindowUpdate(Stream.this, written, true);
+	 * 
+	 * return written; }
+	 */
+
+//	}
 
-		} else {
-			handler.push(request, stream);
-		}
-	}
-
-	private static class PrivilegedPush implements PrivilegedExceptionAction<Void> {
-
-		private final Http2UpgradeHandler handler;
-		private final RequestData request;
-		private final Stream stream;
-
-		public PrivilegedPush(Http2UpgradeHandler handler, RequestData request, Stream stream) {
-			this.handler = handler;
-			this.request = request;
-			this.stream = stream;
-		}
-
-		@Override
-		public Void run() throws IOException {
-			handler.push(request, stream);
-			return null;
-		}
-	}
-
-	class StreamOutputBuffer implements HttpOutputBuffer {
-
-		// Flag that indicates that data was left over on a previous
-		// non-blocking write. Once set, this flag stays set until all the data
-		// has been written.
-		private volatile long written = 0;
-		private volatile boolean closed = false;
-		private volatile StreamException reset = null;
-		private volatile boolean endOfStreamSent = false;
-
-		private StreamOutputBuffer() {
-
-		}
-
-		/*
-		 * The write methods are synchronized to ensure that only one thread at a time
-		 * is able to access the buffer. Without this protection, a client that
-		 * performed concurrent writes could corrupt the buffer.
-		 */
-
-		@Override
-		public final synchronized int doWrite(ByteBuffer chunk) throws IOException {
-			if (closed) {
-				throw new IllegalStateException(sm.getString("stream.closed", getConnectionId(), getIdentifier()));
-			}
-			// chunk is always fully written
-			int result = chunk.remaining();
-			written += result;
-			long contentLength = requestData.getResponseData().getContentLengthLong();
-			boolean finished = contentLength != -1 && contentLength == written
-					&& responseData.getTrailerFields() == null;
-			handler.writeBody(Stream.this, chunk, result, finished);
-			return result;
-		}
-
-		final synchronized boolean isReady() {
-			// Bug 63682
-			// Only want to return false if the window size is zero AND we are
-			// already waiting for an allocation.
-			if (getWindowSize() > 0 && allocationManager.isWaitingForStream()
-					|| handler.getZero().getWindowSize() > 0 && allocationManager.isWaitingForConnection()) {
-				return false;
-			} else {
-				return true;
-			}
-		}
-
-		@Override
-		public final long getBytesWritten() {
-			return written;
-		}
-
-		@Override
-		public final void end() throws IOException {
-			if (reset != null) {
-				throw new CloseNowException(reset);
-			}
-			if (!closed) {
-				closed = true;
-				// flush(true);
-				if (!endOfStreamSent) {
-					// Handling this special case here is simpler than trying
-					// to modify the following code to handle it.
-					System.err.println("write empty body for finish");
-					handler.writeBody(Stream.this, ByteBuffer.allocate(0), 0, responseData.getTrailerFields() == null);
-				}
-				writeTrailers();
-			}
-		}
-
-		/**
-		 * @return <code>true</code> if it is certain that the associated response has
-		 *         no body.
-		 */
-		final boolean hasNoBody() {
-			return ((written == 0) && closed);
-		}
-
-		@Override
-		public void flush() throws IOException {
-
-		}
-
-		@Override
-		public boolean flush(boolean block) throws IOException {
-			return false;
-		}
-
-	}
-
-	class StreamOutputBufferBak implements HttpOutputBuffer, WriteBuffer.Sink {
-
-		private final ByteBuffer buffer = ByteBuffer.allocate(8 * 1024);
-		private final WriteBuffer writeBuffer = new WriteBuffer(32 * 1024);
-		// Flag that indicates that data was left over on a previous
-		// non-blocking write. Once set, this flag stays set until all the data
-		// has been written.
-		private boolean dataLeft;
-		private volatile long written = 0;
-		private int streamReservation = 0;
-		private volatile boolean closed = false;
-		private volatile StreamException reset = null;
-		private volatile boolean endOfStreamSent = false;
-
-		/*
-		 * The write methods are synchronized to ensure that only one thread at a time
-		 * is able to access the buffer. Without this protection, a client that
-		 * performed concurrent writes could corrupt the buffer.
-		 */
-
-		@Override
-		public final synchronized int doWrite(ByteBuffer chunk) throws IOException {
-			if (closed) {
-				throw new IllegalStateException(sm.getString("stream.closed", getConnectionId(), getIdentifier()));
-			}
-			// chunk is always fully written
-			int result = chunk.remaining();
-			if (writeBuffer.isEmpty()) {
-				int chunkLimit = chunk.limit();
-				while (chunk.remaining() > 0) {
-					int thisTime = Math.min(buffer.remaining(), chunk.remaining());
-					chunk.limit(chunk.position() + thisTime);
-					buffer.put(chunk);
-					chunk.limit(chunkLimit);
-					if (chunk.remaining() > 0 && !buffer.hasRemaining()) {
-						// Only flush if we have more data to write and the buffer
-						// is full
-						if (flush(true, requestData.getAsyncStateMachine().getWriteListener() == null)) {
-							writeBuffer.add(chunk);
-							dataLeft = true;
-							break;
-						}
-					}
-				}
-			} else {
-				writeBuffer.add(chunk);
-			}
-			written += result;
-			return result;
-		}
-
-		public final synchronized boolean flush(boolean block) throws IOException {
-			/*
-			 * Need to ensure that there is exactly one call to flush even when there is no
-			 * data to write. Too few calls (i.e. zero) and the end of stream message is not
-			 * sent for a completed asynchronous write. Too many calls and the end of stream
-			 * message is sent too soon and trailer headers are not sent.
-			 */
-			boolean dataInBuffer = buffer.position() > 0;
-			boolean flushed = false;
-
-			if (dataInBuffer) {
-				dataInBuffer = flush(false, block);
-				flushed = true;
-			}
-
-			if (dataInBuffer) {
-				dataLeft = true;
-			} else {
-				if (writeBuffer.isEmpty()) {
-					// Both buffer and writeBuffer are empty.
-					if (flushed) {
-						dataLeft = false;
-					} else {
-						dataLeft = flush(false, block);
-					}
-				} else {
-					dataLeft = writeBuffer.write(this, block);
-				}
-			}
-
-			return dataLeft;
-		}
-
-		private final synchronized boolean flush(boolean writeInProgress, boolean block) throws IOException {
-			if (log.isDebugEnabled()) {
-				log.debug(sm.getString("stream.outputBuffer.flush.debug", getConnectionId(), getIdentifier(),
-						Integer.toString(buffer.position()), Boolean.toString(writeInProgress),
-						Boolean.toString(closed)));
-			}
-			if (buffer.position() == 0) {
-				if (closed && !endOfStreamSent) {
-					// Handling this special case here is simpler than trying
-					// to modify the following code to handle it.
-					System.err.println("write empty body for finish");
-					handler.writeBody(Stream.this, buffer, 0, responseData.getTrailerFields() == null);
-				}
-				// Buffer is empty. Nothing to do.
-				return false;
-			}
-			buffer.flip();
-			int left = buffer.remaining();
-			while (left > 0) {
-				if (streamReservation == 0) {
-					streamReservation = reserveWindowSize(left, block);
-					if (streamReservation == 0) {
-						// Must be non-blocking.
-						// Note: Can't add to the writeBuffer here as the write
-						// may originate from the writeBuffer.
-						buffer.compact();
-						return true;
-					}
-				}
-				while (streamReservation > 0) {
-					int connectionReservation = handler.reserveWindowSize(Stream.this, streamReservation, block);
-					if (connectionReservation == 0) {
-						// Must be non-blocking.
-						// Note: Can't add to the writeBuffer here as the write
-						// may originate from the writeBuffer.
-						buffer.compact();
-						return true;
-					}
-					// Do the write
-					handler.writeBody(Stream.this, buffer, connectionReservation, !writeInProgress && closed
-							&& left == connectionReservation && responseData.getTrailerFields() == null);
-					streamReservation -= connectionReservation;
-					left -= connectionReservation;
-				}
-			}
-			buffer.clear();
-			return false;
-		}
-
-		final synchronized boolean isReady() {
-			// Bug 63682
-			// Only want to return false if the window size is zero AND we are
-			// already waiting for an allocation.
-			if (getWindowSize() > 0 && allocationManager.isWaitingForStream()
-					|| handler.getZero().getWindowSize() > 0 && allocationManager.isWaitingForConnection()
-					|| dataLeft) {
-				return false;
-			} else {
-				return true;
-			}
-		}
-
-		@Override
-		public final long getBytesWritten() {
-			return written;
-		}
-
-		@Override
-		public final void end() throws IOException {
-			if (reset != null) {
-				throw new CloseNowException(reset);
-			}
-			if (!closed) {
-				closed = true;
-				flush(true);
-				writeTrailers();
-			}
-		}
-
-		/**
-		 * @return <code>true</code> if it is certain that the associated response has
-		 *         no body.
-		 */
-		final boolean hasNoBody() {
-			return ((written == 0) && closed);
-		}
-
-		@Override
-		public void flush() throws IOException {
-			/*
-			 * This method should only be called during blocking I/O. All the Servlet API
-			 * calls that end up here are illegal during non-blocking I/O. Servlet 5.4.
-			 * However, the wording Servlet specification states that the behaviour is
-			 * undefined so we do the best we can which is to perform a flush using blocking
-			 * I/O or non-blocking I/O based depending which is currently in use.
-			 */
-			flush(requestData.getAsyncStateMachine().getWriteListener() == null);
-		}
-
-		@Override
-		public synchronized boolean writeFromBuffer(ByteBuffer src, boolean blocking) throws IOException {
-			int chunkLimit = src.limit();
-			while (src.remaining() > 0) {
-				int thisTime = Math.min(buffer.remaining(), src.remaining());
-				src.limit(src.position() + thisTime);
-				buffer.put(src);
-				src.limit(chunkLimit);
-				if (flush(false, blocking)) {
-					return true;
-				}
-			}
-			return false;
-		}
-	}
-
-	class StreamInputBuffer implements InputReader {
-
-		/*
-		 * Two buffers are required to avoid various multi-threading issues. These
-		 * issues arise from the fact that the Stream (or the Request/Response) used by
-		 * the application is processed in one thread but the connection is processed in
-		 * another. Therefore it is possible that a request body frame could be received
-		 * before the application is ready to read it. If it isn't buffered, processing
-		 * of the connection (and hence all streams) would block until the application
-		 * read the data. Hence the incoming data has to be buffered. If only one buffer
-		 * was used then it could become corrupted if the connection thread is trying to
-		 * add to it at the same time as the application is read it. While it should be
-		 * possible to avoid this corruption by careful use of the buffer it would still
-		 * require the same copies as using two buffers and the behaviour would be less
-		 * clear.
-		 *
-		 * The buffers are created lazily because they quickly add up to a lot of memory
-		 * and most requests do not have bodies.
-		 */
-		// This buffer is used to populate the ByteChunk passed in to the read
-		// method
-		private byte[] outBuffer;
-		// This buffer is the destination for incoming data. It is normally is
-		// 'write mode'.
-		private volatile ByteBuffer inBuffer;
-		private volatile boolean readInterest;
-		private boolean resetReceived = false;
-
-		// @Override
-		/*
-		 * public final int doRead(PreInputBuffer applicationBufferHandler) throws
-		 * IOException {
-		 * 
-		 * ensureBuffersExist();
-		 * 
-		 * int written = -1;
-		 * 
-		 * // Ensure that only one thread accesses inBuffer at a time synchronized
-		 * (inBuffer) { boolean canRead = false; while (inBuffer.position() == 0 &&
-		 * (canRead = isActive() && !isInputFinished())) { // Need to block until some
-		 * data is written try { if (log.isDebugEnabled()) {
-		 * log.debug(sm.getString("stream.inputBuffer.empty")); }
-		 * 
-		 * long readTimeout = handler.getProtocol().getStreamReadTimeout(); if
-		 * (readTimeout < 0) { inBuffer.wait(); } else { inBuffer.wait(readTimeout); }
-		 * 
-		 * if (resetReceived) { throw new
-		 * IOException(sm.getString("stream.inputBuffer.reset")); }
-		 * 
-		 * if (inBuffer.position() == 0 && isActive() && !isInputFinished()) { String
-		 * msg = sm.getString("stream.inputBuffer.readTimeout"); StreamException se =
-		 * new StreamException(msg, Http2Error.ENHANCE_YOUR_CALM, getIdAsInt()); //
-		 * Trigger a reset once control returns to Tomcat responseData.setError();
-		 * streamOutputBuffer.reset = se; throw new CloseNowException(msg, se); } }
-		 * catch (InterruptedException e) { // Possible shutdown / rst or similar. Use
-		 * an // IOException to signal to the client that further I/O // isn't possible
-		 * for this Stream. throw new IOException(e); } }
-		 * 
-		 * if (inBuffer.position() > 0) { // Data is available in the inBuffer. Copy it
-		 * to the // outBuffer. inBuffer.flip(); written = inBuffer.remaining(); if
-		 * (log.isDebugEnabled()) { log.debug(sm.getString("stream.inputBuffer.copy",
-		 * Integer.toString(written))); } inBuffer.get(outBuffer, 0, written);
-		 * inBuffer.clear(); } else if (!canRead) { return -1; } else { // Should never
-		 * happen throw new IllegalStateException(); } }
-		 * 
-		 * applicationBufferHandler.setBufWrapper(ByteBufferWrapper.wrapper(ByteBuffer.
-		 * wrap(outBuffer, 0, written)));
-		 * 
-		 * // Increment client-side flow control windows by the number of bytes // read
-		 * handler.writeWindowUpdate(Stream.this, written, true);
-		 * 
-		 * return written; }
-		 */
-
-		@Override
-		public BufWrapper doRead() throws IOException {
-			ensureBuffersExist();
-
-			int written = -1;
-
-			// Ensure that only one thread accesses inBuffer at a time
-			synchronized (inBuffer) {
-				boolean canRead = false;
-				while (inBuffer.position() == 0 && (canRead = isActive() && !isInputFinished())) {
-					// Need to block until some data is written
-					try {
-						if (log.isDebugEnabled()) {
-							log.debug(sm.getString("stream.inputBuffer.empty"));
-						}
-
-						long readTimeout = handler.getProtocol().getStreamReadTimeout();
-						if (readTimeout < 0) {
-							inBuffer.wait();
-						} else {
-							inBuffer.wait(readTimeout);
-						}
-
-						if (resetReceived) {
-							throw new IOException(sm.getString("stream.inputBuffer.reset"));
-						}
-
-						if (inBuffer.position() == 0 && isActive() && !isInputFinished()) {
-							String msg = sm.getString("stream.inputBuffer.readTimeout");
-							StreamException se = new StreamException(msg, Http2Error.ENHANCE_YOUR_CALM, getIdAsInt());
-							// Trigger a reset once control returns to Tomcat
-							responseData.setError();
-							streamOutputBuffer.reset = se;
-							throw new CloseNowException(msg, se);
-						}
-					} catch (InterruptedException e) {
-						// Possible shutdown / rst or similar. Use an
-						// IOException to signal to the client that further I/O
-						// isn't possible for this Stream.
-						throw new IOException(e);
-					}
-				}
-
-				if (inBuffer.position() > 0) {
-					// Data is available in the inBuffer. Copy it to the
-					// outBuffer.
-					inBuffer.flip();
-					written = inBuffer.remaining();
-					if (log.isDebugEnabled()) {
-						log.debug(sm.getString("stream.inputBuffer.copy", Integer.toString(written)));
-					}
-					inBuffer.get(outBuffer, 0, written);
-					inBuffer.clear();
-				} else if (!canRead) {
-					return null;
-				} else {
-					// Should never happen
-					throw new IllegalStateException();
-				}
-			}
-
-			// applicationBufferHandler.setBufWrapper();
-
-			// Increment client-side flow control windows by the number of bytes
-			// read
-			handler.writeWindowUpdate(Stream.this, written, true);
-
-			return ByteBufferWrapper.wrapper(ByteBuffer.wrap(outBuffer, 0, written));
-		}
-
-		// @Override
-		public final boolean isReadyForRead() {
-			ensureBuffersExist();
-
-			synchronized (this) {
-				if (available() > 0) {
-					return true;
-				}
-
-				if (!isRequestBodyFullyRead()) {
-					readInterest = true;
-				}
-
-				return false;
-			}
-		}
-
-		public final synchronized boolean isRequestBodyFullyRead() {
-			return (inBuffer == null || inBuffer.position() == 0) && isInputFinished();
-		}
-
-		// @Override
-		public int getAvailable(Object param) {
-			int available = available(Boolean.TRUE.equals(param));
-			// requestData.setAvailable(available);
-			return available;
-		}
-
-		// @Override
-		protected final int available(boolean doRead) {
-			return this.available();// stream.getInputBuffer()
-		}
-
-		final synchronized int available() {
-			if (inBuffer == null) {
-				return 0;
-			}
-			return inBuffer.position();
-		}
-
-		// @Override
-		// protected final boolean isReadyForRead() {
-		// return stream.getInputBuffer().isReadyForRead();
-		// }
-
-		// @Override
-		// protected final boolean isRequestBodyFullyRead() {
-		// return stream.getInputBuffer().isRequestBodyFullyRead();
-		// }
-
-		/*
-		 * Called after placing some data in the inBuffer.
-		 */
-		final synchronized boolean onDataAvailable() {
-			if (readInterest) {
-				if (log.isDebugEnabled()) {
-					log.debug(sm.getString("stream.inputBuffer.dispatch"));
-				}
-				readInterest = false;
-				((AbstractProcessor) getCurrentProcessor()).actionDISPATCH_READ();
-				// Always need to dispatch since this thread is processing
-				// the incoming connection and streams are processed on their
-				// own.
-				((AbstractProcessor) getCurrentProcessor()).actionDISPATCH_EXECUTE();
-				return true;
-			} else {
-				if (log.isDebugEnabled()) {
-					log.debug(sm.getString("stream.inputBuffer.signal"));
-				}
-				synchronized (inBuffer) {
-					inBuffer.notifyAll();
-				}
-				return false;
-			}
-		}
-
-		private final ByteBuffer getInBuffer() {
-			ensureBuffersExist();
-			return inBuffer;
-		}
-
-		final synchronized void insertReplayedBody(ByteChunk body) {
-			inBuffer = ByteBuffer.wrap(body.getBytes(), body.getOffset(), body.getLength());
-		}
-
-		private final void ensureBuffersExist() {
-			if (inBuffer == null) {
-				// The client must obey Tomcat's window size when sending so
-				// this is the initial window size set by Tomcat that the client
-				// uses (i.e. the local setting is required here).
-				int size = handler.getLocalSettings().getInitialWindowSize();
-				synchronized (this) {
-					if (inBuffer == null) {
-						inBuffer = ByteBuffer.allocate(size);
-						outBuffer = new byte[size];
-					}
-				}
-			}
-		}
-
-		private final void receiveReset() {
-			if (inBuffer != null) {
-				synchronized (inBuffer) {
-					resetReceived = true;
-					inBuffer.notifyAll();
-				}
-			}
-		}
-
-		private final void notifyEof() {
-			if (inBuffer != null) {
-				synchronized (inBuffer) {
-					inBuffer.notifyAll();
-				}
-			}
-		}
-
-		/**
-		 * Populate the TLS related request attributes from the {@link SSLSupport}
-		 * instance associated with this processor. Protocols that populate TLS
-		 * attributes from a different source (e.g. AJP) should override this method.
-		 */
-		protected void populateSslRequestAttributes() {
-			try {
-				SSLSupport sslSupport = handler.getChannel().getSslSupport();// Stream.this
-				if (sslSupport != null) {
-					Object sslO = sslSupport.getCipherSuite();
-					if (sslO != null) {
-						requestData.setAttribute(SSLSupport.CIPHER_SUITE_KEY, sslO);
-					}
-					sslO = sslSupport.getPeerCertificateChain();
-					if (sslO != null) {
-						requestData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
-					}
-					sslO = sslSupport.getKeySize();
-					if (sslO != null) {
-						requestData.setAttribute(SSLSupport.KEY_SIZE_KEY, sslO);
-					}
-					sslO = sslSupport.getSessionId();
-					if (sslO != null) {
-						requestData.setAttribute(SSLSupport.SESSION_ID_KEY, sslO);
-					}
-					sslO = sslSupport.getProtocol();
-					if (sslO != null) {
-						requestData.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, sslO);
-					}
-					requestData.setAttribute(SSLSupport.SESSION_MGR, sslSupport);
-				}
-			} catch (Exception e) {
-				log.warn(sm.getString("abstractProcessor.socket.ssl"), e);
-			}
-		}
-
-	}
 }

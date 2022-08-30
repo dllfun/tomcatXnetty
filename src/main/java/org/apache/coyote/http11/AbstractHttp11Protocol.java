@@ -31,16 +31,14 @@ import javax.servlet.http.HttpUpgradeHandler;
 
 import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.CompressionConfig;
+import org.apache.coyote.ExchangeData;
 import org.apache.coyote.Processor;
-import org.apache.coyote.RequestData;
-import org.apache.coyote.ResponseData;
 import org.apache.coyote.UpgradeProtocol;
 import org.apache.coyote.UpgradeToken;
 import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.coyote.http11.upgrade.UpgradeProcessorExternal;
 import org.apache.coyote.http11.upgrade.UpgradeProcessorInternal;
 import org.apache.tomcat.util.buf.StringUtils;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint;
 import org.apache.tomcat.util.net.SSLHostConfig;
 import org.apache.tomcat.util.net.SocketChannel;
@@ -342,8 +340,8 @@ public abstract class AbstractHttp11Protocol<S> extends AbstractProtocol<S> {
 		compressionConfig.setNoCompressionStrongETag(noCompressionStrongETag);
 	}
 
-	public boolean useCompression(RequestData request, ResponseData response) {
-		return compressionConfig.useCompression(request, response);
+	public boolean useCompression(ExchangeData exchangeData) {
+		return compressionConfig.useCompression(exchangeData);
 	}
 
 	private Pattern restrictedUserAgents = null;

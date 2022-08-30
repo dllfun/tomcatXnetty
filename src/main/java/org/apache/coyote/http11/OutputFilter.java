@@ -16,8 +16,6 @@
  */
 package org.apache.coyote.http11;
 
-import org.apache.coyote.ResponseData;
-
 /**
  * Output filter.
  *
@@ -27,6 +25,8 @@ public interface OutputFilter extends HttpOutputBuffer {
 
 	public int getId();
 
+	public void actived();
+
 	/**
 	 * Some filters need additional parameters from the response. All the necessary
 	 * reading can occur in that method, as this method is called after the response
@@ -34,7 +34,7 @@ public interface OutputFilter extends HttpOutputBuffer {
 	 *
 	 * @param response The response to associate with this OutputFilter
 	 */
-	public void setResponse(ResponseData response);
+//	public void setResponse(ExchangeData exchangeData);
 
 	/**
 	 * Make the filter ready to process the next request.
@@ -46,5 +46,5 @@ public interface OutputFilter extends HttpOutputBuffer {
 	 *
 	 * @param buffer The next buffer instance
 	 */
-	public void setBuffer(HttpOutputBuffer buffer);
+	public void setNext(HttpOutputBuffer next);
 }

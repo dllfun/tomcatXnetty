@@ -74,7 +74,7 @@ public interface UpgradeProtocol {
 	 * @return An instance of the HTTP upgrade handler for this protocol
 	 */
 	public InternalHttpUpgradeHandler getInternalUpgradeHandler(SocketChannel channel, Adapter adapter,
-			RequestData request);
+			ExchangeData exchangeData);
 
 	/**
 	 * Allows the implementation to examine the request and accept or reject it
@@ -85,7 +85,7 @@ public interface UpgradeProtocol {
 	 * @return <code>true</code> if the request is accepted, otherwise
 	 *         <code>false</code>
 	 */
-	public boolean accept(RequestData request);
+	public boolean accept(ExchangeData exchangeData);
 
 	/**
 	 * Configure the HTTP/1.1 protocol that this UpgradeProcotol is nested under.

@@ -66,7 +66,7 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 	private volatile ServletResponse servletResponse = null;
 	private final List<AsyncListenerWrapper> listeners = new ArrayList<>();
 	private boolean hasOriginalRequestAndResponse = true;
-
+//	private volatile Runnable dispatch = null;
 	private Context context = null;
 	// Default of 30000 (30s) is set by the connector
 	private long timeout = -1;
@@ -179,9 +179,9 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 				logDebug("dispatch   ");
 			}
 			check();
-			if (request.hasDispatch()) {
-				throw new IllegalStateException(sm.getString("asyncContextImpl.dispatchingStarted"));
-			}
+//			if (dispatch != null) {
+//				throw new IllegalStateException(sm.getString("asyncContextImpl.dispatchingStarted"));
+//			}
 			if (request.getAttribute(ASYNC_REQUEST_URI) == null) {
 				request.setAttribute(ASYNC_REQUEST_URI, request.getRequestURI());
 				request.setAttribute(ASYNC_CONTEXT_PATH, request.getContextPath());
@@ -203,8 +203,8 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 			final Context context = this.context;
 
 			Runnable dispatch = new AsyncRunnable(applicationDispatcher, servletRequest, servletResponse);// request,
-			this.request.setDispatch(dispatch);
-			this.request.getCoyoteRequest().asyncDispatch();
+//			this.request.setDispatch(dispatch);
+			this.request.getCoyoteRequest().asyncDispatch(dispatch);
 			clearServletRequestResponse();
 			context.decrementInProgressAsyncCount();
 		}
@@ -523,7 +523,7 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 			// Since this runnable is not executing as a result of a socket
 			// event, we need to ensure that any registered dispatches are
 			// executed.
-			coyoteRequest.actionDISPATCH_EXECUTE();
+			coyoteRequest.dispatchExecute();
 		}
 	}
 

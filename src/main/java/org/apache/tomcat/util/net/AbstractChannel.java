@@ -2,6 +2,8 @@ package org.apache.tomcat.util.net;
 
 import java.io.IOException;
 
+import org.apache.coyote.Processor;
+
 public abstract class AbstractChannel implements Channel {
 
 	/**
@@ -52,7 +54,18 @@ public abstract class AbstractChannel implements Channel {
 
 	@Override
 	public void setCurrentProcessor(Object currentProcessor) {
+		if (currentProcessor == null) {
+			throw new NullPointerException();
+		}
+		if (currentProcessor instanceof Processor) {
+			((Processor) currentProcessor).setChannel(this);
+		}
 		this.currentProcessor = currentProcessor;
+	}
+
+	@Override
+	public void clearCurrentProcessor() {
+		this.currentProcessor = null;
 	}
 
 	@Override

@@ -34,21 +34,30 @@ abstract class AbstractStream extends AbstractChannel {
 	private static final StringManager sm = StringManager.getManager(AbstractStream.class);
 
 	private final Integer identifier;
+	private final String idAsString;
 
 	private volatile AbstractStream parentStream = null;
 	private final Set<Stream> childStreams = Collections.newSetFromMap(new ConcurrentHashMap<>());
 	private long windowSize = ConnectionSettingsBase.DEFAULT_INITIAL_WINDOW_SIZE;
 
+	private volatile int connectionAllocationRequested = 0;
+	private volatile int connectionAllocationMade = 0;
+
 	AbstractStream(Integer identifier) {
 		this.identifier = identifier;
+		this.idAsString = identifier.toString();
 	}
 
-	final Integer getIdentifier() {
+	public final Integer getIdentifier() {
 		return identifier;
 	}
 
 	final int getIdAsInt() {
 		return identifier.intValue();
+	}
+
+	final String getIdAsString() {
+		return idAsString;
 	}
 
 	final void detachFromParent() {
@@ -136,6 +145,26 @@ abstract class AbstractStream extends AbstractChannel {
 			log.debug(sm.getString("abstractStream.windowSizeDec", getConnectionId(), getIdentifier(),
 					Integer.toString(decrement), Long.toString(windowSize)));
 		}
+	}
+
+	final int getConnectionAllocationRequested() {
+		return connectionAllocationRequested;
+	}
+
+	final void setConnectionAllocationRequested(int connectionAllocationRequested) {
+		log.debug(sm.getString("abstractStream.setConnectionAllocationRequested", getConnectionId(), getIdAsString(),
+				Integer.toString(this.connectionAllocationRequested), Integer.toString(connectionAllocationRequested)));
+		this.connectionAllocationRequested = connectionAllocationRequested;
+	}
+
+	final int getConnectionAllocationMade() {
+		return connectionAllocationMade;
+	}
+
+	final void setConnectionAllocationMade(int connectionAllocationMade) {
+		log.debug(sm.getString("abstractStream.setConnectionAllocationMade", getConnectionId(), getIdAsString(),
+				Integer.toString(this.connectionAllocationMade), Integer.toString(connectionAllocationMade)));
+		this.connectionAllocationMade = connectionAllocationMade;
 	}
 
 	abstract String getConnectionId();

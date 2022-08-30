@@ -23,8 +23,8 @@ import javax.servlet.http.HttpServletResponse;
 
 import org.apache.coyote.CloseNowException;
 import org.apache.coyote.ErrorState;
+import org.apache.coyote.ExchangeData;
 import org.apache.coyote.ResponseAction;
-import org.apache.coyote.ResponseData;
 import org.apache.coyote.http11.filters.ChunkedOutputFilter;
 import org.apache.coyote.http11.filters.GzipOutputFilter;
 import org.apache.coyote.http11.filters.IdentityOutputFilter;
@@ -65,7 +65,7 @@ public class Http11OutputBuffer extends ResponseAction {
 	/**
 	 * Associated Coyote response.
 	 */
-	protected final ResponseData responseData;
+	protected final ExchangeData exchangeData;
 
 	/**
 	 * The buffer used for header composition.
@@ -75,7 +75,7 @@ public class Http11OutputBuffer extends ResponseAction {
 	/**
 	 * Underlying output buffer.
 	 */
-	protected HttpOutputBuffer channelOutputBuffer;
+//	protected HttpOutputBuffer channelOutputBuffer;
 
 	/**
 	 * Bytes written to client for the current request
@@ -83,6 +83,8 @@ public class Http11OutputBuffer extends ResponseAction {
 	protected long byteCount = 0;
 
 	private int headerBufferSize;
+
+	private volatile boolean ackSent = false;
 
 	/**
 	 * Sendfile data.
@@ -95,21 +97,21 @@ public class Http11OutputBuffer extends ResponseAction {
 
 		// this.asyncState = processor.getAsyncStateMachine();
 
-		this.responseData = processor.getResponseData();
+		this.exchangeData = processor.getExchangeData();
 
 		this.headerBufferSize = headerBufferSize;
 
-		this.channelOutputBuffer = new SocketOutputBuffer();
+//		this.channelOutputBuffer = new SocketOutputBuffer();
 
 		// Create and add the identity filters.
-		addFilter(new IdentityOutputFilter());
+		addFilter(new IdentityOutputFilter(processor));
 		// Create and add the chunked filters.
-		addFilter(new ChunkedOutputFilter());
+		addFilter(new ChunkedOutputFilter(processor));
 		// Create and add the void filters.
-		addFilter(new VoidOutputFilter());
+		addFilter(new VoidOutputFilter(processor));
 		// Create and add the gzip filters.
 		// inputBuffer.addFilter(new GzipInputFilter());
-		addFilter(new GzipOutputFilter());
+		addFilter(new GzipOutputFilter(processor));
 
 	}
 
@@ -129,10 +131,10 @@ public class Http11OutputBuffer extends ResponseAction {
 
 	// --------------------------------------------------- OutputBuffer Methods
 
-	@Override
-	protected HttpOutputBuffer getBaseOutputBuffer() {
-		return channelOutputBuffer;
-	}
+//	@Override
+//	protected HttpOutputBuffer getBaseOutputBuffer() {
+//		return channelOutputBuffer;
+//	}
 
 	public void init(SocketChannel channel) {
 		// this.channel = channel;
@@ -166,7 +168,7 @@ public class Http11OutputBuffer extends ResponseAction {
 
 		// If the response is not yet committed, chunked encoding can be used
 		// and the trailer fields sent
-		if (!responseData.isCommitted()) {
+		if (!exchangeData.isCommitted()) {
 			return true;
 		}
 
@@ -189,37 +191,43 @@ public class Http11OutputBuffer extends ResponseAction {
 		AbstractHttp11Protocol<?> protocol = (AbstractHttp11Protocol<?>) processor.getProtocol();
 
 		boolean entityBody = true;
-		inputBuffer.contentDelimitation = false;
+//		inputBuffer.contentDelimitation = false;
+		if (exchangeData.getResponseBodyType() != -1) {
+			throw new RuntimeException();
+		}
 
 		// OutputFilter[] outputFilters = this.getFilters();
 
 		if (inputBuffer.http09 == true) {
 			// HTTP/0.9
 			this.addActiveFilter(Constants.IDENTITY_FILTER);
+			exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_FIXEDLENGTH);
 			this.writeHeaderBuffer();
 			return;
 		}
 
-		int statusCode = responseData.getStatus();
+		int statusCode = exchangeData.getStatus();
 		if (statusCode < 200 || statusCode == 204 || statusCode == 205 || statusCode == 304) {
 			// No entity body
 			this.addActiveFilter(Constants.VOID_FILTER);
 			entityBody = false;
-			inputBuffer.contentDelimitation = true;
+//			inputBuffer.contentDelimitation = true;
+			exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_NOBODY);
 			if (statusCode == 205) {
 				// RFC 7231 requires the server to explicitly signal an empty
 				// response in this case
-				responseData.setContentLength(0);
+				exchangeData.setResponseContentLength(0);
 			} else {
-				responseData.setContentLength(-1);
+				exchangeData.setResponseContentLength(-1);
 			}
 		}
 
-		MessageBytes methodMB = responseData.getRequestData().method();
+		MessageBytes methodMB = exchangeData.getMethod();
 		if (methodMB.equals("HEAD")) {
 			// No entity body
 			this.addActiveFilter(Constants.VOID_FILTER);
-			inputBuffer.contentDelimitation = true;
+//			inputBuffer.contentDelimitation = true;
+			exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_NOBODY);
 		}
 
 		// Sendfile support
@@ -230,35 +238,37 @@ public class Http11OutputBuffer extends ResponseAction {
 		// Check for compression
 		boolean useCompression = false;
 		if (entityBody && sendfileData == null) {
-			useCompression = protocol.useCompression(responseData.getRequestData(), responseData);
+			useCompression = protocol.useCompression(exchangeData);
 		}
 
-		MimeHeaders headers = responseData.getMimeHeaders();
+		MimeHeaders headers = exchangeData.getResponseHeaders();
 		// A SC_NO_CONTENT response may include entity headers
 		if (entityBody || statusCode == HttpServletResponse.SC_NO_CONTENT) {
-			String contentType = responseData.getContentType();
+			String contentType = exchangeData.getResponseContentType();
 			if (contentType != null) {
 				headers.setValue("Content-Type").setString(contentType);
 			}
-			String contentLanguage = responseData.getContentLanguage();
+			String contentLanguage = exchangeData.getContentLanguage();
 			if (contentLanguage != null) {
 				headers.setValue("Content-Language").setString(contentLanguage);
 			}
 		}
 
-		long contentLength = responseData.getContentLengthLong();
+		long contentLength = exchangeData.getResponseContentLengthLong();
 		boolean connectionClosePresent = Http11Processor.isConnectionToken(headers, Constants.CLOSE);
 		// System.out.println("http11:" + http11);
 		// System.out.println("contentLength:" + contentLength);
-		if (inputBuffer.http11 && responseData.getTrailerFields() != null) {
+		if (inputBuffer.http11 && exchangeData.getTrailerFieldsSupplier() != null) {
 			// If trailer fields are set, always use chunking
 			this.addActiveFilter(Constants.CHUNKED_FILTER);
-			inputBuffer.contentDelimitation = true;
+//			inputBuffer.contentDelimitation = true;
+			exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_CHUNKED);
 			headers.addValue(Constants.TRANSFERENCODING).setString(Constants.CHUNKED);
 		} else if (contentLength != -1) {
 			headers.setValue("Content-Length").setLong(contentLength);
 			this.addActiveFilter(Constants.IDENTITY_FILTER);
-			inputBuffer.contentDelimitation = true;
+//			inputBuffer.contentDelimitation = true;
+			exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_FIXEDLENGTH);
 		} else {
 			// If the response code supports an entity body and we're on
 			// HTTP 1.1 then we chunk unless we have a Connection: close header
@@ -266,10 +276,17 @@ public class Http11OutputBuffer extends ResponseAction {
 			// System.out.println("connectionClosePresent:" + connectionClosePresent);
 			if (inputBuffer.http11 && entityBody && !connectionClosePresent) {
 				this.addActiveFilter(Constants.CHUNKED_FILTER);
-				inputBuffer.contentDelimitation = true;
+//				inputBuffer.contentDelimitation = true;
+				exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_CHUNKED);
 				headers.addValue(Constants.TRANSFERENCODING).setString(Constants.CHUNKED);
 			} else {
+				if ((entityBody) && (exchangeData.getResponseBodyType() == -1)) {// !inputBuffer.contentDelimitation
+					// Mark as close the connection after the request, and add the
+					// connection: close header
+					inputBuffer.keepAlive = false;
+				}
 				this.addActiveFilter(Constants.IDENTITY_FILTER);
+				exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_FIXEDLENGTH);
 			}
 		}
 
@@ -286,11 +303,6 @@ public class Http11OutputBuffer extends ResponseAction {
 		// FIXME: Add transfer encoding header
 
 		// System.out.println("contentDelimitation:" + contentDelimitation);
-		if ((entityBody) && (!inputBuffer.contentDelimitation)) {
-			// Mark as close the connection after the request, and add the
-			// connection: close header
-			inputBuffer.keepAlive = false;
-		}
 
 		// This may disabled keep-alive to check before working out the
 		// Connection header.
@@ -313,8 +325,8 @@ public class Http11OutputBuffer extends ResponseAction {
 			}
 
 			if (protocol.getUseKeepAliveResponseHeader()) {
-				boolean connectionKeepAlivePresent = Http11Processor.isConnectionToken(
-						responseData.getRequestData().getMimeHeaders(), Constants.KEEP_ALIVE_HEADER_VALUE_TOKEN);
+				boolean connectionKeepAlivePresent = Http11Processor.isConnectionToken(exchangeData.getRequestHeaders(),
+						Constants.KEEP_ALIVE_HEADER_VALUE_TOKEN);
 
 				if (connectionKeepAlivePresent) {
 					int keepAliveTimeout = protocol.getKeepAliveTimeout();
@@ -374,18 +386,18 @@ public class Http11OutputBuffer extends ResponseAction {
 	}
 
 	private void prepareSendfile() {
-		String fileName = (String) responseData.getRequestData()
-				.getAttribute(org.apache.coyote.Constants.SENDFILE_FILENAME_ATTR);
+		String fileName = (String) exchangeData.getAttribute(org.apache.coyote.Constants.SENDFILE_FILENAME_ATTR);
 		if (fileName == null) {
 			sendfileData = null;
 		} else {
 			// No entity body sent here
 			this.addActiveFilter(Constants.VOID_FILTER);
-			inputBuffer.contentDelimitation = true;
-			long pos = ((Long) responseData.getRequestData()
-					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_START_ATTR)).longValue();
-			long end = ((Long) responseData.getRequestData()
-					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_END_ATTR)).longValue();
+//			inputBuffer.contentDelimitation = true;
+			exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_NOBODY);
+			long pos = ((Long) exchangeData.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_START_ATTR))
+					.longValue();
+			long end = ((Long) exchangeData.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_END_ATTR))
+					.longValue();
 			sendfileData = ((SocketChannel) processor.getChannel()).createSendfileData(fileName, pos, end - pos);
 		}
 	}
@@ -400,7 +412,7 @@ public class Http11OutputBuffer extends ResponseAction {
 		// Acknowledge request
 		// Send a 100 status back if it makes sense (response not committed
 		// yet, and client specified an expectation for 100-continue)
-		if (!responseData.isCommitted() && responseData.getRequestData().hasExpectation()) {
+		if (!exchangeData.isCommitted() && exchangeData.hasExpectation()) {
 			inputBuffer.setSwallowInput(true);
 			try {
 				this.writeAckAndFlush();
@@ -439,10 +451,13 @@ public class Http11OutputBuffer extends ResponseAction {
 	}
 
 	private void writeAckAndFlush() throws IOException {
-		((SocketChannel) processor.getChannel()).write(isBlocking(), Constants.ACK_BYTES, 0,
-				Constants.ACK_BYTES.length);
-		if (flushBuffer(true)) {
-			throw new IOException(sm.getString("iob.failedwrite.ack"));
+		if (!exchangeData.isCommitted() && !ackSent) {
+			ackSent = true;
+			((SocketChannel) processor.getChannel()).write(processor.isBlockingWrite(), Constants.ACK_BYTES, 0,
+					Constants.ACK_BYTES.length);
+			if (flushBuffer(true)) {
+				throw new IOException(sm.getString("iob.failedwrite.ack"));
+			}
 		}
 	}
 
@@ -456,7 +471,7 @@ public class Http11OutputBuffer extends ResponseAction {
 		headerBuffer.putByte(Constants.SP);
 
 		// Write status code
-		int status = responseData.getStatus();
+		int status = exchangeData.getStatus();
 		switch (status) {
 		case 200:
 			write(Constants._200_BYTES);
@@ -618,7 +633,7 @@ public class Http11OutputBuffer extends ResponseAction {
 			try {
 				SocketChannel channel = ((SocketChannel) processor.getChannel());
 				if (channel != null) {
-					channel.write(isBlocking(), headerBuffer);
+					channel.write(processor.isBlockingWrite(), headerBuffer);
 				} else {
 					throw new CloseNowException(sm.getString("iob.failedwrite"));
 				}
@@ -646,15 +661,6 @@ public class Http11OutputBuffer extends ResponseAction {
 		return ((SocketChannel) processor.getChannel()).flush(block);
 	}
 
-	/**
-	 * Is standard Servlet blocking IO being used for output?
-	 * 
-	 * @return <code>true</code> if this is blocking IO
-	 */
-	protected final boolean isBlocking() {
-		return responseData.getRequestData().getAsyncStateMachine().getWriteListener() == null;
-	}
-
 	protected final boolean isReady() {
 		boolean result = !hasDataToWrite();
 		if (!result) {
@@ -669,6 +675,49 @@ public class Http11OutputBuffer extends ResponseAction {
 
 	public void registerWriteInterest() {
 		((SocketChannel) processor.getChannel()).registerWriteInterest();
+	}
+
+	/**
+	 * Write chunk.
+	 */
+	@Override
+	public int doWriteToChannel(ByteBuffer chunk) throws IOException {
+		try {
+			int len = chunk.remaining();
+			SocketChannel channel = ((SocketChannel) processor.getChannel());
+			if (channel != null) {
+				channel.write(processor.isBlockingWrite(), chunk);
+			} else {
+				throw new CloseNowException(sm.getString("iob.failedwrite"));
+			}
+			len -= chunk.remaining();
+			byteCount += len;
+			return len;
+		} catch (IOException ioe) {
+			closeNow(ioe);
+			// Re-throw
+			throw ioe;
+		}
+	}
+
+	@Override
+	public long getBytesWrittenToChannel() {
+		return byteCount;
+	}
+
+	@Override
+	public void flushToChannel() throws IOException {
+		((SocketChannel) processor.getChannel()).flush(processor.isBlockingWrite());
+	}
+
+	@Override
+	public boolean flushToChannel(boolean block) throws IOException {
+		return ((SocketChannel) processor.getChannel()).flush(processor.isBlockingWrite());
+	}
+
+	@Override
+	public void endToChannel() throws IOException {
+		((SocketChannel) processor.getChannel()).flush(true);
 	}
 
 	/**
@@ -695,6 +744,7 @@ public class Http11OutputBuffer extends ResponseAction {
 			headerBuffer.setLimit(headerBuffer.getCapacity());
 		}
 
+		ackSent = false;
 		byteCount = 0;
 	}
 
@@ -717,50 +767,7 @@ public class Http11OutputBuffer extends ResponseAction {
 	/**
 	 * This class is an output buffer which will write data to a socket.
 	 */
-	protected class SocketOutputBuffer implements HttpOutputBuffer {
+//	protected class SocketOutputBuffer implements HttpOutputBuffer {
 
-		/**
-		 * Write chunk.
-		 */
-		@Override
-		public int doWrite(ByteBuffer chunk) throws IOException {
-			try {
-				int len = chunk.remaining();
-				SocketChannel channel = ((SocketChannel) processor.getChannel());
-				if (channel != null) {
-					channel.write(isBlocking(), chunk);
-				} else {
-					throw new CloseNowException(sm.getString("iob.failedwrite"));
-				}
-				len -= chunk.remaining();
-				byteCount += len;
-				return len;
-			} catch (IOException ioe) {
-				closeNow(ioe);
-				// Re-throw
-				throw ioe;
-			}
-		}
-
-		@Override
-		public long getBytesWritten() {
-			return byteCount;
-		}
-
-		@Override
-		public void end() throws IOException {
-			((SocketChannel) processor.getChannel()).flush(true);
-		}
-
-		@Override
-		public void flush() throws IOException {
-			((SocketChannel) processor.getChannel()).flush(isBlocking());
-		}
-
-		@Override
-		public boolean flush(boolean block) throws IOException {
-			return ((SocketChannel) processor.getChannel()).flush(isBlocking());
-		}
-
-	}
+//	}
 }

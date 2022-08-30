@@ -50,7 +50,7 @@ class Http2AsyncParser extends Http2Parser {
 	}
 
 	@Override
-	void readConnectionPreface(WebConnection webConnection, Stream stream) throws Http2Exception {
+	void readConnectionPreface(WebConnection webConnection, StreamChannel stream) throws Http2Exception {
 		byte[] prefaceData = new byte[CLIENT_PREFACE_START.length];
 		ByteBuffer preface = ByteBuffer.wrap(prefaceData);
 		ByteBuffer header = ByteBuffer.allocate(9);
@@ -66,10 +66,10 @@ class Http2AsyncParser extends Http2Parser {
 		private boolean prefaceValidated = false;
 
 		private final WebConnection webConnection;
-		private final Stream stream;
+		private final StreamChannel stream;
 		private final byte[] prefaceData;
 
-		private PrefaceCompletionHandler(WebConnection webConnection, Stream stream, byte[] prefaceData,
+		private PrefaceCompletionHandler(WebConnection webConnection, StreamChannel stream, byte[] prefaceData,
 				ByteBuffer... buffers) {
 			super(FrameType.SETTINGS, buffers);
 			this.webConnection = webConnection;

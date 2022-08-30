@@ -4,44 +4,47 @@ import java.io.IOException;
 
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.ErrorState;
-import org.apache.coyote.InputReader;
+import org.apache.coyote.ExchangeData;
 import org.apache.coyote.RequestAction;
-import org.apache.coyote.RequestData;
-import org.apache.coyote.http2.Stream.StreamInputBuffer;
+import org.apache.juli.logging.Log;
+import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteChunk;
+import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
+import org.apache.tomcat.util.res.StringManager;
 
 public class Http2InputBuffer extends RequestAction {
 
-	private AbstractProcessor processor;
-	private Stream stream;
-	private StreamInputBuffer streamInputBuffer;
-	private RequestData requestData;
+	private static final Log log = LogFactory.getLog(Stream.class);
+	private static final StringManager sm = StringManager.getManager(Stream.class);
 
-	public Http2InputBuffer(AbstractProcessor processor, Stream stream, RequestData requestData,
-			StreamInputBuffer streamInputBuffer) {
+	private AbstractProcessor processor;
+//	private StreamChannel stream;
+	// private StreamInputBuffer streamInputBuffer;
+	private ExchangeData exchangeData;
+
+	public Http2InputBuffer(AbstractProcessor processor) {
 		super(processor);
 		this.processor = processor;
-		this.stream = stream;
-		this.requestData = requestData;
-		this.streamInputBuffer = streamInputBuffer;
-	}
-
-	@Override
-	protected InputReader getBaseInputReader() {
-		return streamInputBuffer;
+//		this.stream = stream;
+		this.exchangeData = processor.getExchangeData();
+//		this.streamInputBuffer = stream.getInputBuffer();
 	}
 
 //	@Override
 //	public BufWrapper doRead() throws IOException {
 //		return streamInputBuffer.doRead();
 //	}
+	@Override
+	protected BufWrapper doReadFromChannel() throws IOException {
+		return ((StreamChannel) processor.getChannel()).doRead();
+	}
 
 	@Override
 	public int getAvailable(Object param) {
 		int available = getAvailableInFilters();
 		if (available > 0)
 			return available;
-		return streamInputBuffer.getAvailable(param);
+		return getAvailableInBuffer(param);
 	}
 
 	@Override
@@ -49,7 +52,12 @@ public class Http2InputBuffer extends RequestAction {
 		if (getAvailable(true) > 0) {
 			return true;
 		}
-		return streamInputBuffer.isReadyForRead();
+
+		if (!isRequestBodyFullyRead()) {
+			return ((StreamChannel) processor.getChannel()).isReadyForRead();
+		}
+
+		return false;
 	}
 
 	@Override
@@ -57,7 +65,7 @@ public class Http2InputBuffer extends RequestAction {
 		if (hasActiveFilters()) {
 			return getLastActiveFilter().isFinished();
 		} else {
-			return streamInputBuffer.isRequestBodyFullyRead();
+			return ((StreamChannel) processor.getChannel()).isRequestBodyFullyRead();
 		}
 	}
 
@@ -70,14 +78,14 @@ public class Http2InputBuffer extends RequestAction {
 
 	@Override
 	public boolean isTrailerFieldsReady() {
-		return stream.isTrailerFieldsReady();
+		return ((StreamChannel) processor.getChannel()).isTrailerFieldsReady();
 	}
 
 	@Override
 	public final void setRequestBody(ByteChunk body) {
-		streamInputBuffer.insertReplayedBody(body);// stream.getInputBuffer()
+		((StreamChannel) processor.getChannel()).insertReplayedBody(body);// stream.getInputBuffer()
 		try {
-			stream.receivedEndOfStream();// stream
+			((StreamChannel) processor.getChannel()).receivedEndOfStream();// stream
 		} catch (ConnectionException e) {
 			// Exception will not be thrown in this case
 		}
@@ -95,15 +103,19 @@ public class Http2InputBuffer extends RequestAction {
 	 * populate this from an alternative source should override this method.
 	 */
 	protected void populateRequestAttributeRemoteHost() {
-		if (getPopulateRequestAttributesFromSocket() && stream.getSocketChannel() != null) {
-			requestData.remoteHost().setString(stream.getSocketChannel().getRemoteHost());
+		if (getPopulateRequestAttributesFromSocket()
+				&& ((StreamChannel) processor.getChannel()).getSocketChannel() != null) {
+			exchangeData.getRemoteHost()
+					.setString(((StreamChannel) processor.getChannel()).getSocketChannel().getRemoteHost());
 		}
 	}
 
 	@Override
 	public void actionREQ_HOST_ADDR_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && stream.getSocketChannel() != null) {
-			requestData.remoteAddr().setString(stream.getSocketChannel().getRemoteAddr());
+		if (getPopulateRequestAttributesFromSocket()
+				&& ((StreamChannel) processor.getChannel()).getSocketChannel() != null) {
+			exchangeData.getRemoteAddr()
+					.setString(((StreamChannel) processor.getChannel()).getSocketChannel().getRemoteAddr());
 		}
 	}
 
@@ -114,35 +126,41 @@ public class Http2InputBuffer extends RequestAction {
 
 	@Override
 	public void actionREQ_LOCALPORT_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && stream.getSocketChannel() != null) {
-			requestData.setLocalPort(stream.getSocketChannel().getLocalPort());
+		if (getPopulateRequestAttributesFromSocket()
+				&& ((StreamChannel) processor.getChannel()).getSocketChannel() != null) {
+			exchangeData.setLocalPort(((StreamChannel) processor.getChannel()).getSocketChannel().getLocalPort());
 		}
 	}
 
 	@Override
 	public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && stream.getSocketChannel() != null) {
-			requestData.localAddr().setString(stream.getSocketChannel().getLocalAddr());
+		if (getPopulateRequestAttributesFromSocket()
+				&& ((StreamChannel) processor.getChannel()).getSocketChannel() != null) {
+			exchangeData.getLocalAddr()
+					.setString(((StreamChannel) processor.getChannel()).getSocketChannel().getLocalAddr());
 		}
 	}
 
 	@Override
 	public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && stream.getSocketChannel() != null) {
-			requestData.localName().setString(stream.getSocketChannel().getLocalName());
+		if (getPopulateRequestAttributesFromSocket()
+				&& ((StreamChannel) processor.getChannel()).getSocketChannel() != null) {
+			exchangeData.getLocalName()
+					.setString(((StreamChannel) processor.getChannel()).getSocketChannel().getLocalName());
 		}
 	}
 
 	@Override
 	public void actionREQ_REMOTEPORT_ATTRIBUTE() {
-		if (getPopulateRequestAttributesFromSocket() && stream.getSocketChannel() != null) {
-			requestData.setRemotePort(stream.getSocketChannel().getRemotePort());
+		if (getPopulateRequestAttributesFromSocket()
+				&& ((StreamChannel) processor.getChannel()).getSocketChannel() != null) {
+			exchangeData.setRemotePort(((StreamChannel) processor.getChannel()).getSocketChannel().getRemotePort());
 		}
 	}
 
 	@Override
 	public void actionREQ_SSL_ATTRIBUTE() {
-		streamInputBuffer.populateSslRequestAttributes();
+		((StreamChannel) processor.getChannel()).populateSslRequestAttributes();
 	}
 
 	@Override
@@ -164,6 +182,37 @@ public class Http2InputBuffer extends RequestAction {
 	 */
 	protected void sslReHandShake() throws IOException {
 		// NO-OP
+	}
+
+	// @Override
+	public int getAvailableInBuffer(Object param) {
+		int available = availableInBuffer(Boolean.TRUE.equals(param));
+		// exchangeData.setAvailable(available);
+		return available;
+	}
+
+	// @Override
+	protected final int availableInBuffer(boolean doRead) {
+		return ((StreamChannel) processor.getChannel()).available();// stream.getInputBuffer()
+	}
+
+	public void prepareRequest() {
+		// TODO Auto-generated method stub
+
+	}
+
+	// @Override
+	// protected final boolean isReadyForRead() {
+	// return stream.getInputBuffer().isReadyForRead();
+	// }
+
+	// @Override
+	// protected final boolean isRequestBodyFullyRead() {
+	// return stream.getInputBuffer().isRequestBodyFullyRead();
+	// }
+
+	public void recycle() {
+
 	}
 
 }

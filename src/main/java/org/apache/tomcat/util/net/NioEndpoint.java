@@ -405,7 +405,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 
 			socketWrapper.setReadTimeout(getConnectionTimeout());
 			socketWrapper.setWriteTimeout(getConnectionTimeout());
-			socketWrapper.setKeepAliveLeft(NioEndpoint.this.getMaxKeepAliveRequests());
+			// socketWrapper.setKeepAliveLeft(NioEndpoint.this.getMaxKeepAliveRequests());
 			// socketWrapper.setSecure(isSSLEnabled());
 			poller.register(socketWrapper);
 			return true;
@@ -433,6 +433,12 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("endpoint.err.close"), ioe);
 			}
+		}
+	}
+
+	private void closeSocketWrapper(NioSocketWrapper socketWrapper) {
+		if (socketWrapper.getSocket().getIOChannel() != null) {
+			connections.remove(socketWrapper.getSocket().getIOChannel());
 		}
 	}
 
@@ -639,6 +645,13 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 				event.reset(socketWrapper, OP_REGISTER);
 			}
 			addEvent(event);
+		}
+
+		private void closeSocketWrapper(final NioSocketWrapper socketWrapper) {
+			SocketChannel socketChannel = socketWrapper.getSocket().getIOChannel();
+			if (socketChannel != null) {
+				poller.cancelledKey(socketChannel.keyFor(poller.getSelector()), socketWrapper, false);
+			}
 		}
 
 		private void cancelledKey(SelectionKey sk, SocketWrapperBase<NioChannel> socketWrapper) {
@@ -1013,6 +1026,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		private final NioSelectorPool pool;
 		private final SynchronizedStack<NioChannel> nioChannels;
 		private final Poller poller;
+		private final NioEndpoint endpoint;
 
 		// private int interestOps = 0;
 		private CountDownLatch readLatch = null;
@@ -1024,9 +1038,10 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 
 		public NioSocketWrapper(NioChannel channel, NioEndpoint endpoint) {
 			super(channel, endpoint);
-			pool = endpoint.getSelectorPool();
-			nioChannels = endpoint.getNioChannels();
-			poller = endpoint.getPoller();
+			this.endpoint = endpoint;
+			this.pool = endpoint.getSelectorPool();
+			this.nioChannels = endpoint.getNioChannels();
+			this.poller = endpoint.getPoller();
 			// setSocketBufferHandler(channel);
 		}
 
@@ -1140,6 +1155,12 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		@Override
 		protected SocketBufferHandler getSocketBufferHandler() {
 			return getSocket();
+		}
+
+		@Override
+		public int getAvailable() {
+			getSocket().configureReadBufferForRead();
+			return getSocket().getReadBuffer().remaining();
 		}
 
 		@Override
@@ -1530,8 +1551,8 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 				log.debug("Calling [" + getEndpoint() + "].closeSocket([" + this + "])");
 			}
 			try {
-				poller.cancelledKey(getSocket().getIOChannel().keyFor(poller.getSelector()), this, false);
-				getEndpoint().connections.remove(getSocket().getIOChannel());
+				poller.closeSocketWrapper(this);
+				endpoint.closeSocketWrapper(this);
 				if (getSocket().isOpen()) {
 					getSocket().close(true);
 				}

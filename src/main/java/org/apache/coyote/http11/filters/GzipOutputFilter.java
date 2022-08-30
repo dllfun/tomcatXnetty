@@ -21,8 +21,9 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.zip.GZIPOutputStream;
 
-import org.apache.coyote.Response;
-import org.apache.coyote.ResponseData;
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.ExchangeData;
+import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
@@ -34,7 +35,7 @@ import org.apache.juli.logging.LogFactory;
  *
  * @author Remy Maucherat
  */
-public class GzipOutputFilter implements OutputFilter {
+public class GzipOutputFilter extends ProcessorComponent implements OutputFilter {
 
 	protected static final Log log = LogFactory.getLog(GzipOutputFilter.class);
 
@@ -43,7 +44,7 @@ public class GzipOutputFilter implements OutputFilter {
 	/**
 	 * Next buffer in the pipeline.
 	 */
-	protected HttpOutputBuffer buffer;
+	protected HttpOutputBuffer next;
 
 	/**
 	 * Compression output stream.
@@ -55,11 +56,20 @@ public class GzipOutputFilter implements OutputFilter {
 	 */
 	protected final OutputStream fakeOutputStream = new FakeOutputStream();
 
+	public GzipOutputFilter(AbstractProcessor processor) {
+		super(processor);
+	}
+
 	// --------------------------------------------------- OutputBuffer Methods
 
 	@Override
 	public int getId() {
 		return Constants.GZIP_FILTER;
+	}
+
+	@Override
+	public void actived() {
+
 	}
 
 	@Override
@@ -80,7 +90,7 @@ public class GzipOutputFilter implements OutputFilter {
 
 	@Override
 	public long getBytesWritten() {
-		return buffer.getBytesWritten();
+		return next.getBytesWritten();
 	}
 
 	// --------------------------------------------------- OutputFilter Methods
@@ -102,7 +112,7 @@ public class GzipOutputFilter implements OutputFilter {
 				}
 			}
 		}
-		buffer.flush();
+		next.flush();
 	}
 
 	@Override
@@ -111,18 +121,18 @@ public class GzipOutputFilter implements OutputFilter {
 			flush();
 			return false;
 		} else {
-			return buffer.flush(block);
+			return next.flush(block);
 		}
 	}
 
-	@Override
-	public void setResponse(ResponseData response) {
-		// NOOP: No need for parameters from response in this filter
-	}
+//	@Override
+//	public void setResponse(ExchangeData exchangeData) {
+	// NOOP: No need for parameters from response in this filter
+//	}
 
 	@Override
-	public void setBuffer(HttpOutputBuffer buffer) {
-		this.buffer = buffer;
+	public void setNext(HttpOutputBuffer next) {
+		this.next = next;
 	}
 
 	@Override
@@ -132,7 +142,7 @@ public class GzipOutputFilter implements OutputFilter {
 		}
 		compressionStream.finish();
 		compressionStream.close();
-		buffer.end();
+		next.end();
 	}
 
 	/**
@@ -154,12 +164,12 @@ public class GzipOutputFilter implements OutputFilter {
 			// Shouldn't get used for good performance, but is needed for
 			// compatibility with Sun JDK 1.4.0
 			outputChunk.put(0, (byte) (b & 0xff));
-			buffer.doWrite(outputChunk);
+			next.doWrite(outputChunk);
 		}
 
 		@Override
 		public void write(byte[] b, int off, int len) throws IOException {
-			buffer.doWrite(ByteBuffer.wrap(b, off, len));
+			next.doWrite(ByteBuffer.wrap(b, off, len));
 		}
 
 		@Override

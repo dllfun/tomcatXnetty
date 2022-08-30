@@ -30,9 +30,8 @@ import java.util.regex.Pattern;
 import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.Adapter;
 import org.apache.coyote.CompressionConfig;
+import org.apache.coyote.ExchangeData;
 import org.apache.coyote.Processor;
-import org.apache.coyote.RequestData;
-import org.apache.coyote.ResponseData;
 import org.apache.coyote.UpgradeProtocol;
 import org.apache.coyote.UpgradeToken;
 import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
@@ -97,7 +96,7 @@ public class Http2Protocol implements UpgradeProtocol {
 	public Http2Protocol() {
 		// TODO remove
 		// setCompression("force");
-		// maxConcurrentStreamExecution = 1;
+		maxConcurrentStreamExecution = 1;
 	}
 
 	@Override
@@ -128,15 +127,15 @@ public class Http2Protocol implements UpgradeProtocol {
 
 	@Override
 	public InternalHttpUpgradeHandler getInternalUpgradeHandler(SocketChannel channel, Adapter adapter,
-			RequestData requestData) {
-		return channel.hasAsyncIO() ? new Http2AsyncUpgradeHandler(this, adapter, requestData)
-				: new Http2UpgradeHandler(this, adapter, requestData);
+			ExchangeData exchangeData) {
+		return channel.hasAsyncIO() ? new Http2AsyncUpgradeHandler(this, adapter, exchangeData)
+				: new Http2UpgradeHandler(this, adapter, exchangeData);
 	}
 
 	@Override
-	public boolean accept(RequestData request) {
+	public boolean accept(ExchangeData exchangeData) {
 		// Should only be one HTTP2-Settings header
-		Enumeration<String> settings = request.getMimeHeaders().values("HTTP2-Settings");
+		Enumeration<String> settings = exchangeData.getRequestHeaders().values("HTTP2-Settings");
 		int count = 0;
 		while (settings.hasMoreElements()) {
 			count++;
@@ -146,7 +145,7 @@ public class Http2Protocol implements UpgradeProtocol {
 			return false;
 		}
 
-		Enumeration<String> connection = request.getMimeHeaders().values("Connection");
+		Enumeration<String> connection = exchangeData.getRequestHeaders().values("Connection");
 		boolean found = false;
 		while (connection.hasMoreElements() && !found) {
 			found = connection.nextElement().contains("HTTP2-Settings");
@@ -383,8 +382,8 @@ public class Http2Protocol implements UpgradeProtocol {
 		compressionConfig.setNoCompressionStrongETag(noCompressionStrongETag);
 	}
 
-	public boolean useCompression(RequestData request, ResponseData response) {
-		return compressionConfig.useCompression(request, response);
+	public boolean useCompression(ExchangeData exchangeData) {
+		return compressionConfig.useCompression(exchangeData);
 	}
 
 	public AbstractProtocol<?> getHttp11Protocol() {

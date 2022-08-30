@@ -302,7 +302,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 
 			socketWrapper.setReadTimeout(getConnectionTimeout());
 			socketWrapper.setWriteTimeout(getConnectionTimeout());
-			socketWrapper.setKeepAliveLeft(Nio2Endpoint.this.getMaxKeepAliveRequests());
+			// socketWrapper.setKeepAliveLeft(Nio2Endpoint.this.getMaxKeepAliveRequests());
 			// socketWrapper.setSecure(isSSLEnabled());
 			// Continue processing on the same thread as the acceptor is async
 			getHandler().processSocket(socketWrapper, SocketEvent.OPEN_READ, false);
@@ -720,6 +720,12 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		@Override
 		protected SocketBufferHandler getSocketBufferHandler() {
 			return getSocket();
+		}
+
+		@Override
+		public int getAvailable() {
+			getSocket().configureReadBufferForRead();
+			return getSocket().getReadBuffer().remaining();
 		}
 
 		@Override

@@ -40,16 +40,16 @@ public class UpgradeProcessorExternal extends UpgradeProcessorBase {
 	private final UpgradeServletInputStream upgradeServletInputStream;
 	private final UpgradeServletOutputStream upgradeServletOutputStream;
 
-	public UpgradeProcessorExternal(AbstractProtocol<?> protocol, SocketChannel wrapper, UpgradeToken upgradeToken) {
+	public UpgradeProcessorExternal(AbstractProtocol<?> protocol, SocketChannel channel, UpgradeToken upgradeToken) {
 		super(protocol, upgradeToken);
-		this.upgradeServletInputStream = new UpgradeServletInputStream(this, wrapper);
-		this.upgradeServletOutputStream = new UpgradeServletOutputStream(this, wrapper);
+		this.upgradeServletInputStream = new UpgradeServletInputStream(this, channel);
+		this.upgradeServletOutputStream = new UpgradeServletOutputStream(this, channel);
 
 		/*
 		 * Leave timeouts in the hands of the upgraded protocol.
 		 */
-		wrapper.setReadTimeout(INFINITE_TIMEOUT);
-		wrapper.setWriteTimeout(INFINITE_TIMEOUT);
+		channel.setReadTimeout(INFINITE_TIMEOUT);
+		channel.setWriteTimeout(INFINITE_TIMEOUT);
 	}
 
 	@Override

@@ -174,8 +174,8 @@ class Http2Parser {
 					Integer.toString(dataLength), padding));
 		}
 
-		ByteBuffer dest = output.startRequestBodyFrame(streamId, payloadSize, endOfStream);
-		if (dest == null) {
+		ByteBufferHandler handler = output.startRequestBodyFrame(streamId, payloadSize, endOfStream);
+		if (handler == null) {
 			swallow(streamId, dataLength, false, buffer);
 			// Process padding before sending any notifications in case padding
 			// is invalid.
@@ -186,7 +186,10 @@ class Http2Parser {
 				output.receivedEndOfStream(streamId);
 			}
 		} else {
-			synchronized (dest) {
+
+			try {
+				handler.startWrite();
+				ByteBuffer dest = handler.getByteBuffer();
 				if (dest.remaining() < dataLength) {
 					swallow(streamId, dataLength, false, buffer);
 					// Client has sent more data than permitted by Window size
@@ -210,6 +213,8 @@ class Http2Parser {
 					output.receivedEndOfStream(streamId);
 				}
 				output.endRequestBodyFrame(streamId);
+			} finally {
+				handler.finishWrite();
 			}
 		}
 		if (padLength > 0) {
@@ -642,7 +647,7 @@ class Http2Parser {
 	 * @param webConnection The connection
 	 * @param stream        The current stream
 	 */
-	void readConnectionPreface(WebConnection webConnection, Stream stream) throws Http2Exception {
+	void readConnectionPreface(WebConnection webConnection, StreamChannel stream) throws Http2Exception {
 		byte[] data = new byte[CLIENT_PREFACE_START.length];
 		try {
 			input.fill(true, data);
@@ -699,6 +704,16 @@ class Http2Parser {
 		int getMaxFrameSize();
 	}
 
+	static interface ByteBufferHandler {
+
+		public void startWrite();
+
+		public ByteBuffer getByteBuffer();
+
+		public void finishWrite();
+
+	}
+
 	/**
 	 * Interface that must be implemented to receive notifications from the parser
 	 * as it processes incoming frames.
@@ -708,7 +723,8 @@ class Http2Parser {
 		HpackDecoder getHpackDecoder();
 
 		// Data frames
-		ByteBuffer startRequestBodyFrame(int streamId, int payloadSize, boolean endOfStream) throws Http2Exception;
+		ByteBufferHandler startRequestBodyFrame(int streamId, int payloadSize, boolean endOfStream)
+				throws Http2Exception;
 
 		void endRequestBodyFrame(int streamId) throws Http2Exception;
 

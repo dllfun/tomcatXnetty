@@ -1,18 +1,22 @@
-package org.apache.coyote.http2;
+package org.apache.coyote.http2.filters;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.apache.coyote.ResponseData;
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.ExchangeData;
+import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
+import org.apache.coyote.http2.Stream;
+import org.apache.coyote.http2.StreamChannel;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.WriteBuffer;
 import org.apache.tomcat.util.res.StringManager;
 
-public class BufferedOutputFilter implements OutputFilter, WriteBuffer.Sink {
+public class BufferedOutputFilter extends ProcessorComponent implements OutputFilter, WriteBuffer.Sink {
 
 	private static final Log log = LogFactory.getLog(BufferedOutputFilter.class);
 	private static final StringManager sm = StringManager.getManager(Stream.class);
@@ -26,17 +30,22 @@ public class BufferedOutputFilter implements OutputFilter, WriteBuffer.Sink {
 
 	private HttpOutputBuffer next;
 
-	private ResponseData responseData;
-
 	private volatile boolean closed = false;
-	private Stream stream;
+//	private Stream stream;
 
-	public BufferedOutputFilter(Stream stream) {
-		this.stream = stream;
+	public BufferedOutputFilter(AbstractProcessor processor) {
+		super(processor);
+//		this.stream = stream;
 	}
 
-	public void setStream(Stream stream) {
-		this.stream = stream;
+	@Override
+	public int getId() {
+		return Constants.BUFFEREDOUTPUT_FILTER;
+	}
+
+	@Override
+	public void actived() {
+
 	}
 
 	public boolean isDataLeft() {
@@ -51,7 +60,7 @@ public class BufferedOutputFilter implements OutputFilter, WriteBuffer.Sink {
 
 	@Override
 	public void flush() throws IOException {
-		boolean block = responseData.getRequestData().getAsyncStateMachine().getWriteListener() == null;
+		boolean block = processor.isBlockingWrite();
 		/*
 		 * Need to ensure that there is exactly one call to flush even when there is no
 		 * data to write. Too few calls (i.e. zero) and the end of stream message is not
@@ -91,8 +100,10 @@ public class BufferedOutputFilter implements OutputFilter, WriteBuffer.Sink {
 
 	private boolean flush(boolean writeInProgress, boolean block) throws IOException {
 		if (log.isDebugEnabled()) {
-			log.debug(sm.getString("stream.outputBuffer.flush.debug", stream.getConnectionId(), stream.getIdentifier(),
-					Integer.toString(buffer.position()), Boolean.toString(writeInProgress), Boolean.toString(closed)));
+			log.debug(sm.getString("stream.outputBuffer.flush.debug",
+					((StreamChannel) processor.getChannel()).getConnectionId(),
+					((StreamChannel) processor.getChannel()).getIdentifier(), Integer.toString(buffer.position()),
+					Boolean.toString(writeInProgress), Boolean.toString(closed)));
 		}
 		if (buffer.position() == 0) {
 			// Buffer is empty. Nothing to do.
@@ -127,7 +138,7 @@ public class BufferedOutputFilter implements OutputFilter, WriteBuffer.Sink {
 
 	@Override
 	public int doWrite(ByteBuffer chunk) throws IOException {
-		boolean block = responseData.getRequestData().getAsyncStateMachine().getWriteListener() == null;
+		boolean block = processor.isBlockingWrite();
 		// chunk is always fully written
 		int result = chunk.remaining();
 		if (writeBuffer.isEmpty()) {
@@ -158,15 +169,10 @@ public class BufferedOutputFilter implements OutputFilter, WriteBuffer.Sink {
 		return next.getBytesWritten();
 	}
 
-	@Override
-	public int getId() {
-		return Constants.BUFFEREDOUTPUT_FILTER;
-	}
-
-	@Override
-	public void setResponse(ResponseData response) {
-		this.responseData = response;
-	}
+//	@Override
+//	public void setResponse(ExchangeData exchangeData) {
+//		this.exchangeData = exchangeData;
+//	}
 
 	@Override
 	public void recycle() {
@@ -174,8 +180,8 @@ public class BufferedOutputFilter implements OutputFilter, WriteBuffer.Sink {
 	}
 
 	@Override
-	public void setBuffer(HttpOutputBuffer buffer) {
-		this.next = buffer;
+	public void setNext(HttpOutputBuffer next) {
+		this.next = next;
 	}
 
 }

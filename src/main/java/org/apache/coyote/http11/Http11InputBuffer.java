@@ -27,10 +27,9 @@ import java.util.regex.Pattern;
 import javax.servlet.http.HttpServletResponse;
 
 import org.apache.coyote.ErrorState;
-import org.apache.coyote.InputReader;
+import org.apache.coyote.ExchangeData;
 import org.apache.coyote.Request;
 import org.apache.coyote.RequestAction;
-import org.apache.coyote.RequestData;
 import org.apache.coyote.Response;
 import org.apache.coyote.http11.filters.BufferedInputFilter;
 import org.apache.coyote.http11.filters.ChunkedInputFilter;
@@ -69,7 +68,7 @@ public class Http11InputBuffer extends RequestAction {
 	/**
 	 * Associated Coyote request.
 	 */
-	private final RequestData requestData;
+	private final ExchangeData exchangeData;
 
 	/**
 	 * The read buffer.
@@ -92,7 +91,7 @@ public class Http11InputBuffer extends RequestAction {
 	/**
 	 * Underlying input buffer.
 	 */
-	private InputReader channelInputBuffer;
+//	private InputReader channelInputBuffer;
 
 	/**
 	 * HTTP/1.1 flag.
@@ -113,30 +112,31 @@ public class Http11InputBuffer extends RequestAction {
 	 * Content delimiter for the request (if false, the connection will be closed at
 	 * the end of the request).
 	 */
-	protected boolean contentDelimitation = true;
+	// protected boolean contentDelimitation = true;
 
 	// ----------------------------------------------------------- Constructors
 
 	public Http11InputBuffer(Http11Processor processor, HttpParser httpParser) {
 		super(processor);
 		this.processor = processor;
-		this.requestData = processor.getRequestData();
+		this.exchangeData = processor.getExchangeData();
 		this.httpParser = httpParser;
 
-		channelInputBuffer = new SocketInputReader();
+//		channelInputBuffer = new SocketInputReader();
 
 		AbstractHttp11Protocol<?> protocol = (AbstractHttp11Protocol<?>) processor.getProtocol();
 
 		// Create and add the identity filters.
-		addFilter(new IdentityInputFilter(protocol.getMaxSwallowSize()));
+		addFilter(new IdentityInputFilter(processor, protocol.getMaxSwallowSize()));
 		// Create and add the chunked filters.
-		addFilter(new ChunkedInputFilter(protocol.getMaxTrailerSize(), protocol.getAllowedTrailerHeadersInternal(),
-				protocol.getMaxExtensionSize(), protocol.getMaxSwallowSize()));
+		addFilter(new ChunkedInputFilter(processor, protocol.getMaxTrailerSize(),
+				protocol.getAllowedTrailerHeadersInternal(), protocol.getMaxExtensionSize(),
+				protocol.getMaxSwallowSize()));
 		// Create and add the void filters.
-		addFilter(new VoidInputFilter());
+		addFilter(new VoidInputFilter(processor));
 		// Create and add buffered input filter
-		addFilter(new BufferedInputFilter());
-		addFilter(new SavedRequestInputFilter(null));
+		addFilter(new BufferedInputFilter(processor));
+		addFilter(new SavedRequestInputFilter(processor, null));
 		markPluggableFilterIndex();
 	}
 
@@ -156,14 +156,14 @@ public class Http11InputBuffer extends RequestAction {
 
 	// ------------------------------------------------------- Protected Methods
 
-	@Override
-	protected InputReader getBaseInputReader() {
-		return channelInputBuffer;
-	}
+//	@Override
+//	protected InputReader getBaseInputReader() {
+//		return channelInputBuffer;
+//	}
 
 	protected void prepareRequestProtocol() {
 
-		MessageBytes protocolMB = requestData.protocol();
+		MessageBytes protocolMB = exchangeData.getProtocol();
 		if (protocolMB.equals(Constants.HTTP_11)) {
 			http09 = false;
 			http11 = true;
@@ -183,7 +183,7 @@ public class Http11InputBuffer extends RequestAction {
 			http09 = false;
 			http11 = false;
 			// Send 505; Unsupported HTTP version
-			requestData.getResponseData().setStatus(505);
+			exchangeData.setStatus(505);
 			processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("http11processor.request.prepare") + " Unsupported HTTP version \"" + protocolMB
@@ -209,15 +209,18 @@ public class Http11InputBuffer extends RequestAction {
 	 */
 	protected void prepareRequest() throws IOException {
 
-		contentDelimitation = false;
+//		contentDelimitation = false;
+		if (exchangeData.getRequestBodyType() != -1) {
+			throw new RuntimeException();
+		}
 
 		AbstractHttp11Protocol<?> protocol = (AbstractHttp11Protocol<?>) processor.getProtocol();
 
 		if (protocol.isSSLEnabled()) {
-			requestData.scheme().setString("https");
+			exchangeData.getScheme().setString("https");
 		}
 
-		MimeHeaders headers = requestData.getMimeHeaders();
+		MimeHeaders headers = exchangeData.getRequestHeaders();
 
 		// Check connection header
 		MessageBytes connectionValueMB = headers.getValue(Constants.CONNECTION);
@@ -236,9 +239,9 @@ public class Http11InputBuffer extends RequestAction {
 			if (expectMB != null && !expectMB.isNull()) {
 				if (expectMB.toString().trim().equalsIgnoreCase("100-continue")) {
 					this.setSwallowInput(false);
-					requestData.setExpectation(true);
+					exchangeData.setExpectation(true);
 				} else {
-					requestData.getResponseData().setStatus(HttpServletResponse.SC_EXPECTATION_FAILED);
+					exchangeData.setStatus(HttpServletResponse.SC_EXPECTATION_FAILED);
 					processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
 				}
 			}
@@ -273,7 +276,7 @@ public class Http11InputBuffer extends RequestAction {
 
 		// Check for an absolute-URI less the query string which has already
 		// been removed during the parsing of the request line
-		ByteChunk uriBC = requestData.requestURI().getByteChunk();
+		ByteChunk uriBC = exchangeData.getRequestURI().getByteChunk();
 		byte[] uriB = uriBC.getBytes();
 		if (uriBC.startsWithIgnoreCase("http", 0)) {
 			int pos = 4;
@@ -302,9 +305,9 @@ public class Http11InputBuffer extends RequestAction {
 					// 01234567
 					// http://
 					// https://
-					requestData.requestURI().setBytes(uriB, uriBCStart + 6, 1);
+					exchangeData.getRequestURI().setBytes(uriB, uriBCStart + 6, 1);
 				} else {
-					requestData.requestURI().setBytes(uriB, uriBCStart + slashPos, uriBC.getLength() - slashPos);
+					exchangeData.getRequestURI().setBytes(uriB, uriBCStart + slashPos, uriBC.getLength() - slashPos);
 				}
 
 				// Skip any user info
@@ -396,36 +399,38 @@ public class Http11InputBuffer extends RequestAction {
 		// Parse content-length header
 		long contentLength = -1;
 		try {
-			contentLength = requestData.getContentLengthLong();
+			contentLength = exchangeData.getRequestContentLengthLong();
 		} catch (NumberFormatException e) {
 			badRequest("http11processor.request.nonNumericContentLength");
 		} catch (IllegalArgumentException e) {
 			badRequest("http11processor.request.multipleContentLength");
 		}
 		if (contentLength >= 0) {
-			if (contentDelimitation) {
+			if (exchangeData.getRequestBodyType() == ExchangeData.BODY_TYPE_CHUNKED) {
 				// contentDelimitation being true at this point indicates that
 				// chunked encoding is being used but chunked encoding should
 				// not be used with a content length. RFC 2616, section 4.4,
 				// bullet 3 states Content-Length must be ignored in this case -
 				// so remove it.
 				headers.removeHeader("content-length");
-				requestData.setContentLength(-1);
+				exchangeData.setRequestContentLength(-1);
 			} else {
 				this.addActiveFilter(Constants.IDENTITY_FILTER);
-				contentDelimitation = true;
+//				contentDelimitation = true;
+				exchangeData.setRequestBodyType(ExchangeData.BODY_TYPE_FIXEDLENGTH);
 			}
 		}
 
 		// Validate host name and extract port if present
 		parseHost(hostValueMB);
 
-		if (!contentDelimitation) {
+		if (exchangeData.getRequestBodyType() == -1) {
 			// If there's no content length
 			// (broken HTTP/1.0 or HTTP/1.1), assume
 			// the client is not broken and didn't send a body
 			this.addActiveFilter(Constants.VOID_FILTER);
-			contentDelimitation = true;
+//			contentDelimitation = true;
+			exchangeData.setRequestBodyType(ExchangeData.BODY_TYPE_NOBODY);
 		}
 
 		if (!processor.getErrorState().isIoAllowed()) {
@@ -434,6 +439,15 @@ public class Http11InputBuffer extends RequestAction {
 			request.setResponse(response);
 			processor.getAdapter().log(request, response, 0);
 		}
+
+		int maxKeepAliveRequests = protocol.getMaxKeepAliveRequests();
+		if (maxKeepAliveRequests == 1) {
+			keepAlive = false;
+		} else if (maxKeepAliveRequests > 0
+				&& ((SocketChannel) processor.getChannel()).incrementKeepAlive() >= maxKeepAliveRequests) {
+			keepAlive = false;
+		}
+
 	}
 
 	/**
@@ -448,7 +462,8 @@ public class Http11InputBuffer extends RequestAction {
 			// Skip
 		} else if (encodingName.equals("chunked")) {
 			this.addActiveFilter(Constants.CHUNKED_FILTER);
-			contentDelimitation = true;
+//			contentDelimitation = true;
+			exchangeData.setRequestBodyType(ExchangeData.BODY_TYPE_CHUNKED);
 		} else {
 			InputFilter filter = getFilterByEncodingName(encodingName);
 			if (filter != null) {
@@ -463,7 +478,7 @@ public class Http11InputBuffer extends RequestAction {
 //			}
 			// Unsupported transfer encoding
 			// 501 - Unimplemented
-			requestData.getResponseData().setStatus(501);
+			exchangeData.setStatus(501);
 			processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("http11processor.request.prepare") + " Unsupported transfer encoding ["
@@ -473,7 +488,7 @@ public class Http11InputBuffer extends RequestAction {
 	}
 
 	private void badRequest(String errorKey) {
-		requestData.getResponseData().setStatus(400);
+		exchangeData.setStatus(400);
 		processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
 		if (log.isDebugEnabled()) {
 			log.debug(sm.getString(errorKey));
@@ -496,9 +511,25 @@ public class Http11InputBuffer extends RequestAction {
 	}
 
 	@Override
+	protected BufWrapper doReadFromChannel() throws IOException {
+		if (((SocketChannel) processor.getChannel()).getAppReadBuffer().hasNoRemaining()) {
+			// The application is reading the HTTP request body which is
+			// always a blocking operation.
+			if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(true))
+				return null;
+		}
+
+		int length = ((SocketChannel) processor.getChannel()).getAppReadBuffer().getRemaining();
+		BufWrapper bufWrapper = ((SocketChannel) processor.getChannel()).getAppReadBuffer().duplicate();//
+		((SocketChannel) processor.getChannel()).getAppReadBuffer()
+				.setPosition(((SocketChannel) processor.getChannel()).getAppReadBuffer().getLimit());
+		return bufWrapper;
+	}
+
+	@Override
 	public int getAvailable(Object param) {
 		int available = available(Boolean.TRUE.equals(param));
-		// requestData.setAvailable(available);
+		// exchangeData.setAvailable(available);
 		return available;
 	}
 
@@ -512,6 +543,9 @@ public class Http11InputBuffer extends RequestAction {
 		int available = byteBuffer.getRemaining();
 		if (available == 0) {
 			available = getAvailableInFilters();
+		}
+		if (available == 0) {
+			available = ((SocketChannel) processor.getChannel()).getAvailable();
 		}
 //		if ((available == 0) && (hasActiveFilters())) {
 //			for (int i = 0; (available == 0) && (i < getActiveFiltersCount()); i++) {
@@ -609,14 +643,14 @@ public class Http11InputBuffer extends RequestAction {
 	 */
 	protected void populateRequestAttributeRemoteHost() {
 		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
-			requestData.remoteHost().setString(((SocketChannel) processor.getChannel()).getRemoteHost());
+			exchangeData.getRemoteHost().setString(((SocketChannel) processor.getChannel()).getRemoteHost());
 		}
 	}
 
 	@Override
 	public void actionREQ_HOST_ADDR_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
-			requestData.remoteAddr().setString(((SocketChannel) processor.getChannel()).getRemoteAddr());
+			exchangeData.getRemoteAddr().setString(((SocketChannel) processor.getChannel()).getRemoteAddr());
 		}
 	}
 
@@ -628,28 +662,28 @@ public class Http11InputBuffer extends RequestAction {
 	@Override
 	public void actionREQ_LOCALPORT_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
-			requestData.setLocalPort(((SocketChannel) processor.getChannel()).getLocalPort());
+			exchangeData.setLocalPort(((SocketChannel) processor.getChannel()).getLocalPort());
 		}
 	}
 
 	@Override
 	public void actionREQ_LOCAL_ADDR_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
-			requestData.localAddr().setString(((SocketChannel) processor.getChannel()).getLocalAddr());
+			exchangeData.getLocalAddr().setString(((SocketChannel) processor.getChannel()).getLocalAddr());
 		}
 	}
 
 	@Override
 	public void actionREQ_LOCAL_NAME_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
-			requestData.localName().setString(((SocketChannel) processor.getChannel()).getLocalName());
+			exchangeData.getLocalName().setString(((SocketChannel) processor.getChannel()).getLocalName());
 		}
 	}
 
 	@Override
 	public void actionREQ_REMOTEPORT_ATTRIBUTE() {
 		if (getPopulateRequestAttributesFromSocket() && ((SocketChannel) processor.getChannel()) != null) {
-			requestData.setRemotePort(((SocketChannel) processor.getChannel()).getRemotePort());
+			exchangeData.setRemotePort(((SocketChannel) processor.getChannel()).getRemotePort());
 		}
 	}
 
@@ -662,7 +696,7 @@ public class Http11InputBuffer extends RequestAction {
 	protected void populatePort() {
 		// Ensure the local port field is populated before using it.
 		this.actionREQ_LOCALPORT_ATTRIBUTE();
-		requestData.setServerPort(requestData.getLocalPort());
+		exchangeData.setServerPort(exchangeData.getLocalPort());
 	}
 
 	@Override
@@ -700,25 +734,25 @@ public class Http11InputBuffer extends RequestAction {
 			if (sslSupport != null) {
 				Object sslO = sslSupport.getCipherSuite();
 				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.CIPHER_SUITE_KEY, sslO);
+					exchangeData.setAttribute(SSLSupport.CIPHER_SUITE_KEY, sslO);
 				}
 				sslO = sslSupport.getPeerCertificateChain();
 				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
+					exchangeData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
 				}
 				sslO = sslSupport.getKeySize();
 				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.KEY_SIZE_KEY, sslO);
+					exchangeData.setAttribute(SSLSupport.KEY_SIZE_KEY, sslO);
 				}
 				sslO = sslSupport.getSessionId();
 				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.SESSION_ID_KEY, sslO);
+					exchangeData.setAttribute(SSLSupport.SESSION_ID_KEY, sslO);
 				}
 				sslO = sslSupport.getProtocol();
 				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, sslO);
+					exchangeData.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, sslO);
 				}
-				requestData.setAttribute(SSLSupport.SESSION_MGR, sslSupport);
+				exchangeData.setAttribute(SSLSupport.SESSION_MGR, sslSupport);
 			}
 		} catch (Exception e) {
 			log.warn(sm.getString("abstractProcessor.socket.ssl"), e);
@@ -770,7 +804,7 @@ public class Http11InputBuffer extends RequestAction {
 				 */
 				Object sslO = sslSupport.getPeerCertificateChain();
 				if (sslO != null) {
-					requestData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
+					exchangeData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
 				}
 			} catch (IOException ioe) {
 				log.warn(sm.getString("http11processor.socket.ssl"), ioe);
@@ -790,7 +824,7 @@ public class Http11InputBuffer extends RequestAction {
 	 * pointers so that we are ready to parse the next HTTP request.
 	 */
 	void nextRequest() {
-		// requestData.recycle();
+		// exchangeData.recycle();
 
 		((SocketChannel) processor.getChannel()).getAppReadBuffer().nextRequest();
 
@@ -804,10 +838,10 @@ public class Http11InputBuffer extends RequestAction {
 		if (((SocketChannel) processor.getChannel()) != null) {
 			((SocketChannel) processor.getChannel()).getAppReadBuffer().reset();
 		}
-		// requestData.recycle();
+		// exchangeData.recycle();
 
+		keepAlive = true;
 		resetFilters();
-
 	}
 
 	// ------------------------------------- InputStreamInputBuffer Inner Class
@@ -815,42 +849,30 @@ public class Http11InputBuffer extends RequestAction {
 	/**
 	 * This class is an input buffer which will read its data from an input stream.
 	 */
-	private class SocketInputReader implements InputReader {
+//	private class SocketInputReader implements InputReader {
 
-		// @Override
-		// public int doRead(PreInputBuffer handler) throws IOException {
+	// @Override
+	// public int doRead(PreInputBuffer handler) throws IOException {
 
-		// if (channel.getAppReadBuffer().hasNoRemaining()) {
-		// // The application is reading the HTTP request body which is
-		// // always a blocking operation.
-		// if (!channel.getAppReadBuffer().fill(true))
-		// return -1;
-		// }
+	// if (channel.getAppReadBuffer().hasNoRemaining()) {
+	// // The application is reading the HTTP request body which is
+	// // always a blocking operation.
+	// if (!channel.getAppReadBuffer().fill(true))
+	// return -1;
+	// }
 
-		// int length = channel.getAppReadBuffer().getRemaining();
-		// handler.setBufWrapper(channel.getAppReadBuffer().duplicate());
-		// channel.getAppReadBuffer().setPosition(channel.getAppReadBuffer().getLimit());
+	// int length = channel.getAppReadBuffer().getRemaining();
+	// handler.setBufWrapper(channel.getAppReadBuffer().duplicate());
+	// channel.getAppReadBuffer().setPosition(channel.getAppReadBuffer().getLimit());
 
-		// return length;
-		// }
+	// return length;
+	// }
 
-		@Override
-		public BufWrapper doRead() throws IOException {
-			if (((SocketChannel) processor.getChannel()).getAppReadBuffer().hasNoRemaining()) {
-				// The application is reading the HTTP request body which is
-				// always a blocking operation.
-				if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(true))
-					return null;
-			}
+//		@Override
+//		public BufWrapper doRead() throws IOException {
 
-			int length = ((SocketChannel) processor.getChannel()).getAppReadBuffer().getRemaining();
-			BufWrapper bufWrapper = ((SocketChannel) processor.getChannel()).getAppReadBuffer();// .duplicate()
-			// ((SocketChannel)
-			// processor.getChannel()).getAppReadBuffer().setPosition(((SocketChannel)
-			// processor.getChannel()).getAppReadBuffer().getLimit());
-			return bufWrapper;
-		}
+//		}
 
-	}
+//	}
 
 }

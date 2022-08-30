@@ -20,8 +20,10 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.ExchangeData;
 import org.apache.coyote.InputReader;
-import org.apache.coyote.RequestData;
+import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.InputFilter;
 import org.apache.tomcat.util.buf.ByteChunk;
@@ -33,7 +35,7 @@ import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
  *
  * @author Remy Maucherat
  */
-public class VoidInputFilter implements InputFilter {
+public class VoidInputFilter extends ProcessorComponent implements InputFilter {
 
 	// -------------------------------------------------------------- Constants
 
@@ -53,10 +55,19 @@ public class VoidInputFilter implements InputFilter {
 	// return -1;
 	// }
 
+	public VoidInputFilter(AbstractProcessor processor) {
+		super(processor);
+	}
+
 	// ---------------------------------------------------- InputFilter Methods
 	@Override
 	public int getId() {
 		return Constants.VOID_FILTER;
+	}
+
+	@Override
+	public void actived() {
+
 	}
 
 	@Override
@@ -68,16 +79,16 @@ public class VoidInputFilter implements InputFilter {
 	/**
 	 * Set the associated request.
 	 */
-	@Override
-	public void setRequest(RequestData request) {
-		// NOOP: Request isn't used so ignore it
-	}
+//	@Override
+//	public void setRequest(ExchangeData exchangeData) {
+	// NOOP: Request isn't used so ignore it
+//	}
 
 	/**
 	 * Set the next buffer in the filter pipeline.
 	 */
 	@Override
-	public void setBuffer(InputReader buffer) {
+	public void setNext(InputReader next) {
 		// NOOP: No body to read
 	}
 

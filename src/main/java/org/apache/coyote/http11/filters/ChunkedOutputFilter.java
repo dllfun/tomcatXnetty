@@ -26,7 +26,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import org.apache.coyote.ResponseData;
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.ExchangeData;
+import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
@@ -38,7 +40,7 @@ import org.apache.tomcat.util.http.fileupload.ByteArrayOutputStream;
  *
  * @author Remy Maucherat
  */
-public class ChunkedOutputFilter implements OutputFilter {
+public class ChunkedOutputFilter extends ProcessorComponent implements OutputFilter {
 
 	private static final byte[] LAST_CHUNK_BYTES = { (byte) '0', (byte) '\r', (byte) '\n' };
 	private static final byte[] CRLF_BYTES = { (byte) '\r', (byte) '\n' };
@@ -67,7 +69,7 @@ public class ChunkedOutputFilter implements OutputFilter {
 	/**
 	 * Next buffer in the pipeline.
 	 */
-	protected HttpOutputBuffer buffer;
+	protected HttpOutputBuffer next;
 
 	/**
 	 * Chunk header.
@@ -81,11 +83,13 @@ public class ChunkedOutputFilter implements OutputFilter {
 	 */
 	protected final ByteBuffer endChunk = ByteBuffer.wrap(END_CHUNK_BYTES);
 
-	private ResponseData response;
+	// private ExchangeData exchangeData;
 
-	public ChunkedOutputFilter() {
+	public ChunkedOutputFilter(AbstractProcessor processor) {
+		super(processor);
 		chunkHeader.put(8, (byte) '\r');
 		chunkHeader.put(9, (byte) '\n');
+//		this.exchangeData = processor.getExchangeData();
 	}
 
 	// --------------------------------------------------- OutputBuffer Methods
@@ -93,6 +97,11 @@ public class ChunkedOutputFilter implements OutputFilter {
 	@Override
 	public int getId() {
 		return Constants.CHUNKED_FILTER;
+	}
+
+	@Override
+	public void actived() {
+
 	}
 
 	@Override
@@ -107,12 +116,12 @@ public class ChunkedOutputFilter implements OutputFilter {
 		int pos = calculateChunkHeader(result);
 
 		chunkHeader.position(pos).limit(10);
-		buffer.doWrite(chunkHeader);
+		next.doWrite(chunkHeader);
 
-		buffer.doWrite(chunk);
+		next.doWrite(chunk);
 
 		chunkHeader.position(8).limit(10);
-		buffer.doWrite(chunkHeader);
+		next.doWrite(chunkHeader);
 
 		return result;
 	}
@@ -131,36 +140,35 @@ public class ChunkedOutputFilter implements OutputFilter {
 
 	@Override
 	public long getBytesWritten() {
-		return buffer.getBytesWritten();
+		return next.getBytesWritten();
 	}
 
 	// --------------------------------------------------- OutputFilter Methods
 
-	@Override
-	public void setResponse(ResponseData response) {
-		this.response = response;
-	}
+//	@Override
+//	public void setResponse(ExchangeData exchangeData) {
+//	}
 
 	@Override
-	public void setBuffer(HttpOutputBuffer buffer) {
-		this.buffer = buffer;
+	public void setNext(HttpOutputBuffer next) {
+		this.next = next;
 	}
 
 	@Override
 	public void flush() throws IOException {
 		// No data buffered in this filter. Flush next buffer.
-		buffer.flush();
+		next.flush();
 	}
 
 	@Override
 	public boolean flush(boolean block) throws IOException {
-		return buffer.flush(block);
+		return next.flush(block);
 	}
 
 	@Override
 	public void end() throws IOException {
 
-		Supplier<Map<String, String>> trailerFieldsSupplier = response.getTrailerFields();
+		Supplier<Map<String, String>> trailerFieldsSupplier = processor.getExchangeData().getTrailerFieldsSupplier();
 		Map<String, String> trailerFields = null;
 
 		if (trailerFieldsSupplier != null) {
@@ -169,10 +177,10 @@ public class ChunkedOutputFilter implements OutputFilter {
 
 		if (trailerFields == null) {
 			// Write end chunk
-			buffer.doWrite(endChunk);
+			next.doWrite(endChunk);
 			endChunk.position(0).limit(endChunk.capacity());
 		} else {
-			buffer.doWrite(lastChunk);
+			next.doWrite(lastChunk);
 			lastChunk.position(0).limit(lastChunk.capacity());
 
 			ByteArrayOutputStream baos = new ByteArrayOutputStream(1024);
@@ -189,16 +197,16 @@ public class ChunkedOutputFilter implements OutputFilter {
 				osw.write("\r\n");
 			}
 			osw.close();
-			buffer.doWrite(ByteBuffer.wrap(baos.toByteArray()));
+			next.doWrite(ByteBuffer.wrap(baos.toByteArray()));
 
-			buffer.doWrite(crlfChunk);
+			next.doWrite(crlfChunk);
 			crlfChunk.position(0).limit(crlfChunk.capacity());
 		}
-		buffer.end();
+		next.end();
 	}
 
 	@Override
 	public void recycle() {
-		response = null;
+//		exchangeData = null;
 	}
 }

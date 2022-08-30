@@ -23,8 +23,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.ExchangeData;
 import org.apache.coyote.InputReader;
-import org.apache.coyote.RequestData;
+import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.InputFilter;
 import org.apache.tomcat.util.buf.ByteChunk;
@@ -38,7 +40,7 @@ import org.apache.tomcat.util.res.StringManager;
  *
  * @author Remy Maucherat
  */
-public class ChunkedInputFilter implements InputFilter {
+public class ChunkedInputFilter extends ProcessorComponent implements InputFilter {
 
 	private static final StringManager sm = StringManager.getManager(ChunkedInputFilter.class.getPackage().getName());
 
@@ -58,7 +60,7 @@ public class ChunkedInputFilter implements InputFilter {
 	/**
 	 * Next buffer in the pipeline.
 	 */
-	protected InputReader buffer;
+	protected InputReader next;
 
 	/**
 	 * Number of bytes remaining in the current chunk.
@@ -72,7 +74,7 @@ public class ChunkedInputFilter implements InputFilter {
 
 	// private BufWrapper oldReadChunk;
 
-	private int oldLimit = -1;
+	private int currLimit = -1;
 
 	private int realLimit = -1;
 
@@ -95,7 +97,7 @@ public class ChunkedInputFilter implements InputFilter {
 	/**
 	 * Request being parsed.
 	 */
-	private RequestData request;
+	private ExchangeData exchangeData;
 
 	/**
 	 * Limit for extension size.
@@ -123,13 +125,15 @@ public class ChunkedInputFilter implements InputFilter {
 
 	// ----------------------------------------------------------- Constructors
 
-	public ChunkedInputFilter(int maxTrailerSize, Set<String> allowedTrailerHeaders, int maxExtensionSize,
-			int maxSwallowSize) {
+	public ChunkedInputFilter(AbstractProcessor processor, int maxTrailerSize, Set<String> allowedTrailerHeaders,
+			int maxExtensionSize, int maxSwallowSize) {
+		super(processor);
 		this.trailingHeaders.setLimit(maxTrailerSize);
 		this.allowedTrailerHeaders = allowedTrailerHeaders;
 		this.maxExtensionSize = maxExtensionSize;
 		this.maxTrailerSize = maxTrailerSize;
 		this.maxSwallowSize = maxSwallowSize;
+		this.exchangeData = processor.getExchangeData();
 	}
 
 	// ---------------------------------------------------- InputBuffer Methods
@@ -192,6 +196,11 @@ public class ChunkedInputFilter implements InputFilter {
 	}
 
 	@Override
+	public void actived() {
+
+	}
+
+	@Override
 	public BufWrapper doRead() throws IOException {
 		if (endChunk) {
 			return null;
@@ -203,7 +212,7 @@ public class ChunkedInputFilter implements InputFilter {
 		// throw new RuntimeException();
 		// }
 
-		if (readChunk != null && oldLimit != -1 && readChunk.getLimit() != oldLimit) {
+		if (readChunk != null && currLimit != -1 && readChunk.getLimit() != currLimit) {
 			throw new RuntimeException();
 		}
 
@@ -228,7 +237,7 @@ public class ChunkedInputFilter implements InputFilter {
 			if (endChunk) {
 				parseEndChunk();
 				// oldReadChunk = readChunk;
-				oldLimit = readChunk.getLimit();
+				currLimit = readChunk.getLimit();
 				readChunk.startTrace();
 				return null;
 			}
@@ -244,6 +253,7 @@ public class ChunkedInputFilter implements InputFilter {
 
 		if (remaining > readChunk.getRemaining()) {
 			result = readChunk.getRemaining();
+			realLimit = readChunk.getLimit();
 			remaining = remaining - result;
 			// if (readChunk != handler.getBufWrapper()) {
 			// handler.setBufWrapper(readChunk);// .duplicate()
@@ -270,7 +280,7 @@ public class ChunkedInputFilter implements InputFilter {
 		}
 
 		// oldReadChunk = readChunk;
-		oldLimit = readChunk.getLimit();
+		currLimit = readChunk.getLimit();
 		readChunk.startTrace();
 
 		return readChunk;
@@ -279,10 +289,10 @@ public class ChunkedInputFilter implements InputFilter {
 	/**
 	 * Read the content length from the request.
 	 */
-	@Override
-	public void setRequest(RequestData request) {
-		this.request = request;
-	}
+//	@Override
+//	public void setRequest(ExchangeData exchangeData) {
+//		this.exchangeData = exchangeData;
+//	}
 
 	/**
 	 * End the current request.
@@ -309,15 +319,15 @@ public class ChunkedInputFilter implements InputFilter {
 	 */
 	@Override
 	public int available() {
-		return readChunk != null ? readChunk.getRemaining() : 0;
+		return readChunk != null ? (realLimit - currLimit) : 0;
 	}
 
 	/**
 	 * Set the next buffer in the filter pipeline.
 	 */
 	@Override
-	public void setBuffer(InputReader buffer) {
-		this.buffer = buffer;
+	public void setNext(InputReader next) {
+		this.next = next;
 	}
 
 	/**
@@ -359,7 +369,7 @@ public class ChunkedInputFilter implements InputFilter {
 	 * @throws IOException Read error
 	 */
 	protected BufWrapper readBytes() throws IOException {
-		return buffer.doRead();
+		return next.doRead();
 	}
 
 	/**
@@ -491,7 +501,7 @@ public class ChunkedInputFilter implements InputFilter {
 
 	private boolean parseHeader() throws IOException {
 
-		Map<String, String> headers = request.getTrailerFields();
+		Map<String, String> headers = exchangeData.getTrailerFields();
 
 		byte chr = 0;
 

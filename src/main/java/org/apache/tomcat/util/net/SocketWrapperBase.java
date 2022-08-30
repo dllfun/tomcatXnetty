@@ -791,10 +791,11 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 			return provider.getByteBuffer().duplicate();
 		}
 
-		// @Override
-		// public BufWrapper duplicate() {
-		// return new ByteBufferWrapper(channel, delegate.duplicate());
-		// }
+		@Override
+		public BufWrapper duplicate() {
+			ByteBuffer buffer = provider.getByteBuffer().duplicate();
+			return new ByteBufferWrapper(channel, () -> (buffer));
+		}
 
 		public static ByteBufferWrapper wrapper(ByteBuffer buffer) {
 			return new ByteBufferWrapper(null, () -> buffer);

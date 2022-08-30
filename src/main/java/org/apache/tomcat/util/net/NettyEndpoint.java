@@ -370,6 +370,27 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		}
 
 		@Override
+		public int getAvailable() {
+			synchronized (queue) {
+				if (queue.isEmpty()) {
+					return 0;
+				} else {
+					int available = 0;
+					for (ByteBuf buf : queue) {
+						available += buf.readableBytes();
+					}
+					return available;
+				}
+			}
+		}
+
+		@Override
+		public boolean isReadyForRead() throws IOException {
+			// TODO Auto-generated method stub
+			return true;
+		}
+
+		@Override
 		public boolean hasDataToRead() {
 			// TODO Auto-generated method stub
 			return true;
@@ -497,12 +518,6 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			} else {
 				throw new RuntimeException();
 			}
-		}
-
-		@Override
-		public boolean isReadyForRead() throws IOException {
-			// TODO Auto-generated method stub
-			return true;
 		}
 
 		@Override
@@ -952,7 +967,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				return delegate.nioBuffer();
 			}
 
-			// @Override
+			@Override
 			public BufWrapper duplicate() {
 				if (trace) {
 					System.out.println("duplicate");

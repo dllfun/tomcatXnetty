@@ -20,8 +20,10 @@ package org.apache.coyote.http11.filters;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.ExchangeData;
 import org.apache.coyote.InputReader;
-import org.apache.coyote.RequestData;
+import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.InputFilter;
 import org.apache.tomcat.util.buf.ByteChunk;
@@ -33,7 +35,7 @@ import org.apache.tomcat.util.res.StringManager;
  *
  * @author Remy Maucherat
  */
-public class IdentityInputFilter implements InputFilter {
+public class IdentityInputFilter extends ProcessorComponent implements InputFilter {
 
 	private static final StringManager sm = StringManager.getManager(IdentityInputFilter.class.getPackage().getName());
 
@@ -63,7 +65,7 @@ public class IdentityInputFilter implements InputFilter {
 	/**
 	 * Next buffer in the pipeline.
 	 */
-	protected InputReader buffer;
+	protected InputReader next;
 
 	/**
 	 * ByteBuffer used to read leftover bytes.
@@ -72,7 +74,8 @@ public class IdentityInputFilter implements InputFilter {
 
 	private final int maxSwallowSize;
 
-	public IdentityInputFilter(int maxSwallowSize) {
+	public IdentityInputFilter(AbstractProcessor processor, int maxSwallowSize) {
+		super(processor);
 		this.maxSwallowSize = maxSwallowSize;
 	}
 
@@ -106,13 +109,19 @@ public class IdentityInputFilter implements InputFilter {
 	}
 
 	@Override
+	public void actived() {
+		contentLength = processor.getExchangeData().getRequestContentLengthLong();
+		remaining = contentLength;
+	}
+
+	@Override
 	public BufWrapper doRead() throws IOException {
 		BufWrapper result = null;
 
 		if (contentLength >= 0) {
 			if (remaining > 0) {
 				int nRead = -1;
-				result = buffer.doRead();
+				result = next.doRead();
 				if (result != null) {
 					nRead = result.getRemaining();
 				}
@@ -146,11 +155,10 @@ public class IdentityInputFilter implements InputFilter {
 	/**
 	 * Read the content length from the request.
 	 */
-	@Override
-	public void setRequest(RequestData request) {
-		contentLength = request.getContentLengthLong();
-		remaining = contentLength;
-	}
+//	@Override
+//	public void setRequest(ExchangeData exchangeData) {
+
+//	}
 
 	@Override
 	public long end() throws IOException {
@@ -162,7 +170,7 @@ public class IdentityInputFilter implements InputFilter {
 		while (remaining > 0) {
 
 			int nread = -1;// buffer.doRead(this);
-			BufWrapper bufWrapper = buffer.doRead();
+			BufWrapper bufWrapper = next.doRead();
 			if (bufWrapper != null) {
 				nread = bufWrapper.getRemaining();
 			}
@@ -198,8 +206,8 @@ public class IdentityInputFilter implements InputFilter {
 	 * Set the next buffer in the filter pipeline.
 	 */
 	@Override
-	public void setBuffer(InputReader buffer) {
-		this.buffer = buffer;
+	public void setNext(InputReader next) {
+		this.next = next;
 	}
 
 	/**

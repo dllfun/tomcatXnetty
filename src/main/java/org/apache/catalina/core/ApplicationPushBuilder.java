@@ -39,6 +39,7 @@ import org.apache.catalina.authenticator.AuthenticatorBase;
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.util.SessionConfig;
 import org.apache.coyote.ActionCode;
+import org.apache.coyote.ExchangeData;
 import org.apache.tomcat.util.buf.HexUtils;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.collections.CaseInsensitiveKeyMap;
@@ -290,18 +291,18 @@ public class ApplicationPushBuilder implements PushBuilder {
 			throw new IllegalStateException(sm.getString("pushBuilder.noPath"));
 		}
 
-		org.apache.coyote.RequestData pushTarget = new org.apache.coyote.RequestData();
+		ExchangeData exchangeData = new org.apache.coyote.ExchangeData();
 
-		pushTarget.method().setString(method);
+		exchangeData.getMethod().setString(method);
 		// The next three are implied by the Javadoc getPath()
-		pushTarget.serverName().setString(baseRequest.getServerName());
-		pushTarget.setServerPort(baseRequest.getServerPort());
-		pushTarget.scheme().setString(baseRequest.getScheme());
+		exchangeData.getServerName().setString(baseRequest.getServerName());
+		exchangeData.setServerPort(baseRequest.getServerPort());
+		exchangeData.getScheme().setString(baseRequest.getScheme());
 
 		// Copy headers
 		for (Map.Entry<String, List<String>> header : headers.entrySet()) {
 			for (String value : header.getValue()) {
-				pushTarget.getMimeHeaders().addValue(header.getKey()).setString(value);
+				exchangeData.getRequestHeaders().addValue(header.getKey()).setString(value);
 			}
 		}
 
@@ -322,13 +323,13 @@ public class ApplicationPushBuilder implements PushBuilder {
 		if (sessionId != null) {
 			if (addSessionPathParameter) {
 				pushPath = pushPath + ";" + sessionPathParameterName + "=" + sessionId;
-				pushTarget.addPathParameter(sessionPathParameterName, sessionId);
+				exchangeData.addPathParameter(sessionPathParameterName, sessionId);
 			}
 			if (addSessionCookie) {
 				String sessionCookieHeader = sessionCookieName + "=" + sessionId;
-				MessageBytes mb = pushTarget.getMimeHeaders().getValue("cookie");
+				MessageBytes mb = exchangeData.getRequestHeaders().getValue("cookie");
 				if (mb == null) {
-					mb = pushTarget.getMimeHeaders().addValue("cookie");
+					mb = exchangeData.getRequestHeaders().addValue("cookie");
 					mb.setString(sessionCookieHeader);
 				} else {
 					mb.setString(mb.getString() + ";" + sessionCookieHeader);
@@ -337,25 +338,25 @@ public class ApplicationPushBuilder implements PushBuilder {
 		}
 
 		// Undecoded path - just %nn encoded
-		pushTarget.requestURI().setString(pushPath);
-		pushTarget.decodedURI().setString(decode(pushPath, catalinaRequest.getConnector().getURICharset()));
+		exchangeData.getRequestURI().setString(pushPath);
+		exchangeData.getDecodedURI().setString(decode(pushPath, catalinaRequest.getConnector().getURICharset()));
 
 		// Query string
 		if (pushQueryString == null && queryString != null) {
-			pushTarget.queryString().setString(queryString);
+			exchangeData.getQueryString().setString(queryString);
 		} else if (pushQueryString != null && queryString == null) {
-			pushTarget.queryString().setString(pushQueryString);
+			exchangeData.getQueryString().setString(pushQueryString);
 		} else if (pushQueryString != null && queryString != null) {
-			pushTarget.queryString().setString(pushQueryString + "&" + queryString);
+			exchangeData.getQueryString().setString(pushQueryString + "&" + queryString);
 		}
 
 		// Authorization
 		if (userName != null) {
-			pushTarget.getRemoteUser().setString(userName);
-			pushTarget.setRemoteUserNeedsAuthorization(true);
+			exchangeData.getRemoteUser().setString(userName);
+			exchangeData.setRemoteUserNeedsAuthorization(true);
 		}
 
-		coyoteRequest.actionPUSH_REQUEST(pushTarget);
+		coyoteRequest.pushRequest(exchangeData);
 
 		// Reset for next call to this method
 		path = null;

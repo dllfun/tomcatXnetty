@@ -22,8 +22,10 @@ import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.ExchangeData;
 import org.apache.coyote.InputReader;
-import org.apache.coyote.RequestData;
+import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.InputFilter;
 import org.apache.tomcat.util.buf.ByteChunk;
@@ -34,7 +36,7 @@ import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
  * Input filter responsible for reading and buffering the request body, so that
  * it does not interfere with client SSL handshake messages.
  */
-public class BufferedInputFilter implements InputFilter {
+public class BufferedInputFilter extends ProcessorComponent implements InputFilter {
 
 	// -------------------------------------------------------------- Constants
 
@@ -45,7 +47,7 @@ public class BufferedInputFilter implements InputFilter {
 
 	private ByteBuffer buffered;
 	private BufWrapper tempRead;
-	private InputReader buffer;
+	private InputReader next;
 	private boolean hasRead = false;
 
 	// ----------------------------------------------------- Static Initializer
@@ -56,9 +58,18 @@ public class BufferedInputFilter implements InputFilter {
 
 	// --------------------------------------------------------- Public Methods
 
+	public BufferedInputFilter(AbstractProcessor processor) {
+		super(processor);
+	}
+
 	@Override
 	public int getId() {
 		return Constants.BUFFERED_FILTER;
+	}
+
+	@Override
+	public void actived() {
+
 	}
 
 	/**
@@ -78,23 +89,10 @@ public class BufferedInputFilter implements InputFilter {
 	/**
 	 * Reads the request body and buffers it.
 	 */
-	@Override
-	public void setRequest(RequestData request) {
-		// save off the Request body
-		try {
-			while ((tempRead = buffer.doRead()) != null) {
-				buffered.mark().position(buffered.limit()).limit(buffered.capacity());
-				while (buffered.hasRemaining() && tempRead.getRemaining() > 0) {
-					buffered.put(tempRead.getByte());
-				}
-				buffered.limit(buffered.position()).reset();
-				tempRead = null;
-			}
-		} catch (IOException | BufferOverflowException ioe) {
-			// No need for i18n - this isn't going to get logged anywhere
-			throw new IllegalStateException("Request body too large for buffer");
-		}
-	}
+//	@Override
+//	public void setRequest(ExchangeData exchangeData) {
+
+//	}
 
 	/**
 	 * Fills the given ByteBuffer with the buffered request body.
@@ -121,8 +119,22 @@ public class BufferedInputFilter implements InputFilter {
 	}
 
 	@Override
-	public void setBuffer(InputReader buffer) {
-		this.buffer = buffer;
+	public void setNext(InputReader next) {
+		this.next = next;
+		// save off the Request body
+		try {
+			while ((tempRead = next.doRead()) != null) {
+				buffered.mark().position(buffered.limit()).limit(buffered.capacity());
+				while (buffered.hasRemaining() && tempRead.getRemaining() > 0) {
+					buffered.put(tempRead.getByte());
+				}
+				buffered.limit(buffered.position()).reset();
+				tempRead = null;
+			}
+		} catch (IOException | BufferOverflowException ioe) {
+			// No need for i18n - this isn't going to get logged anywhere
+			throw new IllegalStateException("Request body too large for buffer");
+		}
 	}
 
 	@Override
@@ -135,7 +147,7 @@ public class BufferedInputFilter implements InputFilter {
 			}
 		}
 		hasRead = false;
-		buffer = null;
+		next = null;
 	}
 
 	@Override

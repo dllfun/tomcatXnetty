@@ -68,7 +68,7 @@ public class UpgradeProcessorInternal extends UpgradeProcessorBase {
 	}
 
 	@Override
-	public void timeoutAsync(long now) {
+	public void checkTimeout(long now) {
 		internalHttpUpgradeHandler.timeoutAsync(now);
 	}
 

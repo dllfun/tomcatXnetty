@@ -18,43 +18,78 @@ package org.apache.coyote.http2;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Collections;
+import java.util.Map;
+import java.util.function.Supplier;
+
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.CloseNowException;
 import org.apache.coyote.ErrorState;
+import org.apache.coyote.ExchangeData;
 import org.apache.coyote.ResponseAction;
-import org.apache.coyote.ResponseData;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.filters.GzipOutputFilter;
-import org.apache.coyote.http2.Stream.StreamOutputBuffer;
-import org.apache.tomcat.util.net.SendfileState;
+import org.apache.coyote.http2.filters.BufferedOutputFilter;
+import org.apache.coyote.http2.filters.FlowCtrlOutputFilter;
+import org.apache.juli.logging.Log;
+import org.apache.juli.logging.LogFactory;
+import org.apache.tomcat.util.buf.MessageBytes;
+import org.apache.tomcat.util.http.MimeHeaders;
+import org.apache.tomcat.util.res.StringManager;
 
 public class Http2OutputBuffer extends ResponseAction {
 
-	private Stream stream;
-	private final ResponseData responseData;
-	private StreamOutputBuffer streamOutputBuffer;
-	private StreamProcessor processor;
-	private SendfileData sendfileData = null;
-	private SendfileState sendfileState = null;
+	protected static final Log log = LogFactory.getLog(Stream.class);
+	protected static final StringManager sm = StringManager.getManager(Stream.class);
 
-	public Http2OutputBuffer(StreamProcessor processor, Stream stream, ResponseData responseData,
-			StreamOutputBuffer streamOutputBuffer) {
+	private static final MimeHeaders ACK_HEADERS;
+
+	static {
+		ExchangeData exchangeData = new ExchangeData();
+		exchangeData.setStatus(100);
+		StreamProcessor.prepareHeaders(exchangeData, true, null, null);
+		ACK_HEADERS = exchangeData.getResponseHeaders();
+	}
+
+//	private final StreamChannel stream;
+	private final ExchangeData exchangeData;
+//	private StreamOutputBuffer streamOutputBuffer;
+	private final AbstractProcessor processor;
+	private SendfileData sendfileData = null;
+//	private SendfileState sendfileState = null;
+	// Flag that indicates that data was left over on a previous
+	// non-blocking write. Once set, this flag stays set until all the data
+	// has been written.
+	private volatile long written = 0;
+
+	public Http2OutputBuffer(AbstractProcessor processor) {
 		super(processor);
 		this.processor = processor;
-		this.stream = stream;
-		this.responseData = responseData;
-		this.streamOutputBuffer = streamOutputBuffer;
-		addFilter(new GzipOutputFilter());
-		addFilter(new FlowCtrlOutputFilter(stream, processor.getHandler()));
-		addFilter(new BufferedOutputFilter(stream));
+//		this.stream = stream;
+		this.exchangeData = processor.getExchangeData();
+//		this.streamOutputBuffer = stream.getOutputBuffer();
+		addFilter(new GzipOutputFilter(processor));
+		addFilter(new FlowCtrlOutputFilter(processor));
+		addFilter(new BufferedOutputFilter(processor));
 	}
 
-	public SendfileState getSendfileState() {
-		return sendfileState;
+	public SendfileData getSendfileData() {
+		return sendfileData;
 	}
 
-	@Override
-	protected HttpOutputBuffer getBaseOutputBuffer() {
-		return streamOutputBuffer;
+//	public SendfileState getSendfileState() {
+//		return sendfileState;
+//	}
+
+//	@Override
+//	protected HttpOutputBuffer getBaseOutputBuffer() {
+//		return streamOutputBuffer;
+//	}
+
+	public void setSendfileData(SendfileData sendfileData) {
+		this.sendfileData = sendfileData;
 	}
 
 	/**
@@ -86,8 +121,12 @@ public class Http2OutputBuffer extends ResponseAction {
 
 	@Override
 	public boolean isTrailerFieldsSupported() {
-		return stream.isTrailerFieldsSupported();
+		return !((StreamChannel) processor.getChannel()).isOutputClosed();
 	}
+
+//	boolean isTrailerFieldsSupported() {
+//		return !endOfStreamSent;
+//	}
 
 	@Override
 	public final boolean isReadyForWrite() {
@@ -98,57 +137,157 @@ public class Http2OutputBuffer extends ResponseAction {
 				return false;
 			}
 		}
-		return stream.isReadyForWrite();
+		return ((StreamChannel) processor.getChannel()).isReadyForWrite();
 	}
 
 	@Override
 	public final void prepareResponse(boolean finished) throws IOException {
-		if (processor.getHandler().hasAsyncIO() && processor.getHandler().getProtocol().getUseSendfile()) {
+		if (((StreamChannel) processor.getChannel()).getHandler().hasAsyncIO()
+				&& ((StreamChannel) processor.getChannel()).getHandler().getProtocol().getUseSendfile()) {
 			prepareSendfile();
 		}
-		StreamProcessor.prepareHeaders(responseData.getRequestData(), responseData, sendfileData == null,
-				processor.getHandler().getProtocol(), stream);
-		stream.writeHeaders(finished);
+		StreamProcessor.prepareHeaders(exchangeData, sendfileData == null,
+				((StreamChannel) processor.getChannel()).getHandler().getProtocol(),
+				((StreamChannel) processor.getChannel()));
+		writeHeaders(finished);
+
+	}
+
+	private void writeHeaders(boolean finished) throws IOException {
+		if (finished) {
+			System.err.println("writeHeaders and finished");
+		}
+		boolean endOfStream = hasNoBody() && exchangeData.getTrailerFieldsSupplier() == null;
+		if (endOfStream) {
+			System.err.println("has bug, never happen");
+		}
+		((StreamChannel) processor.getChannel()).doWriteHeader(exchangeData.getResponseHeaders(),
+				finished && sendfileData == null);
 	}
 
 	@Override
 	public final void finishResponse() throws IOException {
-		sendfileState = processor.getHandler().processSendfile(sendfileData);
-		if (!(sendfileState == SendfileState.PENDING)) {
+//		sendfileState = stream.getHandler().processSendfile(sendfileData);
+		if (sendfileData == null) {// !(sendfileState == SendfileState.PENDING)
 			this.end();
 		}
 	}
 
 	// @Override
 	protected final void ack() {
-		if (!responseData.isCommitted() && responseData.getRequestData().hasExpectation()) {
+		if (!exchangeData.isCommitted() && exchangeData.hasExpectation()) {
 			try {
-				stream.writeAck();
+				writeAck();
 			} catch (IOException ioe) {
 				processor.setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
 			}
 		}
 	}
 
+	final void writeAck() throws IOException {
+		((StreamChannel) processor.getChannel()).doWriteHeader(ACK_HEADERS, false);
+	}
+
 	protected void prepareSendfile() {
-		String fileName = (String) stream.getRequestData()
+		String fileName = (String) processor.getExchangeData()
 				.getAttribute(org.apache.coyote.Constants.SENDFILE_FILENAME_ATTR);
 		if (fileName != null) {
 			sendfileData = new SendfileData();
-			sendfileData.path = new File(fileName).toPath();
-			sendfileData.pos = ((Long) stream.getRequestData()
-					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_START_ATTR)).longValue();
-			sendfileData.end = ((Long) stream.getRequestData()
-					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_END_ATTR)).longValue();
-			sendfileData.left = sendfileData.end - sendfileData.pos;
-			sendfileData.stream = stream;
-			sendfileData.outputBuffer = this;
+			sendfileData.setPath(new File(fileName).toPath());
+			sendfileData.setPos(((Long) ((StreamChannel) processor.getChannel()).getExchangeData()
+					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_START_ATTR)).longValue());
+			sendfileData.setEnd(((Long) ((StreamChannel) processor.getChannel()).getExchangeData()
+					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_END_ATTR)).longValue());
+			sendfileData.setLeft(sendfileData.getEnd() - sendfileData.getPos());
+			sendfileData.setStream(((StreamChannel) processor.getChannel()));
+			// sendfileData.outputBuffer = this;
 		}
 	}
 
 	@Override
 	public final void setSwallowResponse() {
 		// NO-OP
+	}
+
+	@Override
+	protected int doWriteToChannel(ByteBuffer chunk) throws IOException {
+		long contentLength = exchangeData.getResponseContentLengthLong();
+		int result = chunk.remaining();
+		written += result;
+		boolean finished = contentLength != -1 && contentLength == written
+				&& exchangeData.getTrailerFieldsSupplier() == null && sendfileData == null;
+		((StreamChannel) processor.getChannel()).doWriteBody(chunk, finished);
+		return result;
+	}
+
+	@Override
+	protected long getBytesWrittenToChannel() {
+		return written;
+	}
+
+	@Override
+	protected void flushToChannel() throws IOException {
+		// do nothing
+	}
+
+	@Override
+	protected boolean flushToChannel(boolean block) throws IOException {
+		return false;
+	}
+
+	@Override
+	protected void endToChannel() throws IOException {
+		if (((StreamChannel) processor.getChannel()).getResetException() != null) {
+			throw new CloseNowException(((StreamChannel) processor.getChannel()).getResetException());
+		}
+		if (!((StreamChannel) processor.getChannel()).isOutputClosed()) {
+			// ((StreamChannel) processor.getChannel()).setOutputClosed(true);
+			// flush(true);
+			if (!((StreamChannel) processor.getChannel()).isOutputClosed()) {
+				// Handling this special case here is simpler than trying
+				// to modify the following code to handle it.
+				System.err.println("write empty body for finish");
+				((StreamChannel) processor.getChannel()).doWriteBody(ByteBuffer.allocate(0),
+						exchangeData.getTrailerFieldsSupplier() == null);
+			}
+			writeTrailers();
+		}
+	}
+
+	private final void writeTrailers() throws IOException {
+		Supplier<Map<String, String>> supplier = exchangeData.getTrailerFieldsSupplier();
+		if (supplier == null) {
+			// No supplier was set, end of stream will already have been sent
+			return;
+		}
+
+		// We can re-use the MimeHeaders from the response since they have
+		// already been processed by the encoder at this point
+		MimeHeaders mimeHeaders = exchangeData.getResponseHeaders();
+		mimeHeaders.recycle();
+
+		Map<String, String> headerMap = supplier.get();
+		if (headerMap == null) {
+			headerMap = Collections.emptyMap();
+		}
+
+		// Copy the contents of the Map to the MimeHeaders
+		// TODO: Is there benefit in refactoring this? Is MimeHeaders too
+		// heavyweight? Can we reduce the copy/conversions?
+		for (Map.Entry<String, String> headerEntry : headerMap.entrySet()) {
+			MessageBytes mb = mimeHeaders.addValue(headerEntry.getKey());
+			mb.setString(headerEntry.getValue());
+		}
+
+		((StreamChannel) processor.getChannel()).doWriteHeader(mimeHeaders, true);
+	}
+
+	/**
+	 * @return <code>true</code> if it is certain that the associated response has
+	 *         no body.
+	 */
+	final boolean hasNoBody() {
+		return ((written == 0) && ((StreamChannel) processor.getChannel()).isOutputClosed());
 	}
 
 	// @Override
@@ -165,4 +304,9 @@ public class Http2OutputBuffer extends ResponseAction {
 //	public void flush() throws IOException {
 //		next.flush();
 //	}
+
+	public void recycle() {
+
+	}
+
 }

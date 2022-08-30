@@ -656,7 +656,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			}
 			AprSocketWrapper wrapper = new AprSocketWrapper(socket, this);
 			connections.put(socket, wrapper);
-			wrapper.setKeepAliveLeft(getMaxKeepAliveRequests());
+			// wrapper.setKeepAliveLeft(getMaxKeepAliveRequests());
 			// wrapper.setSecure(isSSLEnabled());
 			wrapper.setReadTimeout(getConnectionTimeout());
 			wrapper.setWriteTimeout(getConnectionTimeout());
@@ -1957,6 +1957,26 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 		}
 
 		@Override
+		public int getAvailable() {
+			getSocketBufferHandler().configureReadBufferForRead();
+			return getSocketBufferHandler().getReadBuffer().remaining();
+		}
+
+		@Override
+		public boolean isReadyForRead() throws IOException {
+			getSocketBufferHandler().configureReadBufferForRead();
+
+			if (getSocketBufferHandler().getReadBuffer().remaining() > 0) {
+				return true;
+			}
+
+			int read = fillReadBuffer(false);
+
+			boolean isReady = getSocketBufferHandler().getReadBuffer().position() > 0 || read == -1;
+			return isReady;
+		}
+
+		@Override
 		public int read(boolean block, byte[] b, int off, int len) throws IOException {
 			int nRead = populateReadBuffer(b, off, len);
 			if (nRead > 0) {
@@ -2098,20 +2118,6 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 				throw new IOException(
 						sm.getString("socket.apr.read.error", Integer.valueOf(-result), getSocket(), this));
 			}
-		}
-
-		@Override
-		public boolean isReadyForRead() throws IOException {
-			getSocketBufferHandler().configureReadBufferForRead();
-
-			if (getSocketBufferHandler().getReadBuffer().remaining() > 0) {
-				return true;
-			}
-
-			int read = fillReadBuffer(false);
-
-			boolean isReady = getSocketBufferHandler().getReadBuffer().position() > 0 || read == -1;
-			return isReady;
 		}
 
 		private void checkClosed() throws IOException {

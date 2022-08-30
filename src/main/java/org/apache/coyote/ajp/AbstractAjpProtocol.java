@@ -261,7 +261,7 @@ public abstract class AbstractAjpProtocol<S> extends AbstractProtocol<S> {
 	}
 
 	@Override
-	protected Processor createUpgradeProcessor(SocketChannel socket, UpgradeToken upgradeToken) {
+	protected Processor createUpgradeProcessor(SocketChannel channel, UpgradeToken upgradeToken) {
 		throw new IllegalStateException(sm.getString("ajpprotocol.noUpgradeHandler",
 				upgradeToken.getHttpUpgradeHandler().getClass().getName()));
 	}

@@ -19,6 +19,7 @@ package org.apache.coyote.http11;
 import org.apache.coyote.DispatchHandler;
 import org.apache.coyote.HandShakeHandler;
 import org.apache.coyote.ProcessorHandler;
+import org.apache.coyote.http2.Http2Protocol;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.Endpoint.Handler;
@@ -39,7 +40,8 @@ public class Http11NioProtocol extends AbstractHttp11JsseProtocol<NioChannel> {
 
 	public Http11NioProtocol() {
 		super(new NioEndpoint());
-
+		// TODO remove
+		// addUpgradeProtocol(new Http2Protocol());
 		Handler processorHandler = new ProcessorHandler(this);
 		Handler handShakeHandler = new HandShakeHandler(processorHandler);
 		Handler dispatchHandler = new DispatchHandler(handShakeHandler, this);

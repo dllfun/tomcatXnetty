@@ -24,10 +24,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.servlet.RequestDispatcher;
 
+import org.apache.coyote.AbstractProtocol.RegistrableProcessor;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.log.UserDataHelper;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
+import org.apache.tomcat.util.net.SendfileState;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
@@ -36,7 +39,7 @@ import org.apache.tomcat.util.res.StringManager;
  * Provides functionality and attributes common to all supported protocols
  * (currently HTTP and AJP) for processing a single request/response.
  */
-public abstract class AbstractProcessor extends AbstractProcessorLight {
+public abstract class AbstractProcessor extends AbstractProcessorLight implements RegistrableProcessor {
 
 	private static final StringManager sm = StringManager.getManager(AbstractProcessor.class);
 
@@ -54,8 +57,9 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	 * prevents the response mix-up.
 	 */
 	private volatile long asyncTimeoutGeneration = 0;
-	protected final RequestData requestData;
-	protected final ResponseData responseData;
+	protected final AsyncStateMachineWrapper asyncStateMachine;
+	protected final ExchangeData exchangeData;
+	// protected final ResponseData responseData;
 	// protected InputHandler inputHandler;
 	private volatile Channel channel = null;
 	// protected volatile SSLSupport sslSupport;
@@ -67,18 +71,18 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	protected final UserDataHelper userDataHelper;
 
 	public AbstractProcessor(AbstractProtocol<?> protocol, Adapter adapter) {
-		this(protocol, adapter, new RequestData(), new ResponseData());
+		this(protocol, adapter, new ExchangeData());
 	}
 
-	protected AbstractProcessor(AbstractProtocol<?> protocol, Adapter adapter, RequestData requestData,
-			ResponseData responseData) {
+	protected AbstractProcessor(AbstractProtocol<?> protocol, Adapter adapter, ExchangeData exchangeData) {
 		this.protocol = protocol;
 		this.adapter = adapter;
-		this.requestData = requestData;
-		this.responseData = responseData;
+		this.exchangeData = exchangeData;
+		// this.responseData = responseData;
 		// response.setHook(this);
-		this.requestData.setResponseData(this.responseData);
+//		this.exchangeData.setResponseData(this.responseData);
 		// request.setHook(this);
+		this.asyncStateMachine = new AsyncStateMachineWrapper();
 		this.userDataHelper = new UserDataHelper(getLog());
 	}
 
@@ -96,14 +100,18 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	}
 
 	@Override
-	public RequestData getRequestData() {
-		return requestData;
+	public ExchangeData getExchangeData() {
+		return exchangeData;
 	}
 
-	@Override
-	public ResponseData getResponseData() {
-		return responseData;
+	public AsyncStateMachineWrapper getAsyncStateMachine() {
+		return asyncStateMachine;
 	}
+
+	// @Override
+//	public ResponseData getResponseData() {
+//		return responseData;
+//	}
 
 	/**
 	 * Update the current error state to the new error state if the new error state
@@ -115,20 +123,20 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	public final void setErrorState(ErrorState errorState, Throwable t) {
 		// Use the return value to avoid processing more than one async error
 		// in a single async cycle.
-		boolean setError = responseData.setError();
+		boolean setError = exchangeData.setError();
 		boolean blockIo = this.errorState.isIoAllowed() && !errorState.isIoAllowed();
 		this.errorState = this.errorState.getMostSevere(errorState);
 		// Don't change the status code for IOException since that is almost
 		// certainly a client disconnect in which case it is preferable to keep
 		// the original status code http://markmail.org/message/4cxpwmxhtgnrwh7n
-		if (responseData.getStatus() < 400 && !(t instanceof IOException)) {
-			responseData.setStatus(500);
+		if (exchangeData.getStatus() < 400 && !(t instanceof IOException)) {
+			exchangeData.setStatus(500);
 		}
 		if (t != null) {
-			requestData.setAttribute(RequestDispatcher.ERROR_EXCEPTION, t);
+			exchangeData.setAttribute(RequestDispatcher.ERROR_EXCEPTION, t);
 		}
-		if (blockIo && isAsync() && setError) {
-			if (requestData.getAsyncStateMachine().asyncError()) {
+		if (blockIo && asyncStateMachine.isAsync() && setError) {
+			if (asyncStateMachine.asyncError()) {
 				// processSocketEvent(SocketEvent.ERROR, true);
 				Channel channel = getChannel();
 				if (channel != null) {
@@ -141,7 +149,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 		}
 	}
 
-	public ErrorState getErrorState() {
+	public final ErrorState getErrorState() {
 		return errorState;
 	}
 
@@ -170,6 +178,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	 * 
 	 * @param channel The socket wrapper
 	 */
+	@Override
 	public final void setChannel(Channel channel) {
 		this.channel = channel;
 		initChannel(channel);
@@ -180,6 +189,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	/**
 	 * @return the socket wrapper being used.
 	 */
+	@Override
 	public final Channel getChannel() {
 		return channel;
 	}
@@ -205,100 +215,170 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 //		}
 //	}
 
+//	@Override
+//	protected boolean isAsync() {
+//		return asyncStateMachine.isAsync();
+//	}
+
+	public final boolean isBlockingRead() {
+		return asyncStateMachine.getReadListener() == null;
+	}
+
+	/**
+	 * Is standard Servlet blocking IO being used for output?
+	 * 
+	 * @return <code>true</code> if this is blocking IO
+	 */
+	public final boolean isBlockingWrite() {
+		return asyncStateMachine.getWriteListener() == null;
+	}
+
+//	@Override
+//	protected boolean shouldDispatch(SocketEvent event) {
+//		return asyncStateMachine.isAsync();
+//	}
+
 	@Override
-	public boolean isAsync() {
-		return requestData.getAsyncStateMachine().isAsync();
+	public boolean isIgnoredTimeout() {
+		return (!asyncStateMachine.isAsync()
+				|| asyncStateMachine.isAsync() && asyncTimeoutGeneration == asyncStateMachine.getCurrentGeneration());
+	}
+
+	/**
+	 * {@inheritDoc}
+	 * <p>
+	 * Sub-classes of this base class represent a single request/response pair. The
+	 * timeout to be processed is, therefore, the Servlet asynchronous processing
+	 * timeout.
+	 */
+	@Override
+	public void checkTimeout(long now) {
+		if (now < 0) {
+			doTimeoutAsync();
+		} else {
+			long asyncTimeout = asyncStateMachine.getAsyncTimeout();
+			if (asyncTimeout > 0) {
+				long asyncStart = asyncStateMachine.getLastAsyncStart();
+				if ((now - asyncStart) > asyncTimeout) {
+					doTimeoutAsync();
+				}
+			} else if (!asyncStateMachine.isAvailable()) {
+				// Timeout the async process if the associated web application
+				// is no longer running.
+				doTimeoutAsync();
+			}
+		}
+	}
+
+	private void doTimeoutAsync() {
+		// Avoid multiple timeouts
+		asyncStateMachine.setAsyncTimeout(-1);
+		asyncTimeoutGeneration = asyncStateMachine.getCurrentGeneration();
+		// processSocketEvent(SocketEvent.TIMEOUT, true);
+		Channel channel = getChannel();
+		if (channel != null) {
+
+			// TODO sads
+			// channel.processSocket(event, dispatch);
+			protocol.getHandler().processSocket(channel, SocketEvent.TIMEOUT, true);
+		}
 	}
 
 	@Override
 	public final SocketState dispatch(SocketEvent event) throws IOException {
-
-		if (!requestData.getAsyncStateMachine().isAsync()) {
-			if (requestData.getAsyncStateMachine().hasStackedState()) {
-				requestData.getAsyncStateMachine().popDispatchingState();
-				requestData.getAsyncStateMachine().asyncPostProcess();
-			}
-		}
-
-		if (event == SocketEvent.OPEN_WRITE && requestData.getAsyncStateMachine().getWriteListener() != null) {
-			requestData.getAsyncStateMachine().asyncOperation();
-			try {
-				if (flushBufferedWrite()) {
-					return SocketState.LONG;
-				}
-			} catch (IOException ioe) {
-				if (getLog().isDebugEnabled()) {
-					getLog().debug("Unable to write async data.", ioe);
-				}
-				event = SocketEvent.ERROR;
-				requestData.setAttribute(RequestDispatcher.ERROR_EXCEPTION, ioe);
-			}
-		} else if (event == SocketEvent.OPEN_READ && requestData.getAsyncStateMachine().getReadListener() != null) {
-			dispatchNonBlockingRead();
-		} else if (event == SocketEvent.ERROR) {
-			// An I/O error occurred on a non-container thread. This includes:
-			// - read/write timeouts fired by the Poller (NIO & APR)
-			// - completion handler failures in NIO2
-
-			if (requestData.getAttribute(RequestDispatcher.ERROR_EXCEPTION) == null) {
-				// Because the error did not occur on a container thread the
-				// request's error attribute has not been set. If an exception
-				// is available from the channel, use it to set the
-				// request's error attribute here so it is visible to the error
-				// handling.
-				requestData.setAttribute(RequestDispatcher.ERROR_EXCEPTION, channel.getError());
-			}
-
-			if (requestData.getAsyncStateMachine().getReadListener() != null
-					|| requestData.getAsyncStateMachine().getWriteListener() != null) {
-				// The error occurred during non-blocking I/O. Set the correct
-				// state else the error handling will trigger an ISE.
-				requestData.getAsyncStateMachine().asyncOperation();
-			}
-		}
-
-		RequestInfo rp = requestData.getRequestProcessor();
-		try {
-			rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
-			Request request = createRequest();
-			Response response = createResponse();
-			request.setResponse(response);
-			if (!getAdapter().asyncDispatch(request, response, event)) {
-				setErrorState(ErrorState.CLOSE_NOW, null);
-			}
-		} catch (InterruptedIOException e) {
-			setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
-		} catch (Throwable t) {
-			ExceptionUtils.handleThrowable(t);
-			setErrorState(ErrorState.CLOSE_NOW, t);
-			getLog().error(sm.getString("http11processor.request.process"), t);
-		}
-
-		rp.setStage(org.apache.coyote.Constants.STAGE_ENDED);
-
 		SocketState state;
+		boolean cont = false;
+		do {
+			cont = false;
+			if (!asyncStateMachine.isAsync()) {
+				if (asyncStateMachine.hasStackedState()) {
+					asyncStateMachine.popDispatchingState();
+					asyncStateMachine.asyncPostProcess();
+				}
+			}
 
-		if (getErrorState().isError()) {
-			requestData.updateCounters();
-			state = SocketState.CLOSED;
-		} else if (isAsync()) {
-			state = SocketState.LONG;
-			if (isAsync()) {
-				state = requestData.getAsyncStateMachine().asyncPostProcess();
+			if (event == SocketEvent.OPEN_WRITE && asyncStateMachine.getWriteListener() != null) {
+				asyncStateMachine.asyncOperation();
+				try {
+					if (flushBufferedWrite()) {
+						return SocketState.SUSPENDED;
+					}
+				} catch (IOException ioe) {
+					if (getLog().isDebugEnabled()) {
+						getLog().debug("Unable to write async data.", ioe);
+					}
+					event = SocketEvent.ERROR;
+					exchangeData.setAttribute(RequestDispatcher.ERROR_EXCEPTION, ioe);
+				}
+			} else if (event == SocketEvent.OPEN_READ && asyncStateMachine.getReadListener() != null) {
+				dispatchNonBlockingRead();
+			} else if (event == SocketEvent.ERROR) {
+				// An I/O error occurred on a non-container thread. This includes:
+				// - read/write timeouts fired by the Poller (NIO & APR)
+				// - completion handler failures in NIO2
+
+				if (exchangeData.getAttribute(RequestDispatcher.ERROR_EXCEPTION) == null) {
+					// Because the error did not occur on a container thread the
+					// request's error attribute has not been set. If an exception
+					// is available from the channel, use it to set the
+					// request's error attribute here so it is visible to the error
+					// handling.
+					exchangeData.setAttribute(RequestDispatcher.ERROR_EXCEPTION, channel.getError());
+				}
+
+				if (asyncStateMachine.getReadListener() != null || asyncStateMachine.getWriteListener() != null) {
+					// The error occurred during non-blocking I/O. Set the correct
+					// state else the error handling will trigger an ISE.
+					asyncStateMachine.asyncOperation();
+				}
+			}
+
+			RequestInfo rp = exchangeData.getRequestProcessor();
+			try {
+				rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
+				Request request = asyncStateMachine.getRequest(); // createRequest();
+				Response response = request.getResponse(); // createResponse();
+				// request.setResponse(response);
+				if (!getAdapter().asyncDispatch(request, response, event)) {
+					setErrorState(ErrorState.CLOSE_NOW, null);
+				}
+			} catch (InterruptedIOException e) {
+				setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
+			} catch (Throwable t) {
+				ExceptionUtils.handleThrowable(t);
+				setErrorState(ErrorState.CLOSE_NOW, t);
+				getLog().error(sm.getString("http11processor.request.process"), t);
+			}
+
+			rp.setStage(org.apache.coyote.Constants.STAGE_ENDED);
+
+			if (getErrorState().isError()) {
+				exchangeData.updateCounters();
+				state = SocketState.CLOSED;
+			} else if (asyncStateMachine.isAsync()) {
+				state = SocketState.SUSPENDED;
+				cont = asyncStateMachine.asyncPostProcess();
 				if (getLog().isDebugEnabled()) {
 					getLog().debug("Socket: [" + channel + "], State after async post processing: [" + state + "]");
 				}
+			} else {
+				exchangeData.updateCounters();
+				state = dispatchEndRequest();
 			}
-		} else {
-			requestData.updateCounters();
-			state = dispatchEndRequest();
-		}
 
-		if (getLog().isDebugEnabled()) {
-			getLog().debug("Socket: [" + channel + "], Status in: [" + event + "], State out: [" + state + "]");
-		}
-
+			if (getLog().isDebugEnabled()) {
+				getLog().debug("Socket: [" + channel + "], Status in: [" + event + "], State out: [" + state + "]");
+			}
+		} while (cont);
 		return state;
+	}
+
+	/**
+	 * Perform any necessary processing for a non-blocking read before dispatching
+	 * to the adapter.
+	 */
+	protected void dispatchNonBlockingRead() {
+		asyncStateMachine.asyncOperation();
 	}
 
 	/**
@@ -312,14 +392,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	protected abstract boolean flushBufferedWrite() throws IOException;
 
 	/**
-	 * Perform any necessary processing for a non-blocking read before dispatching
-	 * to the adapter.
-	 */
-	protected void dispatchNonBlockingRead() {
-		requestData.getAsyncStateMachine().asyncOperation();
-	}
-
-	/**
 	 * Perform any necessary clean-up processing if the dispatch resulted in the
 	 * completion of processing for the current request.
 	 *
@@ -331,6 +403,46 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	 */
 	protected abstract SocketState dispatchEndRequest() throws IOException;
 
+	@Override
+	protected final SocketState service(SocketEvent event) throws IOException {
+		SocketState state = SocketState.OPEN;
+		boolean cont = false;
+		do {
+			if (asyncStateMachine.isAsync() || cont) {
+				if (cont) {
+					state = dispatch(event);
+				} else {
+					state = dispatch(event);
+				}
+			}
+			cont = false;
+			if (state == SocketState.OPEN) {
+				state = serviceInternal();
+				if (state != SocketState.CLOSED && asyncStateMachine.isAsync() && !asyncStateMachine.isAsyncError()) {
+					cont = asyncStateMachine.asyncPostProcess();
+					if (getLog().isDebugEnabled()) {
+						getLog().debug("Socket: [" + channel + "], State after async post processing: [" + state + "]");
+					}
+				}
+			}
+		} while (cont);
+		if (state != SocketState.CLOSED && asyncStateMachine.isAsync()) {
+			protocol.addWaitingProcessor(this);
+		}
+		return state;
+	}
+
+	protected abstract boolean repeat();
+
+	protected abstract SocketState serviceInternal() throws IOException;
+
+	protected abstract boolean parsingHeader();
+
+	protected abstract boolean canReleaseProcessor();
+
+	protected abstract void endRequest() throws IOException;
+
+	protected abstract SendfileState processSendfile() throws IOException;
 	// @Override
 	// public final void action(ActionCode actionCode, Object param) {
 	// switch (actionCode) {
@@ -370,7 +482,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	// break;
 	// }
 	// case AVAILABLE: {
-	// requestData.setAvailable(available(Boolean.TRUE.equals(param)));
+	// exchangeData.setAvailable(available(Boolean.TRUE.equals(param)));
 	// break;
 	// }
 	// case REQ_SET_BODY_REPLAY: {
@@ -410,7 +522,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	// Request attribute support
 	// case REQ_HOST_ADDR_ATTRIBUTE: {
 	// if (getPopulateRequestAttributesFromSocket() && channel != null) {
-	// requestData.remoteAddr().setString(channel.getRemoteAddr());
+	// exchangeData.remoteAddr().setString(channel.getRemoteAddr());
 	// }
 	// break;
 	// }
@@ -420,25 +532,25 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	// }
 	// case REQ_LOCALPORT_ATTRIBUTE: {
 	// if (getPopulateRequestAttributesFromSocket() && channel != null) {
-	// requestData.setLocalPort(channel.getLocalPort());
+	// exchangeData.setLocalPort(channel.getLocalPort());
 	// }
 	// break;
 	// }
 	// case REQ_LOCAL_ADDR_ATTRIBUTE: {
 	// if (getPopulateRequestAttributesFromSocket() && channel != null) {
-	// requestData.localAddr().setString(channel.getLocalAddr());
+	// exchangeData.localAddr().setString(channel.getLocalAddr());
 	// }
 	// break;
 	// }
 	// case REQ_LOCAL_NAME_ATTRIBUTE: {
 	// if (getPopulateRequestAttributesFromSocket() && channel != null) {
-	// requestData.localName().setString(channel.getLocalName());
+	// exchangeData.localName().setString(channel.getLocalName());
 	// }
 	// break;
 	// }
 	// case REQ_REMOTEPORT_ATTRIBUTE: {
 	// if (getPopulateRequestAttributesFromSocket() && channel != null) {
-	// requestData.setRemotePort(channel.getRemotePort());
+	// exchangeData.setRemotePort(channel.getRemotePort());
 	// }
 	// break;
 	// }
@@ -630,17 +742,17 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 //	}
 
 	// @Override
-	public void actionDISPATCH_READ() {
+	public void dispatchRead() {
 		addDispatch(DispatchType.NON_BLOCKING_READ);
 	}
 
 	// @Override
-	public void actionDISPATCH_WRITE() {
+	public void dispatchWrite() {
 		addDispatch(DispatchType.NON_BLOCKING_WRITE);
 	}
 
 	// @Override
-	public void actionDISPATCH_EXECUTE() {
+	public void dispatchExecute() {
 		executeDispatches();
 	}
 
@@ -674,7 +786,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	}
 
 	// @Override
-	public void actionUPGRADE(UpgradeToken param) {
+	public void upgrade(UpgradeToken param) {
 		doHttpUpgrade(param);
 	}
 
@@ -694,7 +806,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	}
 
 	// @Override
-	public void actionIS_PUSH_SUPPORTED(AtomicBoolean param) {
+	public void isPushSupported(AtomicBoolean param) {
 		AtomicBoolean result = param;
 		result.set(isPushSupported());
 	}
@@ -711,7 +823,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	}
 
 	// @Override
-	public void actionPUSH_REQUEST(RequestData param) {
+	public void pushRequest(ExchangeData param) {
 		doPush(param);
 	}
 
@@ -724,7 +836,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 	 *
 	 * @throws UnsupportedOperationException if the protocol does not support push
 	 */
-	protected void doPush(RequestData pushTarget) {
+	protected void doPush(ExchangeData exchangeData) {
 		throw new UnsupportedOperationException(sm.getString("abstractProcessor.pushrequest.notsupported"));
 	}
 
@@ -734,61 +846,28 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 //		result.set(isTrailerFieldsSupported());
 //	}
 
-	/**
-	 * {@inheritDoc}
-	 * <p>
-	 * Sub-classes of this base class represent a single request/response pair. The
-	 * timeout to be processed is, therefore, the Servlet asynchronous processing
-	 * timeout.
-	 */
 	@Override
-	public void timeoutAsync(long now) {
-		if (now < 0) {
-			doTimeoutAsync();
-		} else {
-			long asyncTimeout = requestData.getAsyncStateMachine().getAsyncTimeout();
-			if (asyncTimeout > 0) {
-				long asyncStart = requestData.getAsyncStateMachine().getLastAsyncStart();
-				if ((now - asyncStart) > asyncTimeout) {
-					doTimeoutAsync();
-				}
-			} else if (!requestData.getAsyncStateMachine().isAvailable()) {
-				// Timeout the async process if the associated web application
-				// is no longer running.
-				doTimeoutAsync();
-			}
-		}
+	public final void nextRequest() {
+		errorState = ErrorState.NONE;
+		exchangeData.recycle();
+		asyncStateMachine.recycle();
+//		responseData.getRequestData().recycle();
+		nextRequestInternal();
 	}
 
-	private void doTimeoutAsync() {
-		// Avoid multiple timeouts
-		requestData.getAsyncStateMachine().setAsyncTimeout(-1);
-		asyncTimeoutGeneration = requestData.getAsyncStateMachine().getCurrentGeneration();
-		// processSocketEvent(SocketEvent.TIMEOUT, true);
-		Channel channel = getChannel();
-		if (channel != null) {
-
-			// TODO sads
-			// channel.processSocket(event, dispatch);
-			protocol.getHandler().processSocket(channel, SocketEvent.TIMEOUT, true);
-		}
-	}
-
-	@Override
-	public boolean checkAsyncTimeoutGeneration() {
-		return asyncTimeoutGeneration == requestData.getAsyncStateMachine().getCurrentGeneration();
-	}
+	protected abstract void nextRequestInternal();
 
 	@Override
 	public final void recycle() {
 		channel = null;
 		errorState = ErrorState.NONE;
-		requestData.recycle();
-		responseData.recycle();
-		innerRecycle();
+		exchangeData.recycle();
+		asyncStateMachine.recycle();
+//		responseData.getRequestData().recycle();
+		recycleInternal();
 	}
 
-	protected abstract void innerRecycle();
+	protected abstract void recycleInternal();
 
 	@Override
 	public Exception collectCloseException() {
@@ -863,19 +942,26 @@ public abstract class AbstractProcessor extends AbstractProcessorLight {
 //	}
 
 	@Override
-	protected final void logAccess(Channel channel) throws IOException {
+	protected final void logAccess() throws IOException {
 		// Set the socket wrapper so the access log can read the socket related
 		// information (e.g. client IP)
-		setChannel(channel);
+		// setChannel(channel);
 		// Setup the minimal request information
-		requestData.setStartTime(System.currentTimeMillis());
+		exchangeData.setStartTime(System.currentTimeMillis());
 		// Setup the minimal response information
-		responseData.setStatus(400);
-		responseData.setError();
-		Request request = createRequest();
-		Response response = createResponse();
-		request.setResponse(response);
-		getAdapter().log(request, response, 0);
+		exchangeData.setStatus(400);
+		exchangeData.setError();
+		if (asyncStateMachine.isAsync()) {
+			Request request = asyncStateMachine.getRequest(); // createRequest();
+			Response response = request.getResponse(); // createResponse();
+//			request.setResponse(response);
+			getAdapter().log(request, response, 0);
+		} else {
+			Request request = createRequest();
+			Response response = createResponse();
+			request.setResponse(response);
+			getAdapter().log(request, response, 0);
+		}
 	}
 
 	protected abstract Request createRequest();

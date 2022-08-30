@@ -18,7 +18,7 @@ package org.apache.coyote.http2;
 
 import org.apache.tomcat.util.net.SocketEvent;
 
-class StreamRunnable implements Runnable {
+class StreamRunnable {
 
 	private final Stream stream;
 	private final StreamProcessor processor;
@@ -30,10 +30,10 @@ class StreamRunnable implements Runnable {
 		this.event = event;
 	}
 
-	@Override
-	public void run() {
-		processor.process(event);
-	}
+//	@Override
+//	public void run() {
+	// processor.process(event);
+//	}
 
 	public Stream getStream() {
 		return stream;

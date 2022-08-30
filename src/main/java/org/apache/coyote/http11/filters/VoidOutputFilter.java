@@ -19,8 +19,9 @@ package org.apache.coyote.http11.filters;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.apache.coyote.Response;
-import org.apache.coyote.ResponseData;
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.ExchangeData;
+import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
@@ -31,9 +32,13 @@ import org.apache.coyote.http11.OutputFilter;
  *
  * @author Remy Maucherat
  */
-public class VoidOutputFilter implements OutputFilter {
+public class VoidOutputFilter extends ProcessorComponent implements OutputFilter {
 
-	private HttpOutputBuffer buffer = null;
+	private HttpOutputBuffer next = null;
+
+	public VoidOutputFilter(AbstractProcessor processor) {
+		super(processor);
+	}
 
 	// --------------------------------------------------- OutputBuffer Methods
 
@@ -48,39 +53,44 @@ public class VoidOutputFilter implements OutputFilter {
 	}
 
 	@Override
+	public void actived() {
+
+	}
+
+	@Override
 	public long getBytesWritten() {
 		return 0;
 	}
 
 	// --------------------------------------------------- OutputFilter Methods
 
-	@Override
-	public void setResponse(ResponseData response) {
-		// NOOP: No need for parameters from response in this filter
-	}
+//	@Override
+//	public void setResponse(ExchangeData exchangeData) {
+	// NOOP: No need for parameters from response in this filter
+//	}
 
 	@Override
-	public void setBuffer(HttpOutputBuffer buffer) {
-		this.buffer = buffer;
+	public void setNext(HttpOutputBuffer next) {
+		this.next = next;
 	}
 
 	@Override
 	public void flush() throws IOException {
-		this.buffer.flush();
+		this.next.flush();
 	}
 
 	@Override
 	public boolean flush(boolean block) throws IOException {
-		return this.buffer.flush(block);
+		return this.next.flush(block);
 	}
 
 	@Override
 	public void recycle() {
-		buffer = null;
+		next = null;
 	}
 
 	@Override
 	public void end() throws IOException {
-		buffer.end();
+		next.end();
 	}
 }

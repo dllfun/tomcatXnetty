@@ -172,7 +172,7 @@ class WindowAllocationManager {
 				// to stream.notify(). Additional notify() calls may trigger
 				// unexpected timeouts.
 				waitingFor = NONE;
-				if (stream.getRequestData().getAsyncStateMachine().getWriteListener() == null) {
+				if (((AbstractProcessor) stream.getCurrentProcessor()).isBlockingWrite()) {
 					// Blocking, so use notify to release StreamOutputBuffer
 					if (log.isDebugEnabled()) {
 						log.debug(sm.getString("windowAllocationManager.notified", stream.getConnectionId(),
@@ -185,11 +185,11 @@ class WindowAllocationManager {
 						log.debug(sm.getString("windowAllocationManager.dispatched", stream.getConnectionId(),
 								stream.getIdentifier()));
 					}
-					((AbstractProcessor) stream.getCurrentProcessor()).actionDISPATCH_WRITE();
+					((AbstractProcessor) stream.getCurrentProcessor()).dispatchWrite();
 					// Need to explicitly execute dispatches on the StreamProcessor
 					// as this thread is being processed by an UpgradeProcessor
 					// which won't see this dispatch
-					((AbstractProcessor) stream.getCurrentProcessor()).actionDISPATCH_EXECUTE();
+					((AbstractProcessor) stream.getCurrentProcessor()).dispatchExecute();
 				}
 			}
 		}

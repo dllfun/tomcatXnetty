@@ -20,7 +20,6 @@ package org.apache.coyote.http11;
 import java.io.IOException;
 
 import org.apache.coyote.InputReader;
-import org.apache.coyote.RequestData;
 import org.apache.tomcat.util.buf.ByteChunk;
 
 /**
@@ -32,12 +31,14 @@ public interface InputFilter extends InputReader {
 
 	public int getId();
 
+	public void actived();
+
 	/**
 	 * Some filters need additional parameters from the request.
 	 *
 	 * @param request The request to be associated with this filter
 	 */
-	public void setRequest(RequestData request);
+	// public void setProcessor(AbstractProcessor processor);
 
 	/**
 	 * Make the filter ready to process the next request.
@@ -57,7 +58,7 @@ public interface InputFilter extends InputReader {
 	 *
 	 * @param buffer The next buffer
 	 */
-	public void setBuffer(InputReader buffer);
+	public void setNext(InputReader next);
 
 	/**
 	 * End the current request.

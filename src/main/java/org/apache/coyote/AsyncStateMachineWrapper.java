@@ -7,10 +7,10 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.servlet.ReadListener;
+import javax.servlet.RequestDispatcher;
 import javax.servlet.WriteListener;
 
 import org.apache.catalina.core.AsyncContextImpl;
-import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.res.StringManager;
 import org.apache.tomcat.util.security.PrivilegedGetTccl;
 import org.apache.tomcat.util.security.PrivilegedSetTccl;
@@ -21,15 +21,23 @@ public class AsyncStateMachineWrapper {
 
 	private Stack<AsyncStateMachine> stack = new Stack<>();
 
-	volatile AsyncStateMachine currentStateMachine = new AsyncStateMachine();
+	private volatile AsyncStateMachine currentStateMachine = new AsyncStateMachine();
 
-	volatile ReadListener readListener;
+	private volatile ReadListener readListener;
 	/*
 	 * State for non-blocking output is maintained here as it is the one point
 	 * easily reachable from the CoyoteOutputStream and the Processor which both
 	 * need access to state.
 	 */
-	volatile WriteListener writerListener;
+	private volatile WriteListener writerListener;
+
+	private boolean fireListener = false;
+	private boolean registeredForWrite = false;
+	private final Object nonBlockingStateLock = new Object();
+
+	private volatile Request request = null;
+
+	private volatile Runnable dispatcher = null;
 
 	AsyncStateMachineWrapper() {
 
@@ -80,13 +88,25 @@ public class AsyncStateMachineWrapper {
 
 	}
 
+	public Request getRequest() {
+		return request;
+	}
+
 	// @Override
 	// public void actionASYNC_IS_ASYNC(AtomicBoolean param) {
 	// param.set(currentStateMachine.isAsync());
 	// }
 
-	boolean isAsync() {
+	public boolean isAsync() {
 		return currentStateMachine.isAsync();
+	}
+
+	public final boolean isBlockingRead() {
+		return readListener == null;
+	}
+
+	public final boolean isBlockingWrite() {
+		return writerListener == null;
 	}
 
 	boolean isAsyncDispatching() {
@@ -127,7 +147,8 @@ public class AsyncStateMachineWrapper {
 		return currentStateMachine.getCurrentGeneration();
 	}
 
-	void asyncStart(AsyncContextImpl asyncCtxt) {
+	void asyncStart(Request request, AsyncContextImpl asyncCtxt) {
+		this.request = request;
 		currentStateMachine.asyncStart(asyncCtxt);
 	}
 
@@ -140,7 +161,7 @@ public class AsyncStateMachineWrapper {
 	 * current state. For example, as per SRV.2.3.3.3 can now process calls to
 	 * complete() or dispatch().
 	 */
-	SocketState asyncPostProcess() {
+	boolean asyncPostProcess() {
 		return currentStateMachine.asyncPostProcess();
 	}
 
@@ -152,8 +173,10 @@ public class AsyncStateMachineWrapper {
 		return currentStateMachine.asyncTimeout();
 	}
 
-	boolean asyncDispatch() {
-		return currentStateMachine.asyncDispatch();
+	boolean asyncDispatch(Runnable dispatcher) {
+		boolean triggerDispatch = currentStateMachine.asyncDispatch();
+		this.dispatcher = dispatcher;
+		return triggerDispatch;
 	}
 
 	// void asyncDispatched() {
@@ -180,9 +203,12 @@ public class AsyncStateMachineWrapper {
 		return currentStateMachine.getAsyncTimeout();
 	}
 
-	public void pushDispatchingState() {
+	public Runnable pushDispatchingState() {
 		stack.push(currentStateMachine);
 		currentStateMachine = new AsyncStateMachine();
+		Runnable dispatcher = this.dispatcher;
+		this.dispatcher = null;
+		return dispatcher;
 	}
 
 	public void popDispatchingState() {
@@ -197,11 +223,35 @@ public class AsyncStateMachineWrapper {
 		return !stack.isEmpty();
 	}
 
+	public boolean isFireListener() {
+		return fireListener;
+	}
+
+	public void setFireListener(boolean fireListener) {
+		this.fireListener = fireListener;
+	}
+
+	public boolean isRegisteredForWrite() {
+		return registeredForWrite;
+	}
+
+	public void setRegisteredForWrite(boolean registeredForWrite) {
+		this.registeredForWrite = registeredForWrite;
+	}
+
+	public Object getNonBlockingStateLock() {
+		return nonBlockingStateLock;
+	}
+
 	// @Override
 	synchronized void recycle() {
 		currentStateMachine.recycle();
 		readListener = null;
 		writerListener = null;
+		fireListener = false;
+		registeredForWrite = false;
+		request = null;
+		dispatcher = null;
 	}
 
 	protected void clearNonBlockingListeners() {
@@ -433,33 +483,33 @@ public class AsyncStateMachineWrapper {
 		 * current state. For example, as per SRV.2.3.3.3 can now process calls to
 		 * complete() or dispatch().
 		 */
-		synchronized SocketState asyncPostProcess() {
+		synchronized boolean asyncPostProcess() {
 			if (state == AsyncState.COMPLETE_PENDING) {
 				clearNonBlockingListeners();
 				state = AsyncState.COMPLETING;
-				return SocketState.ASYNC_END;
+				return true;
 			} else if (state == AsyncState.DISPATCH_PENDING) {
 				clearNonBlockingListeners();
 				state = AsyncState.DISPATCHING;
-				return SocketState.ASYNC_END;
+				return true;
 			} else if (state == AsyncState.STARTING || state == AsyncState.READ_WRITE_OP) {
 				state = AsyncState.STARTED;
-				return SocketState.LONG;
+				return false;
 			} else if (state == AsyncState.MUST_COMPLETE || state == AsyncState.COMPLETING) {
 				asyncCtxt.fireOnComplete();
 				state = AsyncState.DISPATCHED;
-				return SocketState.ASYNC_END;
+				return true;
 			} else if (state == AsyncState.MUST_DISPATCH) {
 				state = AsyncState.DISPATCHING;
-				return SocketState.ASYNC_END;
+				return true;
 			} else if (state == AsyncState.DISPATCHING) {
 				// asyncCtxt.fireOnComplete();
 				state = AsyncState.COMPLETING;
-				return SocketState.ASYNC_END;
+				return true;
 			} else if (state == AsyncState.STARTED) {
 				// This can occur if an async listener does a dispatch to an async
 				// servlet during onTimeout
-				return SocketState.LONG;
+				return false;
 			} else {
 				throw new IllegalStateException(
 						sm.getString("asyncStateMachine.invalidAsyncState", "asyncPostProcess()", state));

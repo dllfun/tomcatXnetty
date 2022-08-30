@@ -19,7 +19,9 @@ package org.apache.coyote.http11.filters;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.apache.coyote.ResponseData;
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.ExchangeData;
+import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
@@ -29,7 +31,7 @@ import org.apache.coyote.http11.OutputFilter;
  *
  * @author Remy Maucherat
  */
-public class IdentityOutputFilter implements OutputFilter {
+public class IdentityOutputFilter extends ProcessorComponent implements OutputFilter {
 
 	// ----------------------------------------------------- Instance Variables
 
@@ -46,13 +48,22 @@ public class IdentityOutputFilter implements OutputFilter {
 	/**
 	 * Next buffer in the pipeline.
 	 */
-	protected HttpOutputBuffer buffer;
+	protected HttpOutputBuffer next;
 
+	public IdentityOutputFilter(AbstractProcessor processor) {
+		super(processor);
+	}
 	// --------------------------------------------------- OutputBuffer Methods
 
 	@Override
 	public int getId() {
 		return Constants.IDENTITY_FILTER;
+	}
+
+	@Override
+	public void actived() {
+		contentLength = processor.getExchangeData().getResponseContentLengthLong();
+		remaining = contentLength;
 	}
 
 	@Override
@@ -73,7 +84,7 @@ public class IdentityOutputFilter implements OutputFilter {
 				} else {
 					remaining = remaining - result;
 				}
-				buffer.doWrite(chunk);
+				next.doWrite(chunk);
 			} else {
 				// No more bytes left to be written : return -1 and clear the
 				// buffer
@@ -84,7 +95,7 @@ public class IdentityOutputFilter implements OutputFilter {
 		} else {
 			// If no content length was set, just write the bytes
 			result = chunk.remaining();
-			buffer.doWrite(chunk);
+			next.doWrite(chunk);
 			result -= chunk.remaining();
 		}
 
@@ -94,36 +105,35 @@ public class IdentityOutputFilter implements OutputFilter {
 
 	@Override
 	public long getBytesWritten() {
-		return buffer.getBytesWritten();
+		return next.getBytesWritten();
 	}
 
 	// --------------------------------------------------- OutputFilter Methods
 
-	@Override
-	public void setResponse(ResponseData response) {
-		contentLength = response.getContentLengthLong();
-		remaining = contentLength;
-	}
+//	@Override
+//	public void setResponse(ExchangeData exchangeData) {
+
+//	}
 
 	@Override
-	public void setBuffer(HttpOutputBuffer buffer) {
-		this.buffer = buffer;
+	public void setNext(HttpOutputBuffer next) {
+		this.next = next;
 	}
 
 	@Override
 	public void flush() throws IOException {
 		// No data buffered in this filter. Flush next buffer.
-		buffer.flush();
+		next.flush();
 	}
 
 	@Override
 	public boolean flush(boolean block) throws IOException {
-		return buffer.flush(block);
+		return next.flush(block);
 	}
 
 	@Override
 	public void end() throws IOException {
-		buffer.end();
+		next.end();
 	}
 
 	@Override

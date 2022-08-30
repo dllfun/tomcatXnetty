@@ -1,66 +1,72 @@
-package org.apache.coyote.http2;
+package org.apache.coyote.http2.filters;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.apache.coyote.ResponseData;
+import org.apache.coyote.AbstractProcessor;
+import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
+import org.apache.coyote.http2.Http2UpgradeHandler;
+import org.apache.coyote.http2.Stream;
+import org.apache.coyote.http2.StreamChannel;
 
-public class FlowCtrlOutputFilter implements OutputFilter {
+public class FlowCtrlOutputFilter extends ProcessorComponent implements OutputFilter {
 
 	private int streamReservation = 0;
 
-	private Stream stream;
+//	private Stream stream;
 
-	private Http2UpgradeHandler handler;
+//	private Http2UpgradeHandler handler;
 
-	private ResponseData responseData;
+//	private ExchangeData exchangeData;
 
 	/**
 	 * Next buffer in the pipeline.
 	 */
-	private HttpOutputBuffer buffer;
+	private HttpOutputBuffer next;
 
-	public FlowCtrlOutputFilter(Stream stream, Http2UpgradeHandler handler) {
-		super();
-		this.stream = stream;
-		this.handler = handler;
+	public FlowCtrlOutputFilter(AbstractProcessor processor) {
+		super(processor);
+//		this.stream = stream;
+//		this.handler = handler;
 	}
 
-	public void setStream(Stream stream) {
-		this.stream = stream;
+	@Override
+	public int getId() {
+		return Constants.FLOWCTRL_FILTER;
 	}
 
-	public void setHandler(Http2UpgradeHandler handler) {
-		this.handler = handler;
+	@Override
+	public void actived() {
+
 	}
 
 	@Override
 	public void end() throws IOException {
-		buffer.end();
+		next.end();
 	}
 
 	@Override
 	public void flush() throws IOException {
-		buffer.flush();
+		next.flush();
 	}
 
 	@Override
 	public boolean flush(boolean block) throws IOException {
-		return buffer.flush(block);
+		return next.flush(block);
 	}
 
 	@Override
 	public int doWrite(ByteBuffer chunk) throws IOException {
 
-		boolean block = responseData.getRequestData().getAsyncStateMachine().getWriteListener() == null;
+		boolean block = processor.isBlockingWrite();
 		int written = 0;
 		int left = chunk.remaining();
 		while (left > 0) {
 			if (streamReservation == 0) {
-				streamReservation = stream.reserveWindowSize(left, block);
+				streamReservation = ((StreamChannel) processor.getChannel()).reserveWindowSize(left, block);
 				if (streamReservation == 0) {
 					// Must be non-blocking.
 					// Note: Can't add to the writeBuffer here as the write
@@ -70,7 +76,8 @@ public class FlowCtrlOutputFilter implements OutputFilter {
 				}
 			}
 			while (streamReservation > 0) {
-				int connectionReservation = handler.reserveWindowSize(stream, streamReservation, block);
+				int connectionReservation = ((StreamChannel) processor.getChannel()).getHandler().getZero()
+						.reserveWindowSize(((StreamChannel) processor.getChannel()), streamReservation, block);
 				if (connectionReservation == 0) {
 					// Must be non-blocking.
 					// Note: Can't add to the writeBuffer here as the write
@@ -81,7 +88,7 @@ public class FlowCtrlOutputFilter implements OutputFilter {
 				int orgLimit = chunk.limit();
 				chunk.limit(chunk.position() + connectionReservation);
 				// Do the write
-				int len = buffer.doWrite(chunk);
+				int len = next.doWrite(chunk);
 				written += len;
 				chunk.limit(orgLimit);
 				streamReservation -= connectionReservation;
@@ -93,18 +100,13 @@ public class FlowCtrlOutputFilter implements OutputFilter {
 
 	@Override
 	public long getBytesWritten() {
-		return buffer.getBytesWritten();
+		return next.getBytesWritten();
 	}
 
-	@Override
-	public int getId() {
-		return Constants.FLOWCTRL_FILTER;
-	}
-
-	@Override
-	public void setResponse(ResponseData response) {
-		this.responseData = response;
-	}
+//	@Override
+//	public void setResponse(ExchangeData exchangeData) {
+//		this.exchangeData = exchangeData;
+//	}
 
 	@Override
 	public void recycle() {
@@ -112,8 +114,8 @@ public class FlowCtrlOutputFilter implements OutputFilter {
 	}
 
 	@Override
-	public void setBuffer(HttpOutputBuffer buffer) {
-		this.buffer = buffer;
+	public void setNext(HttpOutputBuffer next) {
+		this.next = next;
 	}
 
 }

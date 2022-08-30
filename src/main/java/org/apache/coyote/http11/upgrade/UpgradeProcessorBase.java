@@ -23,11 +23,10 @@ import javax.servlet.http.WebConnection;
 
 import org.apache.coyote.AbstractProcessorLight;
 import org.apache.coyote.AbstractProtocol;
-import org.apache.coyote.RequestData;
-import org.apache.coyote.ResponseData;
 import org.apache.coyote.UpgradeToken;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
+import org.apache.tomcat.util.net.SocketEvent;
 
 public abstract class UpgradeProcessorBase extends AbstractProcessorLight implements WebConnection {
 
@@ -37,6 +36,8 @@ public abstract class UpgradeProcessorBase extends AbstractProcessorLight implem
 
 	private final UpgradeToken upgradeToken;
 
+	private volatile Channel channel;
+
 	public UpgradeProcessorBase(AbstractProtocol<?> protocol, UpgradeToken upgradeToken) {
 		this.protocol = protocol;
 		this.upgradeToken = upgradeToken;
@@ -45,7 +46,22 @@ public abstract class UpgradeProcessorBase extends AbstractProcessorLight implem
 	// ------------------------------------------- Implemented Processor methods
 
 	@Override
+	public void setChannel(Channel channel) {
+		this.channel = channel;
+	}
+
+	@Override
+	public Channel getChannel() {
+		return channel;
+	}
+
+	@Override
 	public final boolean isUpgrade() {
+		return true;
+	}
+
+	@Override
+	public boolean isIgnoredTimeout() {
 		return true;
 	}
 
@@ -55,15 +71,22 @@ public abstract class UpgradeProcessorBase extends AbstractProcessorLight implem
 	}
 
 	@Override
+	public void nextRequest() {
+		// TODO Auto-generated method stub
+
+	}
+
+	@Override
 	public final void recycle() {
 		// Currently a NO-OP as upgrade processors are not recycled.
+		this.channel = null;
 	}
 
 	// ---------------------------- Processor methods that are NO-OP for upgrade
 
 	@Override
-	public final SocketState service(Channel socketWrapper) throws IOException {
-		return null;
+	public final SocketState service(SocketEvent event) throws IOException {
+		return dispatch(event);
 	}
 
 //	@Override
@@ -71,35 +94,40 @@ public abstract class UpgradeProcessorBase extends AbstractProcessorLight implem
 //		return null;
 //	}
 
-	@Override
-	public final boolean isAsync() {
-		return false;
-	}
+//	@Override
+//	public final boolean isAsync() {
+//		return false;
+//	}
 
-	@Override
-	public final RequestData getRequestData() {
-		return null;
-	}
+//	@Override
+//	protected boolean shouldDispatch(SocketEvent event) {
+//		return true;
+//	}
 
-	@Override
-	public ResponseData getResponseData() {
-		return null;
-	}
+//	@Override
+//	public final RequestData getRequestData() {
+//		return null;
+//	}
+
+//	@Override
+//	public ResponseData getResponseData() {
+//		return null;
+//	}
 
 	@Override
 	public ByteBuffer getLeftoverInput() {
 		return null;
 	}
 
-	@Override
-	public boolean checkAsyncTimeoutGeneration() {
-		return false;
-	}
+//	@Override
+//	public boolean checkAsyncTimeoutGeneration() {
+//		return false;
+//	}
 
 	// ----------------- Processor methods that are NO-OP by default for upgrade
 
 	@Override
-	public void timeoutAsync(long now) {
+	public void checkTimeout(long now) {
 		// NO-OP
 	}
 

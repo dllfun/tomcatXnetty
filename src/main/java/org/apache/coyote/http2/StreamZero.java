@@ -1,6 +1,7 @@
 package org.apache.coyote.http2;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
@@ -12,7 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.coyote.CloseNowException;
-import org.apache.coyote.RequestData;
+import org.apache.coyote.ExchangeData;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.res.StringManager;
@@ -26,7 +27,7 @@ public class StreamZero extends AbstractStream {
 	private static final AtomicInteger connectionIdGenerator = new AtomicInteger(0);
 	private final Http2UpgradeHandler handler;
 	private AtomicReference<ConnectionState> connectionState = new AtomicReference<>(ConnectionState.NEW);
-	private final Map<Integer, Stream> streams = new ConcurrentHashMap<>();
+	private final Map<Integer, StreamChannel> streams = new ConcurrentHashMap<>();
 	private final AtomicInteger nextLocalStreamId = new AtomicInteger(2);
 	private volatile int newStreamsSinceLastPrune = 0;
 
@@ -39,9 +40,9 @@ public class StreamZero extends AbstractStream {
 		System.out.println("conn(" + connectionId + ")" + " created");
 	}
 
-	public Stream getStream(int streamId, boolean unknownIsError) throws ConnectionException {
+	public StreamChannel getStream(int streamId, boolean unknownIsError) throws ConnectionException {
 		Integer key = Integer.valueOf(streamId);
-		Stream result = streams.get(key);
+		StreamChannel result = streams.get(key);
 		if (result == null && unknownIsError) {
 			// Stream has been closed and removed from the map
 			throw new ConnectionException(sm.getString("upgradeHandler.stream.closed", key), Http2Error.PROTOCOL_ERROR);
@@ -49,7 +50,7 @@ public class StreamZero extends AbstractStream {
 		return result;
 	}
 
-	public Stream createRemoteStream(int streamId) throws ConnectionException {
+	public StreamChannel createRemoteStream(int streamId) throws ConnectionException {
 		Integer key = Integer.valueOf(streamId);
 
 		if (streamId % 2 != 1) {
@@ -58,17 +59,17 @@ public class StreamZero extends AbstractStream {
 
 		pruneClosedStreams(streamId);
 
-		Stream result = new Stream(key, handler);
+		StreamChannel result = new StreamChannel(key, handler);
 		streams.put(key, result);
 		return result;
 	}
 
-	public Stream createLocalStream(RequestData request) {
+	public StreamChannel createLocalStream(ExchangeData exchangeData) {
 		int streamId = nextLocalStreamId.getAndAdd(2);
 
 		Integer key = Integer.valueOf(streamId);
 
-		Stream result = new Stream(key, handler, request);
+		StreamChannel result = new StreamChannel(key, handler, exchangeData);
 		streams.put(key, result);
 		return result;
 	}
@@ -119,7 +120,7 @@ public class StreamZero extends AbstractStream {
 		TreeSet<Integer> candidatesStepTwo = new TreeSet<>();
 		TreeSet<Integer> candidatesStepThree = new TreeSet<>();
 
-		for (Entry<Integer, Stream> entry : streams.entrySet()) {
+		for (Entry<Integer, StreamChannel> entry : streams.entrySet()) {
 			Stream stream = entry.getValue();
 			// Never remove active streams
 			if (stream.isActive()) {
@@ -257,7 +258,7 @@ public class StreamZero extends AbstractStream {
 		return connectionState;
 	}
 
-	public Map<Integer, Stream> getStreams() {
+	public Map<Integer, StreamChannel> getStreams() {
 		return streams;
 	}
 
@@ -273,6 +274,315 @@ public class StreamZero extends AbstractStream {
 
 		public boolean isNewStreamAllowed() {
 			return newStreamsAllowed;
+		}
+	}
+
+	@SuppressWarnings("sync-override") // notify() needs to be outside sync
+	// to avoid deadlock
+	// @Override
+	protected void incrementWindowSize(int increment) throws Http2Exception {
+		Set<AbstractStream> streamsToNotify = null;
+
+		synchronized (StreamZero.this) {
+			long windowSize = StreamZero.this.getWindowSize();
+			if (windowSize < 1 && windowSize + increment > 0) {
+				streamsToNotify = releaseBackLog((int) (windowSize + increment));
+			}
+			StreamZero.super.incrementWindowSize(increment);
+		}
+
+		if (streamsToNotify != null) {
+			for (AbstractStream stream : streamsToNotify) {
+				if (log.isDebugEnabled()) {
+					log.debug(sm.getString("upgradeHandler.releaseBacklog", StreamZero.this.getConnectionId(),
+							stream.getIdentifier()));
+				}
+// There is never any O/P on stream zero but it is included in
+// the backlog as it simplifies the code. Skip it if it appears
+// here.
+				if (StreamZero.this == stream) {
+					continue;
+				}
+				((Stream) stream).notifyConnection();
+			}
+		}
+	}
+
+	private final Set<AbstractStream> backLogStreams = Collections.newSetFromMap(new ConcurrentHashMap<>());
+	private long backLogSize = 0;
+
+	public int reserveWindowSize(Stream stream, int reservation, boolean block) throws IOException {
+		// Need to be holding the stream lock so releaseBacklog() can't notify
+		// this thread until after this thread enters wait()
+		int allocation = 0;
+		synchronized (stream) {
+			synchronized (this) {
+				if (!stream.canWrite()) {
+					stream.doStreamCancel(sm.getString("upgradeHandler.stream.notWritable", stream.getConnectionId(),
+							stream.getIdAsString()), Http2Error.STREAM_CLOSED);
+				}
+				long windowSize = getWindowSize();
+				if (stream.getConnectionAllocationMade() > 0) {
+					allocation = stream.getConnectionAllocationMade();
+					stream.setConnectionAllocationMade(0);
+				} else if (windowSize < 1) {
+					// Has this stream been granted an allocation
+					if (stream.getConnectionAllocationMade() == 0) {
+						stream.setConnectionAllocationRequested(reservation);
+						backLogSize += reservation;
+						backLogStreams.add(stream);
+						// Add the parents as well
+						AbstractStream parent = stream.getParentStream();
+						while (parent != null && backLogStreams.add(parent)) {
+							parent = parent.getParentStream();
+						}
+					}
+				} else if (windowSize < reservation) {
+					allocation = (int) windowSize;
+					decrementWindowSize(allocation);
+				} else {
+					allocation = reservation;
+					decrementWindowSize(allocation);
+				}
+			}
+			if (allocation == 0) {
+				if (block) {
+					try {
+						// Connection level window is empty. Although this
+						// request is for a stream, use the connection
+						// timeout
+						long writeTimeout = handler.getProtocol().getWriteTimeout();
+						stream.waitForConnectionAllocation(writeTimeout);
+						// Has this stream been granted an allocation
+						if (stream.getConnectionAllocationMade() == 0) {
+							String msg;
+							Http2Error error;
+							if (stream.isActive()) {
+								if (log.isDebugEnabled()) {
+									log.debug(sm.getString("upgradeHandler.noAllocation", connectionId,
+											stream.getIdAsString()));
+								}
+								// No allocation
+								// Close the connection. Do this first since
+								// closing the stream will raise an exception.
+								close();
+								msg = sm.getString("stream.writeTimeout");
+								error = Http2Error.ENHANCE_YOUR_CALM;
+							} else {
+								msg = sm.getString("stream.clientCancel");
+								error = Http2Error.STREAM_CLOSED;
+							}
+							// Close the stream
+							// This thread is in application code so need
+							// to signal to the application that the
+							// stream is closing
+							stream.doStreamCancel(msg, error);
+						} else {
+							allocation = stream.getConnectionAllocationMade();
+							stream.setConnectionAllocationMade(0);
+						}
+					} catch (InterruptedException e) {
+						throw new IOException(sm.getString("upgradeHandler.windowSizeReservationInterrupted",
+								connectionId, stream.getIdAsString(), Integer.toString(reservation)), e);
+					}
+				} else {
+					stream.waitForConnectionAllocationNonBlocking();
+					return 0;
+				}
+			}
+		}
+		return allocation;
+	}
+
+	private synchronized Set<AbstractStream> releaseBackLog(int increment) throws Http2Exception {
+		Set<AbstractStream> result = new HashSet<>();
+		int remaining = increment;
+		if (backLogSize < remaining) {
+			// Can clear the whole backlog
+			for (AbstractStream stream : backLogStreams) {
+				if (stream.getConnectionAllocationRequested() > 0) {
+					stream.setConnectionAllocationMade(stream.getConnectionAllocationRequested());
+					stream.setConnectionAllocationRequested(0);
+				}
+			}
+			remaining -= backLogSize;
+			backLogSize = 0;
+			super.incrementWindowSize(remaining);
+
+			result.addAll(backLogStreams);
+			backLogStreams.clear();
+		} else {
+			allocate(this, remaining);
+			Iterator<AbstractStream> streamIter = backLogStreams.iterator();
+			while (streamIter.hasNext()) {
+				AbstractStream stream = streamIter.next();
+				if (stream.getConnectionAllocationMade() > 0) {
+					backLogSize -= stream.getConnectionAllocationMade();
+					backLogSize -= stream.getConnectionAllocationRequested();
+					stream.setConnectionAllocationRequested(0);
+					result.add(stream);
+					streamIter.remove();
+				}
+			}
+		}
+		return result;
+	}
+
+	private int allocate(AbstractStream stream, int allocation) {
+		if (log.isDebugEnabled()) {
+			log.debug(sm.getString("upgradeHandler.allocate.debug", getConnectionId(), stream.getIdAsString(),
+					Integer.toString(allocation)));
+		}
+
+		int leftToAllocate = allocation;
+
+		if (stream.getConnectionAllocationRequested() > 0) {
+			int allocatedThisTime;
+			if (allocation >= stream.getConnectionAllocationRequested()) {
+				allocatedThisTime = stream.getConnectionAllocationRequested();
+			} else {
+				allocatedThisTime = allocation;
+			}
+			stream.setConnectionAllocationRequested(stream.getConnectionAllocationRequested() - allocatedThisTime);
+			stream.setConnectionAllocationMade(stream.getConnectionAllocationMade() + allocatedThisTime);
+			leftToAllocate = leftToAllocate - allocatedThisTime;
+		}
+
+		if (leftToAllocate == 0) {
+			return 0;
+		}
+
+		if (log.isDebugEnabled()) {
+			log.debug(sm.getString("upgradeHandler.allocate.left", getConnectionId(), stream.getIdAsString(),
+					Integer.toString(leftToAllocate)));
+		}
+
+		// Recipients are children of the current stream that are in the
+		// backlog.
+		Set<AbstractStream> recipients = new HashSet<>(stream.getChildStreams());
+		recipients.retainAll(backLogStreams);
+
+		// Loop until we run out of allocation or recipients
+		while (leftToAllocate > 0) {
+			if (recipients.size() == 0) {
+				if (stream.getConnectionAllocationMade() == 0) {
+					backLogStreams.remove(stream);
+				}
+				if (stream.getIdAsInt() == 0) {
+					throw new IllegalStateException();
+				}
+				return leftToAllocate;
+			}
+
+			int totalWeight = 0;
+			for (AbstractStream recipient : recipients) {
+				if (log.isDebugEnabled()) {
+					log.debug(
+							sm.getString("upgradeHandler.allocate.recipient", getConnectionId(), stream.getIdAsString(),
+									recipient.getIdAsString(), Integer.toString(recipient.getWeight())));
+				}
+				totalWeight += recipient.getWeight();
+			}
+
+			// Use an Iterator so fully allocated children/recipients can be
+			// removed.
+			Iterator<AbstractStream> iter = recipients.iterator();
+			int allocated = 0;
+			while (iter.hasNext()) {
+				AbstractStream recipient = iter.next();
+				int share = leftToAllocate * recipient.getWeight() / totalWeight;
+				if (share == 0) {
+					// This is to avoid rounding issues triggering an infinite
+					// loop. It will cause a very slight over allocation but
+					// HTTP/2 should cope with that.
+					share = 1;
+				}
+				int remainder = allocate(recipient, share);
+				// Remove recipients that receive their full allocation so that
+				// they are excluded from the next allocation round.
+				if (remainder > 0) {
+					iter.remove();
+				}
+				allocated += (share - remainder);
+			}
+			leftToAllocate -= allocated;
+		}
+
+		return 0;
+	}
+
+	private static class BacklogTracker {
+
+		private int remainingReservation;
+		private int unusedAllocation;
+		private boolean notifyInProgress;
+
+		public BacklogTracker() {
+		}
+
+		public BacklogTracker(int reservation) {
+			remainingReservation = reservation;
+		}
+
+		/**
+		 * @return The number of bytes requiring an allocation from the Connection flow
+		 *         control window
+		 */
+		public int getRemainingReservation() {
+			return remainingReservation;
+		}
+
+		/**
+		 *
+		 * @return The number of bytes allocated from the Connection flow control window
+		 *         but not yet written
+		 */
+		public int getUnusedAllocation() {
+			return unusedAllocation;
+		}
+
+		/**
+		 * The purpose of this is to avoid the incorrect triggering of a timeout for the
+		 * following sequence of events:
+		 * <ol>
+		 * <li>window update 1</li>
+		 * <li>allocation 1</li>
+		 * <li>notify 1</li>
+		 * <li>window update 2</li>
+		 * <li>allocation 2</li>
+		 * <li>act on notify 1 (using allocation 1 and 2)</li>
+		 * <li>notify 2</li>
+		 * <li>act on notify 2 (timeout due to no allocation)</li>
+		 * </ol>
+		 *
+		 * @return {@code true} if a notify has been issued but the associated
+		 *         allocation has not been used, otherwise {@code false}
+		 */
+		public boolean isNotifyInProgress() {
+			return notifyInProgress;
+		}
+
+		public void useAllocation() {
+			unusedAllocation = 0;
+			notifyInProgress = false;
+		}
+
+		public void startNotify() {
+			notifyInProgress = true;
+		}
+
+		private int allocate(int allocation) {
+			if (remainingReservation >= allocation) {
+				remainingReservation -= allocation;
+				unusedAllocation += allocation;
+				return 0;
+			}
+
+			int left = allocation - remainingReservation;
+			unusedAllocation += remainingReservation;
+			remainingReservation = 0;
+
+			return left;
 		}
 	}
 }

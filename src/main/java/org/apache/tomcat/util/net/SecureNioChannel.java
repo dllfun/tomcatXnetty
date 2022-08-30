@@ -696,6 +696,7 @@ public class SecureNioChannel extends NioChannel {
 			netread = socketChannel.read(netInBuffer);
 			printInBuffer(pos);
 		} catch (IOException e) {
+			e.printStackTrace();
 			System.out.println(socketChannel.socket().getPort() + " error when read");
 			throw e;
 		}
@@ -782,6 +783,7 @@ public class SecureNioChannel extends NioChannel {
 			netread = socketChannel.read(netInBuffer);
 			printInBuffer(pos);
 		} catch (IOException e) {
+			e.printStackTrace();
 			System.out.println(socketChannel.socket().getPort() + " error when read");
 			throw e;
 		}

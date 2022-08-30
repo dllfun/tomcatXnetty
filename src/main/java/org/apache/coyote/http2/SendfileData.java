@@ -21,20 +21,84 @@ import java.nio.file.Path;
 
 class SendfileData {
 
-	Path path;
-	Stream stream;
-	Http2OutputBuffer outputBuffer;
+	private Path path;
+	private StreamChannel stream;
+//	private Http2OutputBuffer outputBuffer;
 	// Note: a mapped buffer is a special construct with an underlying file
 	// that doesn't need to be closed
-	MappedByteBuffer mappedBuffer;
-	long left;
-	int streamReservation;
-	int connectionReservation;
-	long pos;
-	long end;
+	private MappedByteBuffer mappedBuffer;
+	private long left;
+	private long streamReservation;
+	private long connectionReservation;
+	private long pos;
+	private long end;
 
 	public SendfileData() {
 
+	}
+
+	public Path getPath() {
+		return path;
+	}
+
+	public void setPath(Path path) {
+		this.path = path;
+	}
+
+	public StreamChannel getStream() {
+		return stream;
+	}
+
+	public void setStream(StreamChannel stream) {
+		this.stream = stream;
+	}
+
+	public MappedByteBuffer getMappedBuffer() {
+		return mappedBuffer;
+	}
+
+	public void setMappedBuffer(MappedByteBuffer mappedBuffer) {
+		this.mappedBuffer = mappedBuffer;
+	}
+
+	public long getLeft() {
+		return left;
+	}
+
+	public void setLeft(long left) {
+		this.left = left;
+	}
+
+	public long getStreamReservation() {
+		return streamReservation;
+	}
+
+	public void setStreamReservation(long streamReservation) {
+		this.streamReservation = streamReservation;
+	}
+
+	public long getConnectionReservation() {
+		return connectionReservation;
+	}
+
+	public void setConnectionReservation(long connectionReservation) {
+		this.connectionReservation = connectionReservation;
+	}
+
+	public long getPos() {
+		return pos;
+	}
+
+	public void setPos(long pos) {
+		this.pos = pos;
+	}
+
+	public long getEnd() {
+		return end;
+	}
+
+	public void setEnd(long end) {
+		this.end = end;
 	}
 
 }

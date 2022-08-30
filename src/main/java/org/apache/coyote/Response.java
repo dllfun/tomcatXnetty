@@ -50,13 +50,18 @@ public final class Response {
 
 	// ----------------------------------------------------- Instance Variables
 
-	private ResponseData responseData;
+	private final ExchangeData exchangeData;
 	/**
 	 * Action hook.
 	 */
-	private volatile AbstractProcessor processor;
+	private final AbstractProcessor processor;
 
-	private ResponseAction responseAction;
+	private final ResponseAction responseAction;
+
+	/**
+	 * Notes.
+	 */
+	private final Object responseNotes[] = new Object[Constants.MAX_NOTES];
 
 	private Request request;
 
@@ -64,8 +69,8 @@ public final class Response {
 	// private boolean registeredForWrite = false;
 	// private final Object nonBlockingStateLock = new Object();
 
-	public Response(ResponseData responseData, AbstractProcessor processor, ResponseAction responseAction) {
-		this.responseData = responseData;
+	public Response(ExchangeData exchangeData, AbstractProcessor processor, ResponseAction responseAction) {
+		this.exchangeData = exchangeData;
 		this.processor = processor;
 		this.responseAction = responseAction;
 	}
@@ -85,17 +90,17 @@ public final class Response {
 	// }
 
 	public MimeHeaders getMimeHeaders() {
-		return this.responseData.getMimeHeaders();
+		return this.exchangeData.getResponseHeaders();
 	}
 
 	// -------------------- Per-Response "notes" --------------------
 
 	public final void setNote(int pos, Object value) {
-		this.responseData.setNote(pos, value);
+		responseNotes[pos] = value;
 	}
 
 	public final Object getNote(int pos) {
-		return this.responseData.getNote(pos);
+		return responseNotes[pos];
 	}
 
 	// -------------------- Actions --------------------
@@ -110,38 +115,38 @@ public final class Response {
 	// }
 	// }
 
-	public void actionCOMMIT(boolean finished) {
-		responseAction.commit(finished);
+	public void commit(boolean finished) {
+		this.responseAction.commit(finished);
 	}
 
-	public void actionACK() {
-		responseAction.sendAck();
+	public void ack() {
+		this.responseAction.sendAck();
 	}
 
-	public void actionCLIENT_FLUSH() {
-		responseAction.clientFlush();
+	public void clientFlush() {
+		this.responseAction.clientFlush();
 	}
 
-	public void actionIS_ERROR(AtomicBoolean param) {
+	public void isProcessorError(AtomicBoolean param) {
 		processor.isError(param);
 	}
 
-	public void actionIS_IO_ALLOWED(AtomicBoolean param) {
+	public void isProcessorIoAllowed(AtomicBoolean param) {
 		processor.isIoAllowed(param);
 	}
 
-	public void actionCLOSE() {
-		responseAction.close();
+	public void close() {
+		this.responseAction.close();
 	}
 
-	public void actionCLOSE_NOW(Object param) {
-		responseAction.closeNow(param);
+	public void closeNow(Object param) {
+		this.responseAction.closeNow(param);
 	}
 
 	// -------------------- State --------------------
 
 	public int getStatus() {
-		return this.responseData.getStatus();
+		return this.exchangeData.getStatus();
 	}
 
 	/**
@@ -150,7 +155,7 @@ public final class Response {
 	 * @param status The status value to set
 	 */
 	public void setStatus(int status) {
-		this.responseData.setStatus(status);
+		this.exchangeData.setStatus(status);
 	}
 
 	/**
@@ -159,7 +164,7 @@ public final class Response {
 	 * @return The message associated with the current status
 	 */
 	public String getMessage() {
-		return this.responseData.getMessage();
+		return this.exchangeData.getMessage();
 	}
 
 	/**
@@ -168,15 +173,15 @@ public final class Response {
 	 * @param message The status message to set
 	 */
 	public void setMessage(String message) {
-		this.responseData.setMessage(message);
+		this.exchangeData.setMessage(message);
 	}
 
 	public boolean isCommitted() {
-		return this.responseData.isCommitted();
+		return this.exchangeData.isCommitted();
 	}
 
 //	public void setCommitted(boolean v) {
-//		this.responseData.setCommitted(v);
+//		this.exchangeData.setCommitted(v);
 //	}
 
 	/**
@@ -186,7 +191,7 @@ public final class Response {
 	 * @return the time the response was committed
 	 */
 	public long getCommitTime() {
-		return responseData.getCommitTime();
+		return exchangeData.getCommitTime();
 	}
 
 	// -----------------Error State --------------------
@@ -197,7 +202,7 @@ public final class Response {
 	 * @param ex The exception that occurred
 	 */
 	public void setErrorException(Exception ex) {
-		this.responseData.setErrorException(ex);
+		this.exchangeData.setErrorException(ex);
 	}
 
 	/**
@@ -206,11 +211,11 @@ public final class Response {
 	 * @return The exception that occurred
 	 */
 	public Exception getErrorException() {
-		return this.responseData.getErrorException();
+		return this.exchangeData.getErrorException();
 	}
 
 	public boolean isExceptionPresent() {
-		return this.responseData.isExceptionPresent();
+		return this.exchangeData.isExceptionPresent();
 	}
 
 	/**
@@ -219,7 +224,7 @@ public final class Response {
 	 * @return <code>false</code> if the error flag was already set
 	 */
 	public boolean setError() {
-		return this.responseData.setError();
+		return this.exchangeData.setError();
 	}
 
 	/**
@@ -228,21 +233,21 @@ public final class Response {
 	 * @return <code>true</code> if the response has encountered an error
 	 */
 	public boolean isError() {
-		return this.responseData.isError();
+		return this.exchangeData.isError();
 	}
 
 	public boolean isErrorReportRequired() {
-		return this.responseData.isErrorReportRequired();
+		return this.exchangeData.isErrorReportRequired();
 	}
 
 	public boolean setErrorReported() {
-		return this.responseData.setErrorReported();
+		return this.exchangeData.setErrorReported();
 	}
 
 	// -------------------- Methods --------------------
 
 	public void reset() throws IllegalStateException {
-		this.responseData.reset();
+		this.exchangeData.reset();
 	}
 
 	// -------------------- Headers --------------------
@@ -256,11 +261,11 @@ public final class Response {
 	 * @return {@code true} if the response contains the header.
 	 */
 	public boolean containsHeader(String name) {
-		return this.responseData.containsHeader(name);
+		return this.exchangeData.containsResponseHeader(name);
 	}
 
 	public void setHeader(String name, String value) {
-		this.responseData.setHeader(name, value);
+		this.exchangeData.setResponseHeader(name, value);
 	}
 
 	public void addHeader(String name, String value) {
@@ -268,22 +273,22 @@ public final class Response {
 	}
 
 	public void addHeader(String name, String value, Charset charset) {
-		this.responseData.addHeader(name, value, charset);
+		this.exchangeData.addResponseHeader(name, value, charset);
 	}
 
 	public void setTrailerFields(Supplier<Map<String, String>> supplier) {
 		AtomicBoolean trailerFieldsSupported = new AtomicBoolean(false);
 		// processor.actionIS_TRAILER_FIELDS_SUPPORTED(trailerFieldsSupported);
-		trailerFieldsSupported.set(responseAction.isTrailerFieldsSupported());
+		trailerFieldsSupported.set(this.responseAction.isTrailerFieldsSupported());
 		if (!trailerFieldsSupported.get()) {
 			throw new IllegalStateException(sm.getString("response.noTrailers.notSupported"));
 		}
 
-		this.responseData.setTrailerFields(supplier);
+		this.exchangeData.setTrailerFieldsSupplier(supplier);
 	}
 
-	public Supplier<Map<String, String>> getTrailerFields() {
-		return this.responseData.getTrailerFields();
+	public Supplier<Map<String, String>> getTrailerFieldsSupplier() {
+		return this.exchangeData.getTrailerFieldsSupplier();
 	}
 
 	/**
@@ -299,7 +304,7 @@ public final class Response {
 	// -------------------- I18N --------------------
 
 	public Locale getLocale() {
-		return this.responseData.getLocale();
+		return this.exchangeData.getLocale();
 	}
 
 	/**
@@ -309,7 +314,7 @@ public final class Response {
 	 * @param locale The locale to use for this response
 	 */
 	public void setLocale(Locale locale) {
-		this.responseData.setLocale(locale);
+		this.exchangeData.setLocale(locale);
 	}
 
 	/**
@@ -319,7 +324,7 @@ public final class Response {
 	 *         response
 	 */
 	public String getContentLanguage() {
-		return this.responseData.getContentLanguage();
+		return this.exchangeData.getContentLanguage();
 	}
 
 	/**
@@ -331,18 +336,18 @@ public final class Response {
 	 * @throws UnsupportedEncodingException If the specified name is not recognised
 	 */
 	public void setCharacterEncoding(String characterEncoding) throws UnsupportedEncodingException {
-		this.responseData.setCharacterEncoding(characterEncoding);
+		this.exchangeData.setResponseCharacterEncoding(characterEncoding);
 	}
 
 	public Charset getCharset() {
-		return this.responseData.getCharset();
+		return this.exchangeData.getResponseCharset();
 	}
 
 	/**
 	 * @return The name of the current encoding
 	 */
 	public String getCharacterEncoding() {
-		return this.responseData.getCharacterEncoding();
+		return this.exchangeData.getResponseCharacterEncoding();
 	}
 
 	/**
@@ -355,27 +360,27 @@ public final class Response {
 	 * @param type the content type
 	 */
 	public void setContentType(String type) {
-		this.responseData.setContentType(type);
+		this.exchangeData.setResponseContentType(type);
 	}
 
 	public void setContentTypeNoCharset(String type) {
-		this.responseData.setContentTypeNoCharset(type);
+		this.exchangeData.setContentTypeNoCharset(type);
 	}
 
 	public String getContentType() {
-		return this.responseData.getContentType();
+		return this.exchangeData.getResponseContentType();
 	}
 
 	public void setContentLength(long contentLength) {
-		this.responseData.setContentLength(contentLength);
+		this.exchangeData.setResponseContentLength(contentLength);
 	}
 
 	public int getContentLength() {
-		return this.responseData.getContentLength();
+		return this.exchangeData.getResponseContentLength();
 	}
 
 	public long getContentLengthLong() {
-		return this.responseData.getContentLengthLong();
+		return this.exchangeData.getResponseContentLengthLong();
 	}
 
 	/**
@@ -386,24 +391,24 @@ public final class Response {
 	 * @throws IOException If an I/O error occurs during the write
 	 */
 	public void doWrite(ByteBuffer chunk) throws IOException {
-		if (!responseData.isCommitted()) {
+		if (!exchangeData.isCommitted()) {
 			// Send the connector a request for commit. The connector should
 			// then validate the headers, send them (using sendHeaders) and
 			// set the filters accordingly.
-			responseAction.commit(false);
+			this.responseAction.commit(false);
 		}
 		int len = chunk.remaining();
-		responseAction.doWrite(chunk);
-		long contentWritten = this.responseData.getContentWritten();
-		contentWritten += len - chunk.remaining();
-		this.responseData.setContentWritten(contentWritten);
+		this.responseAction.doWrite(chunk);
+		long bytesWrite = this.exchangeData.getBytesWrite();
+		bytesWrite += len - chunk.remaining();
+		this.exchangeData.setBytesWrite(bytesWrite);
 	}
 
 	// --------------------
 
 	public void recycle() {
 
-		this.responseData.recycle();
+		this.exchangeData.recycle();
 		// Servlet 3.1 non-blocking write listener
 		// listener = null;
 		// processor.setWriteListener(null);
@@ -419,8 +424,8 @@ public final class Response {
 	 *         This will not be the number of bytes written to the network which may
 	 *         be more or less than this value.
 	 */
-	public long getContentWritten() {
-		return this.responseData.getContentWritten();
+	public long getBytesWrite() {
+		return this.exchangeData.getBytesWrite();
 	}
 
 	/**
@@ -434,17 +439,17 @@ public final class Response {
 	 */
 	public long getBytesWritten(boolean flush) {
 		if (flush) {
-			actionCLIENT_FLUSH();
+			clientFlush();
 		}
-		return responseAction.getBytesWritten();
+		return this.responseAction.getBytesWritten();
 	}
 
 	public WriteListener getWriteListener() {
-		return responseData.getRequestData().getAsyncStateMachine().getWriteListener();
+		return processor.getAsyncStateMachine().getWriteListener();
 	}
 
 	public void setWriteListener(WriteListener listener) {
-		responseData.getRequestData().getAsyncStateMachine().setWriteListener(listener);
+		processor.getAsyncStateMachine().setWriteListener(listener);
 
 		// The container is responsible for the first call to
 		// listener.onWritePossible(). If isReady() returns true, the container
@@ -453,26 +458,26 @@ public final class Response {
 		// the container will call listener.onWritePossible() once data can be
 		// written.
 		if (isReady()) {
-			synchronized (responseData.getNonBlockingStateLock()) {
+			synchronized (processor.getAsyncStateMachine().getNonBlockingStateLock()) {
 				// Ensure we don't get multiple write registrations if
 				// ServletOutputStream.isReady() returns false during a call to
 				// onDataAvailable()
-				responseData.setRegisteredForWrite(true);
+				processor.getAsyncStateMachine().setRegisteredForWrite(true);
 				// Need to set the fireListener flag otherwise when the
 				// container tries to trigger onWritePossible, nothing will
 				// happen
-				responseData.setFireListener(true);
+				processor.getAsyncStateMachine().setFireListener(true);
 			}
-			processor.actionDISPATCH_WRITE();
+			processor.dispatchWrite();
 			if (!ContainerThreadMarker.isContainerThread()) {
 				// Not on a container thread so need to execute the dispatch
-				processor.actionDISPATCH_EXECUTE();
+				processor.dispatchExecute();
 			}
 		}
 	}
 
 	public boolean isReady() {
-		if (responseData.getRequestData().getAsyncStateMachine().getWriteListener() == null) {
+		if (processor.getAsyncStateMachine().getWriteListener() == null) {
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("response.notNonBlocking"));
 			}
@@ -480,24 +485,24 @@ public final class Response {
 		}
 		// Assume write is not possible
 		boolean ready = false;
-		synchronized (responseData.getNonBlockingStateLock()) {
-			if (responseData.isRegisteredForWrite()) {
-				responseData.setFireListener(true);
+		synchronized (processor.getAsyncStateMachine().getNonBlockingStateLock()) {
+			if (processor.getAsyncStateMachine().isRegisteredForWrite()) {
+				processor.getAsyncStateMachine().setFireListener(true);
 				return false;
 			}
 			ready = checkRegisterForWrite();
-			responseData.setFireListener(!ready);
+			processor.getAsyncStateMachine().setFireListener(!ready);
 		}
 		return ready;
 	}
 
 	public boolean checkRegisterForWrite() {
 		AtomicBoolean ready = new AtomicBoolean(false);
-		synchronized (responseData.getNonBlockingStateLock()) {
-			if (!responseData.isRegisteredForWrite()) {
+		synchronized (processor.getAsyncStateMachine().getNonBlockingStateLock()) {
+			if (!processor.getAsyncStateMachine().isRegisteredForWrite()) {
 				// processor.actionNB_WRITE_INTEREST(ready);
-				ready.set(responseAction.isReadyForWrite());
-				responseData.setRegisteredForWrite(!ready.get());
+				ready.set(this.responseAction.isReadyForWrite());
+				processor.getAsyncStateMachine().setRegisteredForWrite(!ready.get());
 			}
 		}
 		return ready.get();
@@ -508,10 +513,10 @@ public final class Response {
 		// written in the Processor so if this point is reached the app is able
 		// to write data.
 		boolean fire = false;
-		synchronized (responseData.getNonBlockingStateLock()) {
-			responseData.setRegisteredForWrite(false);
-			if (responseData.isFireListener()) {
-				responseData.setFireListener(false);
+		synchronized (processor.getAsyncStateMachine().getNonBlockingStateLock()) {
+			processor.getAsyncStateMachine().setRegisteredForWrite(false);
+			if (processor.getAsyncStateMachine().isFireListener()) {
+				processor.getAsyncStateMachine().setFireListener(false);
 				fire = true;
 			}
 		}

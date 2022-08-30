@@ -22,10 +22,8 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 import org.apache.juli.logging.Log;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 
 /**
@@ -38,12 +36,12 @@ public abstract class AbstractProcessorLight implements Processor {
 	private Set<DispatchType> dispatches = new CopyOnWriteArraySet<>();
 
 	@Override
-	public boolean processInIoThread(SocketChannel channel, SocketEvent event) throws IOException {
+	public boolean processInIoThread(SocketEvent event) throws IOException {
 		return true;
 	}
 
 	@Override
-	public final SocketState process(Channel channel, SocketEvent event) throws IOException {
+	public final SocketState process(SocketEvent event) throws IOException {
 		SocketState state = SocketState.CLOSED;
 		Iterator<DispatchType> dispatches = null;
 		do {
@@ -54,20 +52,23 @@ public abstract class AbstractProcessorLight implements Processor {
 				}
 				state = dispatch(nextDispatch.getSocketStatus());
 				if (!dispatches.hasNext()) {
-					state = checkForPipelinedData(state, channel);
+					state = checkForPipelinedData(state);
 				}
 			} else if (event == SocketEvent.DISCONNECT) {
 				// Do nothing here, just wait for it to get recycled
-			} else if (isAsync() || isUpgrade() || state == SocketState.ASYNC_END) {
+//			} else if (shouldDispatch(event)) {// || state == SocketState.ASYNC_END
+//				state = dispatch(event);
+//				state = checkForPipelinedData(state, channel);
+			} else if (isUpgrade()) {// || state == SocketState.ASYNC_END
 				state = dispatch(event);
-				state = checkForPipelinedData(state, channel);
-			} else if (event == SocketEvent.OPEN_WRITE) {
+//			} else if (event == SocketEvent.OPEN_WRITE) {
 				// Extra write event likely after async, ignore
-				state = SocketState.LONG;
-			} else if (event == SocketEvent.OPEN_READ) {
-				state = service(channel);
+//				state = SocketState.LONG;
+			} else if (event == SocketEvent.OPEN_READ || event == SocketEvent.OPEN_WRITE || event == SocketEvent.TIMEOUT
+					|| event == SocketEvent.ERROR) {
+				state = service(event);
 			} else if (event == SocketEvent.CONNECT_FAIL) {
-				logAccess(channel);
+				logAccess();
 			} else {
 				// Default to closing the socket if the SocketEvent passed in
 				// is not consistent with the current state of the Processor
@@ -75,7 +76,8 @@ public abstract class AbstractProcessorLight implements Processor {
 			}
 
 			if (getLog().isDebugEnabled()) {
-				getLog().debug("Socket: [" + channel + "], Status in: [" + event + "], State out: [" + state + "]");
+				getLog().debug(
+						"Socket: [" + getChannel() + "], Status in: [" + event + "], State out: [" + state + "]");
 			}
 
 //			if (isAsync()) {
@@ -90,19 +92,19 @@ public abstract class AbstractProcessorLight implements Processor {
 				// dispatches to process.
 				dispatches = getIteratorAndClearDispatches();
 			}
-		} while (state == SocketState.ASYNC_END || dispatches != null && state != SocketState.CLOSED);
+		} while (dispatches != null && state != SocketState.CLOSED);// state == SocketState.ASYNC_END ||
 
 		return state;
 	}
 
-	private SocketState checkForPipelinedData(SocketState inState, Channel channel) throws IOException {
+	private SocketState checkForPipelinedData(SocketState inState) throws IOException {
 		if (inState == SocketState.OPEN) {
 			// There may be pipe-lined data to read. If the data isn't
 			// processed now, execution will exit this loop and call
 			// release() which will recycle the processor (and input
 			// buffer) deleting any pipe-lined data. To avoid this,
 			// process it now.
-			return service(channel);
+			return service(SocketEvent.OPEN_READ);
 		} else {
 			return inState;
 		}
@@ -146,7 +148,7 @@ public abstract class AbstractProcessorLight implements Processor {
 	 * @throws IOException If an I/O error occurs during the processing of the
 	 *                     request
 	 */
-	protected void logAccess(Channel channel) throws IOException {
+	protected void logAccess() throws IOException {
 		// NO-OP by default
 	}
 
@@ -166,7 +168,9 @@ public abstract class AbstractProcessorLight implements Processor {
 	 * @throws IOException If an I/O error occurs during the processing of the
 	 *                     request
 	 */
-	protected abstract SocketState service(Channel channel) throws IOException;
+	protected abstract SocketState service(SocketEvent event) throws IOException;
+
+	// protected abstract boolean shouldDispatch(SocketEvent event);
 
 	/**
 	 * Process an in-progress request that is not longer in standard HTTP mode. Uses

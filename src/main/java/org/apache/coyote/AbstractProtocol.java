@@ -144,7 +144,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		public void service(Request req, Response res) throws Exception {
 			byte[] b = "adapter not set!".getBytes("utf-8");
 			res.doWrite(ByteBuffer.wrap(b));
-			res.actionCLOSE();
+			res.close();
 		}
 
 		@Override
@@ -876,7 +876,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 				public void run() {
 					long now = System.currentTimeMillis();
 					for (Processor processor : waitingProcessors) {
-						processor.timeoutAsync(now);
+						processor.checkTimeout(now);
 					}
 				}
 			}, 1, 1, TimeUnit.SECONDS);
@@ -944,7 +944,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		stopAsyncTimeout();
 		// Timeout any waiting processor
 		for (Processor processor : waitingProcessors) {
-			processor.timeoutAsync(-1);
+			processor.checkTimeout(-1);
 		}
 
 		this.endpoint.stop();
@@ -1033,7 +1033,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 //	}
 
 	protected void longPoll(Channel channel, Processor processor) {
-		if (!processor.isAsync() && channel instanceof SocketChannel) {
+		if (channel instanceof SocketChannel) {// !processor.isAsync() &&
 			// This is currently only used with HTTP
 			// Either:
 			// - this is an upgraded connection
@@ -1098,7 +1098,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	// @Override
 	public void release(SocketChannel channel) {
 		Processor processor = (Processor) channel.getCurrentProcessor();
-		channel.setCurrentProcessor(null);
+		channel.clearCurrentProcessor();
 		release(processor);
 	}
 
@@ -1107,11 +1107,11 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	}
 
 	protected void register(Processor processor) {
-		if (getDomain() != null) {
+		if (getDomain() != null && processor instanceof RegistrableProcessor) {
 			synchronized (this) {
 				try {
 					long count = registerCount.incrementAndGet();
-					RequestInfo rp = processor.getRequestData().getRequestProcessor();
+					RequestInfo rp = ((RegistrableProcessor) processor).getExchangeData().getRequestProcessor();
 					rp.setGlobalProcessor(global);
 					ObjectName rpName = new ObjectName(getDomain() + ":type=RequestProcessor,worker=" + getName()
 							+ ",name=" + getProtocolName() + "Request" + count);
@@ -1128,10 +1128,10 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 	}
 
 	protected void unregister(Processor processor) {
-		if (getDomain() != null) {
+		if (getDomain() != null && processor instanceof RegistrableProcessor) {
 			synchronized (this) {
 				try {
-					RequestData r = processor.getRequestData();
+					ExchangeData r = ((RegistrableProcessor) processor).getExchangeData();
 					if (r == null) {
 						// Probably an UpgradeProcessor
 						return;
@@ -1149,6 +1149,12 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 				}
 			}
 		}
+	}
+
+	protected interface RegistrableProcessor {
+
+		ExchangeData getExchangeData();
+
 	}
 
 	protected class RecycledProcessors extends SynchronizedStack<Processor> {
