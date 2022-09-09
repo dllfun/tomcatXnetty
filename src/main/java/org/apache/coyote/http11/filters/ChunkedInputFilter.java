@@ -18,6 +18,7 @@ package org.apache.coyote.http11.filters;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Map;
@@ -71,12 +72,6 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 	 * Byte chunk used to read bytes.
 	 */
 	protected BufWrapper readChunk;
-
-	// private BufWrapper oldReadChunk;
-
-	private int currLimit = -1;
-
-	private int realLimit = -1;
 
 	/**
 	 * Flag set to true when the end chunk has been read.
@@ -138,58 +133,6 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 
 	// ---------------------------------------------------- InputBuffer Methods
 
-	/*
-	 * @Override public int doRead(PreInputBuffer handler) throws IOException { if
-	 * (endChunk) { return -1; }
-	 * 
-	 * checkError();
-	 * 
-	 * if (oldReadChunk != null && oldReadChunk != readChunk) { throw new
-	 * RuntimeException(); }
-	 * 
-	 * if (oldLimit != -1 && readChunk.getLimit() != oldLimit) { throw new
-	 * RuntimeException(); }
-	 * 
-	 * if (readChunk != null && readChunk.getPosition() != readChunk.getLimit()) {
-	 * throw new RuntimeException(); }
-	 * 
-	 * if (realLimit != -1) { readChunk.setLimit(realLimit); realLimit = -1; }
-	 * 
-	 * if (needCRLFParse) { needCRLFParse = false; parseCRLF(false); }
-	 * 
-	 * if (remaining <= 0) { if (!parseChunkHeader()) {
-	 * throwIOException(sm.getString("chunkedInputFilter.invalidHeader")); } if
-	 * (endChunk) { parseEndChunk(); oldReadChunk = readChunk; oldLimit =
-	 * readChunk.getLimit(); readChunk.startTrace(); return -1; } }
-	 * 
-	 * int result = 0;
-	 * 
-	 * if (readChunk == null || readChunk.getPosition() >= readChunk.getLimit()) {
-	 * if ((readChunk = readBytes()) == null) {
-	 * throwIOException(sm.getString("chunkedInputFilter.eos")); } }
-	 * 
-	 * if (remaining > readChunk.getRemaining()) { result =
-	 * readChunk.getRemaining(); remaining = remaining - result; if (readChunk !=
-	 * handler.getBufWrapper()) { handler.setBufWrapper(readChunk);// .duplicate() }
-	 * // readChunk.setPosition(readChunk.getLimit()); } else { result = remaining;
-	 * if (readChunk != handler.getBufWrapper()) {
-	 * handler.setBufWrapper(readChunk);// .duplicate() } realLimit =
-	 * readChunk.getLimit();
-	 * handler.getBufWrapper().setLimit(readChunk.getPosition() + remaining); //
-	 * readChunk.setPosition(readChunk.getPosition() + remaining); remaining = 0; //
-	 * we need a CRLF if ((readChunk.getPosition() + 1) >= readChunk.getLimit()) {
-	 * // if we call parseCRLF we overrun the buffer here // so we defer it to the
-	 * next call BZ 11117 needCRLFParse = true; } else { needCRLFParse = true; //
-	 * parseCRLF(false); // parse the CRLF immediately } }
-	 * 
-	 * oldReadChunk = readChunk; oldLimit = readChunk.getLimit();
-	 * readChunk.startTrace();
-	 * 
-	 * return result; }
-	 */
-
-	// ---------------------------------------------------- InputFilter Methods
-
 	@Override
 	public int getId() {
 		return Constants.CHUNKED_FILTER;
@@ -202,28 +145,13 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 
 	@Override
 	public BufWrapper doRead() throws IOException {
+		BufWrapper result = null;
+
 		if (endChunk) {
 			return null;
 		}
 
 		checkError();
-
-		// if (oldReadChunk != null && oldReadChunk != readChunk) {
-		// throw new RuntimeException();
-		// }
-
-		if (readChunk != null && currLimit != -1 && readChunk.getLimit() != currLimit) {
-			throw new RuntimeException();
-		}
-
-		if (readChunk != null && readChunk.getPosition() != readChunk.getLimit()) {
-			throw new RuntimeException();
-		}
-
-		if (realLimit != -1) {
-			readChunk.setLimit(realLimit);
-			realLimit = -1;
-		}
 
 		if (needCRLFParse) {
 			needCRLFParse = false;
@@ -236,37 +164,27 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 			}
 			if (endChunk) {
 				parseEndChunk();
-				// oldReadChunk = readChunk;
-				currLimit = readChunk.getLimit();
-				readChunk.startTrace();
 				return null;
 			}
 		}
 
-		int result = 0;
+//		int result = 0;
 
 		if (readChunk == null || readChunk.getPosition() >= readChunk.getLimit()) {
-			if ((readChunk = readBytes()) == null) {
+			readChunk = readBytes();
+			if (readChunk == null || readChunk.getRemaining() == 0) {
 				throwIOException(sm.getString("chunkedInputFilter.eos"));
 			}
 		}
 
 		if (remaining > readChunk.getRemaining()) {
-			result = readChunk.getRemaining();
-			realLimit = readChunk.getLimit();
-			remaining = remaining - result;
-			// if (readChunk != handler.getBufWrapper()) {
-			// handler.setBufWrapper(readChunk);// .duplicate()
-			// }
-			// readChunk.setPosition(readChunk.getLimit());
+			remaining = remaining - readChunk.getRemaining();
+			result = readChunk.duplicate();
+			readChunk.setPosition(readChunk.getLimit());
 		} else {
-			result = remaining;
-			// if (readChunk != handler.getBufWrapper()) {
-			// handler.setBufWrapper(readChunk);// .duplicate()
-			// }
-			realLimit = readChunk.getLimit();
-			readChunk.setLimit(readChunk.getPosition() + remaining);
-			// readChunk.setPosition(readChunk.getPosition() + remaining);
+			result = readChunk.duplicate();
+			result.setLimit(readChunk.getPosition() + remaining);
+			readChunk.setPosition(readChunk.getPosition() + remaining);
 			remaining = 0;
 			// we need a CRLF
 			if ((readChunk.getPosition() + 1) >= readChunk.getLimit()) {
@@ -274,25 +192,14 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 				// so we defer it to the next call BZ 11117
 				needCRLFParse = true;
 			} else {
-				needCRLFParse = true;
-				// parseCRLF(false); // parse the CRLF immediately
+				parseCRLF(false); // parse the CRLF immediately
 			}
 		}
 
-		// oldReadChunk = readChunk;
-		currLimit = readChunk.getLimit();
-		readChunk.startTrace();
-
-		return readChunk;
+		return result;
 	}
 
-	/**
-	 * Read the content length from the request.
-	 */
-//	@Override
-//	public void setRequest(ExchangeData exchangeData) {
-//		this.exchangeData = exchangeData;
-//	}
+	// ---------------------------------------------------- InputFilter Methods
 
 	/**
 	 * End the current request.
@@ -300,11 +207,10 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 	@Override
 	public long end() throws IOException {
 		long swallowed = 0;
-		int read = 0;
+		BufWrapper read = null;
 		// Consume extra bytes : parse the stream until the end chunk is found
-		while ((readChunk = doRead()) != null) {// (read = doRead(this)) >= 0
-			read = readChunk.getRemaining();
-			swallowed += read;
+		while ((read = doRead()) != null) {
+			swallowed += read.getRemaining();
 			if (maxSwallowSize > -1 && swallowed > maxSwallowSize) {
 				throwIOException(sm.getString("inputFilter.maxSwallow"));
 			}
@@ -319,7 +225,11 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 	 */
 	@Override
 	public int available() {
-		return readChunk != null ? (realLimit - currLimit) : 0;
+		int available = 0;
+		if (readChunk != null) {
+			available = readChunk.getRemaining();
+		}
+		return available;
 	}
 
 	/**
@@ -337,7 +247,8 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 	public void recycle() {
 		remaining = 0;
 		if (readChunk != null) {
-			// readChunk.setPosition(0).setLimit(0);
+			readChunk.setPosition(0);
+			readChunk.setLimit(0);
 		}
 		endChunk = false;
 		needCRLFParse = false;
@@ -396,8 +307,10 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 		while (!eol) {
 
 			if (readChunk == null || readChunk.getPosition() >= readChunk.getLimit()) {
-				if ((readChunk = readBytes()) == null)
+				readChunk = readBytes();
+				if (readChunk == null || readChunk.getRemaining() == 0) {
 					return false;
+				}
 			}
 
 			byte chr = readChunk.getByte(readChunk.getPosition());
@@ -463,7 +376,8 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 
 		while (!eol) {
 			if (readChunk == null || readChunk.getPosition() >= readChunk.getLimit()) {
-				if ((readChunk = readBytes()) == null) {
+				readChunk = readBytes();
+				if (readChunk == null || readChunk.getRemaining() == 0) {
 					throwIOException(sm.getString("chunkedInputFilter.invalidCrlfNoData"));
 				}
 			}
@@ -507,7 +421,8 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 
 		// Read new bytes if needed
 		if (readChunk == null || readChunk.getPosition() >= readChunk.getLimit()) {
-			if ((readChunk = readBytes()) == null) {
+			readChunk = readBytes();
+			if (readChunk == null || readChunk.getRemaining() == 0) {
 				throwEOFException(sm.getString("chunkedInputFilter.eosTrailer"));
 			}
 		}
@@ -534,7 +449,8 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 
 			// Read new bytes if needed
 			if (readChunk == null || readChunk.getPosition() >= readChunk.getLimit()) {
-				if ((readChunk = readBytes()) == null) {
+				readChunk = readBytes();
+				if (readChunk == null || readChunk.getRemaining() == 0) {
 					throwEOFException(sm.getString("chunkedInputFilter.eosTrailer"));
 				}
 			}
@@ -573,7 +489,8 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 
 				// Read new bytes if needed
 				if (readChunk == null || readChunk.getPosition() >= readChunk.getLimit()) {
-					if ((readChunk = readBytes()) == null) {
+					readChunk = readBytes();
+					if (readChunk == null || readChunk.getRemaining() == 0) {
 						throwEOFException(sm.getString("chunkedInputFilter.eosTrailer"));
 					}
 				}
@@ -599,7 +516,8 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 
 				// Read new bytes if needed
 				if (readChunk == null || readChunk.getPosition() >= readChunk.getLimit()) {
-					if ((readChunk = readBytes()) == null) {
+					readChunk = readBytes();
+					if (readChunk == null || readChunk.getRemaining() == 0) {
 						throwEOFException(sm.getString("chunkedInputFilter.eosTrailer"));
 					}
 				}
@@ -625,7 +543,8 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 
 			// Read new bytes if needed
 			if (readChunk == null || readChunk.getPosition() >= readChunk.getLimit()) {
-				if ((readChunk = readBytes()) == null) {
+				readChunk = readBytes();
+				if (readChunk == null || readChunk.getRemaining() == 0) {
 					throwEOFException(sm.getString("chunkedInputFilter.eosTrailer"));
 				}
 			}

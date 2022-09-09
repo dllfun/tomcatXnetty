@@ -29,9 +29,8 @@ import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.log.UserDataHelper;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
-import org.apache.tomcat.util.net.SendfileState;
-import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
+import org.apache.tomcat.util.net.SendfileState;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -432,13 +431,37 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 		return state;
 	}
 
+	/**
+	 * 
+	 * @return
+	 */
 	protected abstract boolean repeat();
 
 	protected abstract SocketState serviceInternal() throws IOException;
 
-	protected abstract boolean parsingHeader();
+	/**
+	 * 解析报文头部
+	 * 
+	 * @return
+	 * @throws IOException
+	 */
+	protected abstract boolean parsingHeader() throws IOException;
 
+	/**
+	 * 是否符合http2前言
+	 * 
+	 * @return
+	 */
+	protected abstract boolean isHttp2Preface();
+
+	/**
+	 * 是否可以释放processor
+	 * 
+	 * @return
+	 */
 	protected abstract boolean canReleaseProcessor();
+
+	protected abstract void resetSocketReadTimeout();
 
 	protected abstract void endRequest() throws IOException;
 
@@ -859,12 +882,12 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	@Override
 	public final void recycle() {
-		channel = null;
+//		responseData.getRequestData().recycle();
+		recycleInternal();
 		errorState = ErrorState.NONE;
 		exchangeData.recycle();
 		asyncStateMachine.recycle();
-//		responseData.getRequestData().recycle();
-		recycleInternal();
+		channel = null;
 	}
 
 	protected abstract void recycleInternal();
@@ -967,5 +990,16 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	protected abstract Request createRequest();
 
 	protected abstract Response createResponse();
+
+	/**
+	 * Determine if we must drop the connection because of the HTTP status code. Use
+	 * the same list of codes as Apache/httpd.
+	 */
+	public static boolean statusDropsConnection(int status) {
+		return status == 400 /* SC_BAD_REQUEST */ || status == 408 /* SC_REQUEST_TIMEOUT */
+				|| status == 411 /* SC_LENGTH_REQUIRED */ || status == 413 /* SC_REQUEST_ENTITY_TOO_LARGE */
+				|| status == 414 /* SC_REQUEST_URI_TOO_LONG */ || status == 500 /* SC_INTERNAL_SERVER_ERROR */
+				|| status == 503 /* SC_SERVICE_UNAVAILABLE */ || status == 501 /* SC_NOT_IMPLEMENTED */;
+	}
 
 }

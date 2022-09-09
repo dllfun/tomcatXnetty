@@ -35,7 +35,6 @@ import org.apache.coyote.ProtocolException;
 import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.coyote.http2.HpackDecoder.HeaderEmitter;
 import org.apache.coyote.http2.HpackEncoder.State;
-import org.apache.coyote.http2.Http2Parser.ByteBufferHandler;
 import org.apache.coyote.http2.Http2Parser.Input;
 import org.apache.coyote.http2.Http2Parser.Output;
 import org.apache.coyote.http2.StreamZero.ConnectionState;
@@ -120,7 +119,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 	private Queue<StreamRunnable> queuedRunnable = null;
 
 	// Track 'overhead' frames vs 'request/response' frames
-	private final AtomicLong overheadCount = new AtomicLong(-10);
+	private final AtomicLong overheadCount;
 	private final InputHandlerImpl inputHandler;
 	private final OutputHandlerImpl outputHandler;
 	protected final ConcurrencyControlled controlled = new ConcurrencyControlled() {
@@ -170,6 +169,14 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		this.protocol = protocol;
 		this.adapter = adapter;
 		this.zero = new StreamZero(this);
+
+		// Defaults to -10 * the count factor.
+		// i.e. when the connection opens, 10 'overhead' frames in a row will
+		// cause the connection to be closed.
+		// Over time the count should be a slowly decreasing negative number.
+		// Therefore, the longer a connection is 'well-behaved', the greater
+		// tolerance it will have for a period of 'bad' behaviour.
+		overheadCount = new AtomicLong(-10 * protocol.getOverheadCountFactor());
 
 		remoteSettings = new ConnectionSettingsRemote(zero.getConnectionId());
 		localSettings = new ConnectionSettingsLocal(zero.getConnectionId());
@@ -346,10 +353,15 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		SocketState result = SocketState.CLOSED;
 
 		try {
-			pingManager.sendPing(false);
+//			pingManager.sendPing(false);
 
 			switch (status) {
 			case OPEN_READ:
+				if (channel.canWrite()) {
+					// Only send a ping if there is no other data waiting to be sent.
+					// Ping manager will ensure they aren't sent too frequently.
+					pingManager.sendPing(false);
+				}
 				try {
 					// There is data to read so use the read timeout while
 					// reading frames ...
@@ -811,6 +823,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 			if (!stream.canWrite()) {
 				return;
 			}
+//			System.out.println("stream" + stream.getIdAsString() + " writeWindowUpdate" + increment);
 			try {
 				channel.getWriteLock().lock();
 				// Build window update frame for stream 0
@@ -943,6 +956,11 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		}
 
 		@Override
+		public boolean fill(ByteBuffer buffer) throws IOException {
+			return channel.read(false, buffer) > 0;
+		}
+
+		@Override
 		public boolean fill(boolean block, byte[] data, int offset, int length) throws IOException {
 			int len = length;
 			int pos = offset;
@@ -999,7 +1017,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		}
 
 		@Override
-		public ByteBufferHandler startRequestBodyFrame(int streamId, int payloadSize, boolean endOfStream)
+		public StreamChannel startRequestBodyFrame(int streamId, int payloadSize, boolean endOfStream)
 				throws Http2Exception {
 			// DATA frames reduce the overhead count ...
 			reduceOverheadCount();
@@ -1049,10 +1067,10 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		}
 
 		@Override
-		public void swallowedPadding(int streamId, int paddingLength) throws ConnectionException, IOException {
+		public void onSwallowedDataFramePayload(int streamId, int swallowedDataBytesCount)
+				throws IOException, ConnectionException {
 			Stream stream = zero.getStream(streamId, true);
-			// +1 is for the payload byte used to define the padding length
-			channelWriter.writeWindowUpdate(stream, paddingLength + 1, false);
+			channelWriter.writeWindowUpdate(stream, swallowedDataBytesCount, false);
 		}
 
 		@Override
@@ -1277,7 +1295,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		}
 
 		@Override
-		public void swallowed(int streamId, FrameType frameType, int flags, int size) throws IOException {
+		public void onSwallowedUnknownFrame(int streamId, int frameTypeId, int flags, int size) throws IOException {
 			// NO-OP.
 		}
 

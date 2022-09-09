@@ -477,6 +477,8 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 				}
 				state.sendReset();
 				handler.getWriter().writeStreamReset(se);
+				cancelAllocationRequests();
+				closeInternal();
 			} catch (IOException ioe) {
 				ConnectionException ce = new ConnectionException(sm.getString("stream.reset.fail"),
 						Http2Error.PROTOCOL_ERROR);
@@ -487,6 +489,8 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 			handler.closeConnection(http2Exception);
 		}
 	}
+
+	protected abstract void closeInternal() throws IOException;
 
 	boolean isTrailerFieldsReady() {
 		// Once EndOfStream has been received, canRead will be false

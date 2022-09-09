@@ -101,7 +101,9 @@ public class Http11Processor extends AbstractProcessor {
 	 */
 	private UpgradeToken upgradeToken = null;
 
-	private boolean checkHttp2PrefaceMatch = true;
+	private boolean checkHttp2Preface = true;
+
+	private boolean isHttp2Preface = false;
 
 	private boolean keptAlive = false;
 
@@ -134,17 +136,6 @@ public class Http11Processor extends AbstractProcessor {
 	@Override
 	protected Response createResponse() {
 		return new Response(this.exchangeData, this, outputBuffer);
-	}
-
-	/**
-	 * Determine if we must drop the connection because of the HTTP status code. Use
-	 * the same list of codes as Apache/httpd.
-	 */
-	protected static boolean statusDropsConnection(int status) {
-		return status == 400 /* SC_BAD_REQUEST */ || status == 408 /* SC_REQUEST_TIMEOUT */
-				|| status == 411 /* SC_LENGTH_REQUIRED */ || status == 413 /* SC_REQUEST_ENTITY_TOO_LARGE */
-				|| status == 414 /* SC_REQUEST_URI_TOO_LONG */ || status == 500 /* SC_INTERNAL_SERVER_ERROR */
-				|| status == 503 /* SC_SERVICE_UNAVAILABLE */ || status == 501 /* SC_NOT_IMPLEMENTED */;
 	}
 
 	@Override
@@ -245,45 +236,12 @@ public class Http11Processor extends AbstractProcessor {
 
 	@Override
 	public SocketState serviceInternal() throws IOException {// Channel channel
-		SocketChannel socketChannel = (SocketChannel) channel;
+//		SocketChannel socketChannel = (SocketChannel) channel;
 		RequestInfo rp = exchangeData.getRequestProcessor();
 		rp.setStage(org.apache.coyote.Constants.STAGE_PARSE);
 
 		// Setting up the I/O
 		// setChannel(channel);
-
-		if (checkHttp2PrefaceMatch) {
-			BufWrapper byteBuffer = ((SocketChannel) getChannel()).getAppReadBuffer();
-			byteBuffer.startParsingHeader(CLIENT_PREFACE_START.length);
-			if (byteBuffer.hasNoRemaining() || byteBuffer.getRemaining() < CLIENT_PREFACE_START.length) {
-				if (!((SocketChannel) getChannel()).fillAppReadBuffer(false)) {
-					// A read is pending, so no longer in initial state
-					if (byteBuffer.getRemaining() == 0) {
-						return SocketState.OPEN;
-					} else {
-						return SocketState.LONG;
-					}
-				}
-				// At least one byte of the request has been received.
-				// Switch to the socket timeout.
-				int matchCount = 0;
-				for (int i = 0; i < byteBuffer.getRemaining() && i < CLIENT_PREFACE_START.length; i++) {
-					if (CLIENT_PREFACE_START[i] != byteBuffer.getByte(i)) {
-						checkHttp2PrefaceMatch = false;
-						break;
-					} else {
-						matchCount++;
-					}
-				}
-				if (checkHttp2PrefaceMatch) {
-					if (matchCount < CLIENT_PREFACE_START.length) {
-						return SocketState.LONG;
-					} else {
-						return SocketState.UPGRADING;
-					}
-				}
-			}
-		}
 
 		// Flags
 //		inputBuffer.keepAlive = true;
@@ -297,36 +255,43 @@ public class Http11Processor extends AbstractProcessor {
 			// Parsing the request header
 			if (!parsingHeader()) {
 				if (!getErrorState().isError()) {
-					if (canReleaseProcessor()) {
-						return SocketState.OPEN;
+					if (isHttp2Preface()) {
+						return SocketState.UPGRADING;
 					} else {
-						return SocketState.LONG;
+						if (canReleaseProcessor()) {
+							return SocketState.OPEN;
+						} else {
+							return SocketState.LONG;
+						}
 					}
 				}
 			}
 
-			// Has an upgrade been requested?
-			if (isConnectionToken(exchangeData.getRequestHeaders(), "upgrade")) {
-				// Check the protocol
-				String requestedProtocol = exchangeData.getRequestHeader("Upgrade");
+			if (!getErrorState().isError() && channel instanceof SocketChannel) {
+				SocketChannel socketChannel = (SocketChannel) channel;
+				// Has an upgrade been requested?
+				if (isConnectionToken(exchangeData.getRequestHeaders(), "upgrade")) {
+					// Check the protocol
+					String requestedProtocol = exchangeData.getRequestHeader("Upgrade");
 
-				UpgradeProtocol upgradeProtocol = protocol.getUpgradeProtocol(requestedProtocol);
-				if (upgradeProtocol != null) {
-					if (upgradeProtocol.accept(exchangeData)) {
-						exchangeData.setStatus(HttpServletResponse.SC_SWITCHING_PROTOCOLS);
-						exchangeData.setResponseHeader("Connection", "Upgrade");
-						exchangeData.setResponseHeader("Upgrade", requestedProtocol);
-						outputBuffer.close();
-						Request request = createRequest();
-						Response response = createResponse();
-						request.setResponse(response);
-						getAdapter().log(request, response, 0);
+					UpgradeProtocol upgradeProtocol = protocol.getUpgradeProtocol(requestedProtocol);
+					if (upgradeProtocol != null) {
+						if (upgradeProtocol.accept(exchangeData)) {
+							exchangeData.setStatus(HttpServletResponse.SC_SWITCHING_PROTOCOLS);
+							exchangeData.setResponseHeader("Connection", "Upgrade");
+							exchangeData.setResponseHeader("Upgrade", requestedProtocol);
+							outputBuffer.close();
+							Request request = createRequest();
+							Response response = createResponse();
+							request.setResponse(response);
+							getAdapter().log(request, response, 0);
 
-						InternalHttpUpgradeHandler upgradeHandler = upgradeProtocol.getInternalUpgradeHandler(
-								socketChannel, getAdapter(), cloneRequest(this.exchangeData));
-						UpgradeToken upgradeToken = new UpgradeToken(upgradeHandler, null, null);
-						upgrade(upgradeToken);
-						return SocketState.UPGRADING;
+							InternalHttpUpgradeHandler upgradeHandler = upgradeProtocol.getInternalUpgradeHandler(
+									socketChannel, getAdapter(), cloneRequest(this.exchangeData));
+							UpgradeToken upgradeToken = new UpgradeToken(upgradeHandler, null, null);
+							upgrade(upgradeToken);
+							return SocketState.UPGRADING;
+						}
 					}
 				}
 			}
@@ -344,6 +309,20 @@ public class Http11Processor extends AbstractProcessor {
 					// 500 - Internal Server Error
 					exchangeData.setStatus(500);
 					setErrorState(ErrorState.CLOSE_CLEAN, t);
+				}
+			}
+
+			if (!getErrorState().isIoAllowed()) {
+				Request request = createRequest();
+				Response response = createResponse();
+				request.setResponse(response);
+				getAdapter().log(request, response, 0);
+			} else {
+
+				if (protocol.isPaused()) {// && !cping
+					// 503 - Service unavailable
+					exchangeData.setStatus(503);
+					setErrorState(ErrorState.CLOSE_CLEAN, null);
 				}
 			}
 
@@ -418,16 +397,10 @@ public class Http11Processor extends AbstractProcessor {
 				}
 			}
 
-			if (!protocol.getDisableUploadTimeout()) {
-				int connectionTimeout = protocol.getConnectionTimeout();
-				if (connectionTimeout > 0) {
-					socketChannel.setReadTimeout(connectionTimeout);
-				} else {
-					socketChannel.setReadTimeout(0);
-				}
+			if (repeat()) {
+				resetSocketReadTimeout();
+				rp.setStage(org.apache.coyote.Constants.STAGE_KEEPALIVE);
 			}
-
-			rp.setStage(org.apache.coyote.Constants.STAGE_KEEPALIVE);
 
 			sendfileState = processSendfile();
 		}
@@ -468,7 +441,43 @@ public class Http11Processor extends AbstractProcessor {
 	}
 
 	@Override
-	protected boolean parsingHeader() {
+	protected boolean isHttp2Preface() {
+		return isHttp2Preface;
+	}
+
+	@Override
+	protected boolean parsingHeader() throws IOException {
+
+		if (checkHttp2Preface) {
+			BufWrapper byteBuffer = ((SocketChannel) getChannel()).getAppReadBuffer();
+			byteBuffer.startParsingHeader(CLIENT_PREFACE_START.length);
+			if (byteBuffer.hasNoRemaining() || byteBuffer.getRemaining() < CLIENT_PREFACE_START.length) {
+				if (!((SocketChannel) getChannel()).fillAppReadBuffer(false)) {
+					// A read is pending, so no longer in initial state
+					return false;
+				}
+				// At least one byte of the request has been received.
+				// Switch to the socket timeout.
+				int matchCount = 0;
+				for (int i = 0; i < byteBuffer.getRemaining() && i < CLIENT_PREFACE_START.length; i++) {
+					if (CLIENT_PREFACE_START[i] != byteBuffer.getByte(i)) {
+						checkHttp2Preface = false;
+						isHttp2Preface = false;
+						break;
+					} else {
+						matchCount++;
+					}
+				}
+				if (checkHttp2Preface) {
+					if (matchCount < CLIENT_PREFACE_START.length) {
+						return false;
+					} else {
+						isHttp2Preface = true;
+						return false;
+					}
+				}
+			}
+		}
 
 		try {
 
@@ -553,6 +562,18 @@ public class Http11Processor extends AbstractProcessor {
 			return true;
 		} else {
 			return false;
+		}
+	}
+
+	@Override
+	protected void resetSocketReadTimeout() {
+		if (!protocol.getDisableUploadTimeout()) {
+			int connectionTimeout = protocol.getConnectionTimeout();
+			if (connectionTimeout > 0) {
+				channel.setReadTimeout(connectionTimeout);
+			} else {
+				channel.setReadTimeout(0);
+			}
 		}
 	}
 
@@ -842,7 +863,8 @@ public class Http11Processor extends AbstractProcessor {
 		outputBuffer.recycle();
 		upgradeToken = null;
 		channel = null;
-		checkHttp2PrefaceMatch = true;
+		checkHttp2Preface = true;
+		isHttp2Preface = false;
 		keptAlive = false;
 		// sslSupport = null;
 	}

@@ -3,7 +3,11 @@ package org.apache.coyote.http2;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Locale;
+import java.util.concurrent.BlockingDeque;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
@@ -11,14 +15,15 @@ import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.CloseNowException;
 import org.apache.coyote.ExchangeData;
 import org.apache.coyote.http2.HpackDecoder.HeaderEmitter;
-import org.apache.coyote.http2.Http2Parser.ByteBufferHandler;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.parser.Host;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
-public class StreamChannel extends Stream implements ByteBufferHandler {
+import io.netty.buffer.ByteBuf;
+
+public class StreamChannel extends Stream {
 
 	private static final int HEADER_STATE_START = 0;
 	private static final int HEADER_STATE_PSEUDO = 1;
@@ -57,11 +62,13 @@ public class StreamChannel extends Stream implements ByteBufferHandler {
 	private final ReentrantLock readLock = new ReentrantLock();
 	private final Condition notEmpty = readLock.newCondition();
 	private final ReentrantLock writeLock = new ReentrantLock();
-	private volatile int bufferIndex = -1;
-	private ByteBuffer[] buffers = new ByteBuffer[2];
+	// private volatile int bufferIndex = -1;
+	// private ByteBuffer[] buffers = new ByteBuffer[2];
+	private final Deque<ByteBuffer> deque = new ArrayDeque<>();
 	private volatile boolean readInterest;
-	private boolean resetReceived = false;
+	private volatile boolean resetReceived = false;
 
+	private volatile boolean inputClosed = false;
 	private volatile boolean outputClosed = false;
 	protected volatile StreamException resetException = null;
 //	private volatile boolean endOfStreamSent = false;
@@ -280,48 +287,62 @@ public class StreamChannel extends Stream implements ByteBufferHandler {
 	}
 
 	@Override
-	public void startWrite() {
-		readLock.lock();
+	protected void closeInternal() throws IOException {
+		swallowUnread();
 	}
 
-	@Override
-	public ByteBuffer getByteBuffer() {
-		ensureBuffersExist();
-		return buffers[bufferIndex];
-	}
+//	@Override
+//	public void startWrite() {
+//		readLock.lock();
+//	}
 
-	@Override
-	public void finishWrite() {
-		readLock.unlock();
-	}
+//	@Override
+//	public ByteBuffer getByteBuffer() {
+//		ensureBuffersExist();
+//		return buffers[bufferIndex];
+//	}
 
-	private final void ensureBuffersExist() {
-		if (bufferIndex == -1) {
-			// The client must obey Tomcat's window size when sending so
-			// this is the initial window size set by Tomcat that the client
-			// uses (i.e. the local setting is required here).
-			int size = handler.getLocalSettings().getInitialWindowSize();
-			try {
-				readLock.lock();
-				if (bufferIndex == -1) {
-					bufferIndex = 0;
-					buffers[0] = ByteBuffer.allocate(size);
-					buffers[1] = ByteBuffer.allocate(size);
-				}
-			} finally {
-				readLock.unlock();
-			}
-		}
-	}
+//	@Override
+//	public void finishWrite() {
+//		readLock.unlock();
+//	}
+
+//	private final void ensureBuffersExist() {
+//		if (bufferIndex == -1) {
+//			// The client must obey Tomcat's window size when sending so
+//			// this is the initial window size set by Tomcat that the client
+//			// uses (i.e. the local setting is required here).
+//			int size = handler.getLocalSettings().getInitialWindowSize();
+//			try {
+//				readLock.lock();
+//				if (bufferIndex == -1) {
+//					bufferIndex = 0;
+//					if (!inputClosed) {
+//						buffers[0] = ByteBuffer.allocate(size);
+//						buffers[1] = ByteBuffer.allocate(size);
+//					} else {
+//						buffers[0] = ByteBuffer.allocate(0);
+//						buffers[1] = ByteBuffer.allocate(0);
+//					}
+//				}
+//			} finally {
+//				readLock.unlock();
+//			}
+//		}
+//	}
 
 	@Override
 	public final int available() {
 		try {
 			readLock.lock();
-			if (bufferIndex == -1) {
+			if (deque.size() == 0) {
 				return 0;
 			}
-			return buffers[bufferIndex].position();
+			int available = 0;
+			for (ByteBuffer buf : deque) {
+				available += buf.remaining();
+			}
+			return available;
 		} finally {
 			readLock.unlock();
 		}
@@ -329,7 +350,7 @@ public class StreamChannel extends Stream implements ByteBufferHandler {
 
 	@Override
 	public final boolean isReadyForRead() {
-		ensureBuffersExist();
+//		ensureBuffersExist();
 
 		try {
 			readLock.lock();
@@ -351,7 +372,7 @@ public class StreamChannel extends Stream implements ByteBufferHandler {
 	public final boolean isRequestBodyFullyRead() {
 		try {
 			readLock.lock();
-			boolean finished = (bufferIndex == -1 || buffers[bufferIndex].position() == 0) && isInputFinished();
+			boolean finished = deque.size() == 0 && isInputFinished();
 			if (finished) {
 				System.out.println(
 						"conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " bodyFullyReaded");
@@ -365,13 +386,29 @@ public class StreamChannel extends Stream implements ByteBufferHandler {
 	@Override
 	public final BufWrapper doRead() throws IOException {
 
-		ensureBuffersExist();
-
+//		ensureBuffersExist();
+		ByteBuffer buffer = null;
 		// Ensure that only one thread accesses inBuffer at a time
 		try {
 			readLock.lock();
+			if (inputClosed) {
+				return null;
+			}
+			int available = 0;
+			for (ByteBuffer buf : deque) {
+				available += buf.remaining();
+			}
+			if (available > 0) {
+				buffer = ByteBuffer.allocate(available);
+				ByteBuffer buf = null;
+				while ((buf = deque.poll()) != null) {
+					buffer.put(buf);
+				}
+				buffer.flip();
+			}
 			boolean canRead = false;
-			while (buffers[bufferIndex].position() == 0 && (canRead = this.isActive() && !this.isInputFinished())) {
+			while ((buffer == null || buffer.remaining() == 0)
+					&& (canRead = this.isActive() && !this.isInputFinished())) {
 				// Need to block until some data is written
 				try {
 					if (log.isDebugEnabled()) {
@@ -381,15 +418,23 @@ public class StreamChannel extends Stream implements ByteBufferHandler {
 					long readTimeout = handler.getProtocol().getStreamReadTimeout();
 					if (readTimeout < 0) {
 						notEmpty.await();
+//						buffer = deque.poll();
 					} else {
 						notEmpty.await(readTimeout, TimeUnit.MILLISECONDS);
+//						buffer = deque.poll(readTimeout, TimeUnit.MILLISECONDS);
 					}
 
 					if (resetReceived) {
 						throw new IOException(sm.getString("stream.inputBuffer.reset"));
 					}
 
-					if (buffers[bufferIndex].position() == 0 && this.isActive() && !this.isInputFinished()) {
+					if (inputClosed) {
+						return null;
+					}
+
+					buffer = deque.poll();
+
+					if (buffer == null && this.isActive() && !this.isInputFinished()) {
 						String msg = sm.getString("stream.inputBuffer.readTimeout");
 						StreamException se = new StreamException(msg, Http2Error.ENHANCE_YOUR_CALM, this.getIdAsInt());
 						// Trigger a reset once control returns to Tomcat
@@ -405,11 +450,11 @@ public class StreamChannel extends Stream implements ByteBufferHandler {
 				}
 			}
 
-			if (buffers[bufferIndex].position() > 0) {
+			if (buffer != null) {
 				// Data is available in the readingBuffer. Copy it to the
 				// outBuffer.
-				bufferIndex = (bufferIndex + 1) % 2;
-				buffers[bufferIndex].clear();
+//				bufferIndex = (bufferIndex + 1) % 2;
+//				buffers[bufferIndex].clear();
 				// buffers[bufferIndex.intValue()].get(outBuffer, 0, written);
 				// buffers[bufferIndex.intValue()].clear();
 				// applicationBufferHandler.setBufWrapper();
@@ -426,14 +471,16 @@ public class StreamChannel extends Stream implements ByteBufferHandler {
 
 		// Increment client-side flow control windows by the number of bytes
 		// read
-		int freeIndex = (bufferIndex + 1) % 2;
-		buffers[freeIndex].flip();
-		int written = buffers[freeIndex].remaining();
+//		int freeIndex = (bufferIndex + 1) % 2;
+//		buffers[freeIndex].flip();
+//		buffer.flip();
+		int written = buffer.remaining();
 		if (log.isDebugEnabled()) {
 			log.debug(sm.getString("stream.inputBuffer.copy", Integer.toString(written)));
 		}
 		handler.getWriter().writeWindowUpdate(this, written, true);
-		ByteBufferWrapper toreturn = ByteBufferWrapper.wrapper(buffers[freeIndex]);
+		ByteBufferWrapper toreturn = ByteBufferWrapper.wrapper(buffer);
+		System.out.println("stream" + getIdAsString() + " take:" + toreturn.getRemaining());
 		return toreturn;
 	}
 
@@ -441,34 +488,36 @@ public class StreamChannel extends Stream implements ByteBufferHandler {
 	public final void insertReplayedBody(ByteChunk body) {
 		try {
 			readLock.lock();
-			bufferIndex = 0;
-			buffers[bufferIndex] = ByteBuffer.wrap(body.getBytes(), body.getOffset(), body.getLength());
+			// bufferIndex = 0;
+			// buffers[bufferIndex] = ByteBuffer.wrap(body.getBytes(), body.getOffset(),
+			// body.getLength());
+			deque.offer(ByteBuffer.wrap(body.getBytes(), body.getOffset(), body.getLength()));
 		} finally {
 			readLock.unlock();
 		}
 	}
 
 	protected final void receiveReset() {
-		if (bufferIndex != -1) {
-			try {// synchronized (buffers[bufferIndex.intValue()])
-				readLock.lock();
-				resetReceived = true;
-				notEmpty.signalAll();// buffers[bufferIndex.intValue()]
-			} finally {
-				readLock.unlock();
-			}
+//		if (bufferIndex != -1) {
+		try {// synchronized (buffers[bufferIndex.intValue()])
+			readLock.lock();
+			resetReceived = true;
+			notEmpty.signalAll();// buffers[bufferIndex.intValue()]
+		} finally {
+			readLock.unlock();
 		}
+//		}
 	}
 
 	protected final void notifyEof() {
-		if (bufferIndex != -1) {
-			try {// synchronized (buffers[bufferIndex.intValue()])
-				readLock.lock();
-				notEmpty.signalAll();// buffers[bufferIndex.intValue()]
-			} finally {
-				readLock.unlock();
-			}
+//		if (bufferIndex != -1) {
+		try {// synchronized (buffers[bufferIndex.intValue()])
+			readLock.lock();
+			notEmpty.signalAll();// buffers[bufferIndex.intValue()]
+		} finally {
+			readLock.unlock();
 		}
+//		}
 	}
 
 	/*
@@ -498,6 +547,69 @@ public class StreamChannel extends Stream implements ByteBufferHandler {
 			}
 		} finally {
 			readLock.unlock();
+		}
+	}
+
+	public int availableWindowSize() {
+		int size = handler.getLocalSettings().getInitialWindowSize();
+		try {
+			readLock.lock();
+			for (ByteBuffer buffer : deque) {
+				size -= buffer.remaining();
+			}
+//			System.out.println("availableWindowSize:" + size);
+			return size;
+		} finally {
+			readLock.unlock();
+		}
+	}
+
+	public boolean offer(ByteBuffer buffer) throws IOException {
+		System.out.println("stream" + getIdAsString() + " offer " + buffer.remaining());
+		try {
+			readLock.lock();
+			deque.offer(buffer);
+			if (inputClosed) {
+				swallowUnread();
+			}
+			return true;
+		} finally {
+			readLock.unlock();
+		}
+	}
+
+	private final void swallowUnread() throws IOException {
+		System.out.println("swallowUnread");
+		int unreadByteCount = 0;
+		try {
+			readLock.lock();
+			inputClosed = true;
+			if (deque.size() > 0) {
+				for (ByteBuffer buffer : deque) {
+					unreadByteCount += buffer.remaining();
+				}
+//				unreadByteCount = buffers[bufferIndex].position();
+				if (log.isDebugEnabled()) {
+					log.debug(sm.getString("stream.inputBuffer.swallowUnread", Integer.valueOf(unreadByteCount)));
+				}
+//				if (unreadByteCount > 0) {
+//					buffers[bufferIndex].position(0);
+//					buffers[bufferIndex].limit(buffers[bufferIndex].limit() - unreadByteCount);
+//				}
+//				buffers[0] = ByteBuffer.allocate(0);
+//				buffers[1] = ByteBuffer.allocate(0);
+				deque.clear();
+				notEmpty.signalAll();
+			}
+		} finally {
+			readLock.unlock();
+		}
+		// Do this outside of the sync because:
+		// - it doesn't need to be inside the sync
+		// - if inside the sync it can trigger a deadlock
+		// https://markmail.org/message/vbglzkvj6wxlhh3p
+		if (unreadByteCount > 0) {
+			handler.getWriter().writeWindowUpdate(this, unreadByteCount, false);
 		}
 	}
 

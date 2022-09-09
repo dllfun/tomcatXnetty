@@ -38,6 +38,8 @@ class Http2AsyncParser extends Http2Parser {
 	private final SocketChannel channel;
 	private final Http2AsyncUpgradeHandler upgradeHandler;
 	private Throwable error = null;
+	private ByteBuffer header = ByteBuffer.allocate(9);
+	private ByteBuffer framePayload = ByteBuffer.allocate(input.getMaxFrameSize());
 
 	Http2AsyncParser(String connectionId, Input input, Output output, SocketChannel channel,
 			Http2AsyncUpgradeHandler upgradeHandler) {
@@ -53,12 +55,13 @@ class Http2AsyncParser extends Http2Parser {
 	void readConnectionPreface(WebConnection webConnection, StreamChannel stream) throws Http2Exception {
 		byte[] prefaceData = new byte[CLIENT_PREFACE_START.length];
 		ByteBuffer preface = ByteBuffer.wrap(prefaceData);
-		ByteBuffer header = ByteBuffer.allocate(9);
-		ByteBuffer framePaylod = ByteBuffer.allocate(input.getMaxFrameSize());
+		if (framePayload.capacity() < input.getMaxFrameSize()) {
+			framePayload = ByteBuffer.allocate(input.getMaxFrameSize());
+		}
 		PrefaceCompletionHandler handler = new PrefaceCompletionHandler(webConnection, stream, prefaceData, preface,
-				header, framePaylod);
+				header, framePayload);
 		channel.read(BlockingMode.NON_BLOCK, channel.getReadTimeout(), TimeUnit.MILLISECONDS, null, handler, handler,
-				preface, header, framePaylod);
+				preface, header, framePayload);
 	}
 
 	private class PrefaceCompletionHandler extends FrameCompletionHandler {
@@ -111,7 +114,7 @@ class Http2AsyncParser extends Http2Parser {
 				payload.flip();
 				try {
 					if (streamException) {
-						swallow(streamId, payloadSize, false, payload);
+						swallowPayload(streamId, frameTypeId, payloadSize, false, payload);
 					} else {
 						readSettingsFrame(flags, payloadSize, payload);
 					}
@@ -122,6 +125,8 @@ class Http2AsyncParser extends Http2Parser {
 				if (payload.hasRemaining()) {
 					channel.unRead(payload);
 				}
+				header.compact();
+				framePayload.compact();
 			}
 			// Finish processing the connection
 			upgradeHandler.processConnectionCallback(webConnection, stream);
@@ -139,8 +144,9 @@ class Http2AsyncParser extends Http2Parser {
 	@Override
 	protected boolean readFrame(boolean block, FrameType expected) throws IOException, Http2Exception {
 		handleAsyncException();
-		ByteBuffer header = ByteBuffer.allocate(9);
-		ByteBuffer framePayload = ByteBuffer.allocate(input.getMaxFrameSize());
+		if (framePayload.capacity() < input.getMaxFrameSize()) {
+			framePayload = ByteBuffer.allocate(input.getMaxFrameSize());
+		}
 		FrameCompletionHandler handler = new FrameCompletionHandler(expected, header, framePayload);
 		CompletionState state = channel.read(block ? BlockingMode.BLOCK : BlockingMode.NON_BLOCK,
 				channel.getReadTimeout(), TimeUnit.MILLISECONDS, null, handler, handler, header, framePayload);
@@ -173,14 +179,15 @@ class Http2AsyncParser extends Http2Parser {
 		private final FrameType expected;
 		protected final ByteBuffer[] buffers;
 
-		private boolean parsedFrameHeader = false;
-		private boolean validated = false;
-		private CompletionState state = null;
-		protected int payloadSize;
-		protected FrameType frameType;
-		protected int flags;
-		protected int streamId;
-		protected boolean streamException = false;
+		private volatile boolean parsedFrameHeader = false;
+		private volatile boolean validated = false;
+		private volatile CompletionState state = null;
+		protected volatile int payloadSize;
+		protected volatile int frameTypeId;
+		protected volatile FrameType frameType;
+		protected volatile int flags;
+		protected volatile int streamId;
+		protected volatile boolean streamException = false;
 
 		private FrameCompletionHandler(FrameType expected, ByteBuffer... buffers) {
 			this.expected = expected;
@@ -209,7 +216,8 @@ class Http2AsyncParser extends Http2Parser {
 				}
 				parsedFrameHeader = true;
 				payloadSize = ByteUtil.getThreeBytes(frameHeaderBuffer, 0);
-				frameType = FrameType.valueOf(ByteUtil.getOneByte(frameHeaderBuffer, 3));
+				frameTypeId = ByteUtil.getOneByte(frameHeaderBuffer, 3);
+				frameType = FrameType.valueOf(frameTypeId);
 				flags = ByteUtil.getOneByte(frameHeaderBuffer, 4);
 				streamId = ByteUtil.get31Bits(frameHeaderBuffer, 5);
 			}
@@ -246,7 +254,7 @@ class Http2AsyncParser extends Http2Parser {
 					do {
 						continueParsing = false;
 						if (streamException) {
-							swallow(streamId, payloadSize, false, payload);
+							swallowPayload(streamId, frameTypeId, payloadSize, false, payload);
 						} else {
 							switch (frameType) {
 							case DATA:
@@ -280,7 +288,7 @@ class Http2AsyncParser extends Http2Parser {
 								readContinuationFrame(streamId, flags, payloadSize, payload);
 								break;
 							case UNKNOWN:
-								readUnknownFrame(streamId, frameType, flags, payloadSize, payload);
+								readUnknownFrame(streamId, frameTypeId, flags, payloadSize, payload);
 							}
 						}
 						// See if there is a new 9 byte header and continue parsing if possible
@@ -313,6 +321,8 @@ class Http2AsyncParser extends Http2Parser {
 				if (payload.hasRemaining()) {
 					channel.unRead(payload);
 				}
+				header.compact();
+				framePayload.compact();
 			}
 			if (state == CompletionState.DONE) {
 				// The call was not completed inline, so must start reading new frames

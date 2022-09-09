@@ -25,6 +25,7 @@ import org.apache.coyote.ErrorState;
 import org.apache.coyote.Request;
 import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
+import org.apache.coyote.http11.HeadersTooLargeException;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
@@ -166,7 +167,7 @@ public class AjpProcessor extends AbstractProcessor {
 
 	@Override
 	public SocketState serviceInternal() throws IOException {// Channel channel
-		SocketChannel socketChannel = (SocketChannel) channel;
+//		SocketChannel socketChannel = (SocketChannel) channel;
 		// this.channel = socketChannel;
 		RequestInfo rp = exchangeData.getRequestProcessor();
 		rp.setStage(org.apache.coyote.Constants.STAGE_PARSE);
@@ -182,10 +183,14 @@ public class AjpProcessor extends AbstractProcessor {
 			// Parsing the request header
 			if (!parsingHeader()) {
 				if (!getErrorState().isError()) {
-					if (canReleaseProcessor()) {
-						return SocketState.OPEN;
+					if (isHttp2Preface()) {
+						return SocketState.UPGRADING;
 					} else {
-						return SocketState.LONG;
+						if (canReleaseProcessor()) {
+							return SocketState.OPEN;
+						} else {
+							return SocketState.LONG;
+						}
 					}
 				}
 			}
@@ -211,15 +216,17 @@ public class AjpProcessor extends AbstractProcessor {
 				Response response = createResponse();
 				request.setResponse(response);
 				getAdapter().log(request, response, 0);
-			}
+			} else {
 
-			if (getErrorState().isIoAllowed() && protocol.isPaused()) {// && !cping
-				// 503 - Service unavailable
-				exchangeData.setStatus(503);
-				setErrorState(ErrorState.CLOSE_CLEAN, null);
+				if (protocol.isPaused()) {// && !cping
+					// 503 - Service unavailable
+					exchangeData.setStatus(503);
+					setErrorState(ErrorState.CLOSE_CLEAN, null);
+				}
 			}
 //			cping = false;
 
+			// Process the request in the adapter
 			// Process the request in the adapter
 			if (getErrorState().isIoAllowed()) {
 				try {
@@ -228,11 +235,32 @@ public class AjpProcessor extends AbstractProcessor {
 					Response response = createResponse();
 					request.setResponse(response);
 					getAdapter().service(request, response);
+					// Handle when the response was committed before a serious
+					// error occurred. Throwing a ServletException should both
+					// set the status to 500 and set the errorException.
+					// If we fail here, then the response is likely already
+					// committed, so we can't try and set headers.
+					if (repeat() && !getErrorState().isError() && !asyncStateMachine.isAsync()
+							&& statusDropsConnection(this.exchangeData.getStatus())) {
+						setErrorState(ErrorState.CLOSE_CLEAN, null);
+					}
 				} catch (InterruptedIOException e) {
 					setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
+				} catch (HeadersTooLargeException e) {
+					log.error(sm.getString("ajpprocessor.request.process"), e);
+					// The response should not have been committed but check it
+					// anyway to be safe
+					if (exchangeData.isCommitted()) {
+						setErrorState(ErrorState.CLOSE_NOW, e);
+					} else {
+						exchangeData.reset();
+						exchangeData.setStatus(500);
+						setErrorState(ErrorState.CLOSE_CLEAN, e);
+						exchangeData.setResponseHeader("Connection", "close"); // TODO: Remove
+					}
 				} catch (Throwable t) {
 					ExceptionUtils.handleThrowable(t);
-					getLog().error(sm.getString("ajpprocessor.request.process"), t);
+					log.error(sm.getString("ajpprocessor.request.process"), t);
 					// 500 - Internal Server Error
 					exchangeData.setStatus(500);
 					setErrorState(ErrorState.CLOSE_CLEAN, t);
@@ -262,10 +290,10 @@ public class AjpProcessor extends AbstractProcessor {
 				}
 			}
 
-			// Set keep alive timeout for next request
-			socketChannel.setReadTimeout(protocol.getKeepAliveTimeout());
-
-			rp.setStage(org.apache.coyote.Constants.STAGE_KEEPALIVE);
+			if (repeat()) {
+				resetSocketReadTimeout();
+				rp.setStage(org.apache.coyote.Constants.STAGE_KEEPALIVE);
+			}
 
 			sendfileState = processSendfile();
 		}
@@ -293,6 +321,11 @@ public class AjpProcessor extends AbstractProcessor {
 				}
 			}
 		}
+	}
+
+	@Override
+	protected boolean isHttp2Preface() {
+		return false;
 	}
 
 	@Override
@@ -333,6 +366,12 @@ public class AjpProcessor extends AbstractProcessor {
 		} else {
 			return false;
 		}
+	}
+
+	@Override
+	protected void resetSocketReadTimeout() {
+		// Set keep alive timeout for next request
+		channel.setReadTimeout(protocol.getKeepAliveTimeout());
 	}
 
 	@Override

@@ -251,6 +251,7 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 			if (!stream.canWrite()) {
 				return;
 			}
+//			System.out.println("stream" + stream.getIdAsString() + " writeWindowUpdate" + increment);
 			// Build window update frame for stream 0
 			byte[] frame = new byte[13];
 			ByteUtil.setThreeBytes(frame, 0, 4);

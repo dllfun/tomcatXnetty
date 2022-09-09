@@ -44,7 +44,7 @@ public class Http2InputBuffer extends RequestAction {
 		int available = getAvailableInFilters();
 		if (available > 0)
 			return available;
-		return getAvailableInBuffer(param);
+		return getAvailableInChannel(param);
 	}
 
 	@Override
@@ -185,14 +185,14 @@ public class Http2InputBuffer extends RequestAction {
 	}
 
 	// @Override
-	public int getAvailableInBuffer(Object param) {
-		int available = availableInBuffer(Boolean.TRUE.equals(param));
+	public int getAvailableInChannel(Object param) {
+		int available = availableInChannel(Boolean.TRUE.equals(param));
 		// exchangeData.setAvailable(available);
 		return available;
 	}
 
 	// @Override
-	protected final int availableInBuffer(boolean doRead) {
+	protected final int availableInChannel(boolean doRead) {
 		return ((StreamChannel) processor.getChannel()).available();// stream.getInputBuffer()
 	}
 
