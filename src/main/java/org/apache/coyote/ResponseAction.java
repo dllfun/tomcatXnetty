@@ -29,7 +29,7 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 	/**
 	 * Finished flag.
 	 */
-	private boolean responseFinished;
+	protected boolean responseFinished;
 
 	private AbstractProcessor processor;
 
@@ -181,6 +181,16 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 
 	public abstract boolean isReadyForWrite();
 
+	/**
+	 * Flush any pending writes. Used during non-blocking writes to flush any
+	 * remaining data from a previous incomplete write.
+	 *
+	 * @return <code>true</code> if data remains to be flushed at the end of method
+	 *
+	 * @throws IOException If an I/O error occurs while attempting to flush the data
+	 */
+	public abstract boolean flushBufferedWrite() throws IOException;
+
 	// @Override
 	public void commit(boolean finished) {
 		if (!processor.exchangeData.isCommitted()) {
@@ -253,7 +263,7 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 	}
 
 	// @Override
-	public void close() {
+	public void finish() {
 		commit(true);
 		try {
 			finishResponse();
@@ -280,9 +290,13 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 		}
 	}
 
-	public abstract void prepareResponse(boolean finished) throws IOException;
+	public boolean isResponseFinished() {
+		return responseFinished;
+	}
 
-	public abstract void finishResponse() throws IOException;
+	protected abstract void prepareResponse(boolean finished) throws IOException;
+
+	protected abstract void finishResponse() throws IOException;
 
 	// @Override
 	public void closeNow(Object param) {
@@ -303,5 +317,7 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 		lastActiveFilter = -1;
 		responseFinished = false;
 	}
+
+	public abstract void recycle();
 
 }

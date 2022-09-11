@@ -136,7 +136,7 @@ public final class Response {
 	}
 
 	public void close() {
-		this.responseAction.close();
+		this.responseAction.finish();
 	}
 
 	public void closeNow(Object param) {

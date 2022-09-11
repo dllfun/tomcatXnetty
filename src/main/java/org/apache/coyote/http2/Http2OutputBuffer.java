@@ -29,7 +29,6 @@ import org.apache.coyote.ErrorState;
 import org.apache.coyote.ExchangeData;
 import org.apache.coyote.ResponseAction;
 import org.apache.coyote.http11.Constants;
-import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.filters.GzipOutputFilter;
 import org.apache.coyote.http2.filters.BufferedOutputFilter;
 import org.apache.coyote.http2.filters.FlowCtrlOutputFilter;
@@ -53,12 +52,9 @@ public class Http2OutputBuffer extends ResponseAction {
 		ACK_HEADERS = exchangeData.getResponseHeaders();
 	}
 
-//	private final StreamChannel stream;
 	private final ExchangeData exchangeData;
-//	private StreamOutputBuffer streamOutputBuffer;
 	private final AbstractProcessor processor;
 	private SendfileData sendfileData = null;
-//	private SendfileState sendfileState = null;
 	// Flag that indicates that data was left over on a previous
 	// non-blocking write. Once set, this flag stays set until all the data
 	// has been written.
@@ -79,54 +75,14 @@ public class Http2OutputBuffer extends ResponseAction {
 		return sendfileData;
 	}
 
-//	public SendfileState getSendfileState() {
-//		return sendfileState;
-//	}
-
-//	@Override
-//	protected HttpOutputBuffer getBaseOutputBuffer() {
-//		return streamOutputBuffer;
-//	}
-
 	public void setSendfileData(SendfileData sendfileData) {
 		this.sendfileData = sendfileData;
 	}
-
-	/**
-	 * Add a filter at the start of the existing processing chain. Subsequent calls
-	 * to the {@link HttpOutputBuffer} methods of this object will be passed to the
-	 * filter. If appropriate, the filter will then call the same method on the next
-	 * HttpOutputBuffer in the chain until the call reaches the StreamOutputBuffer.
-	 *
-	 * @param filter The filter to add to the start of the processing chain
-	 */
-//	public void addFilter(OutputFilter filter) {
-//		filter.setBuffer(next);
-//		next = filter;
-//	}
-
-//	@Override
-//	public int doWrite(ByteBuffer chunk) throws IOException {
-	// if (!coyoteResponse.isCommitted()) {
-	// stream.getHook().actionCOMMIT();
-	// coyoteResponse.setCommitted(true);
-	// }
-//		return next.doWrite(chunk);
-//	}
-
-//	@Override
-//	public long getBytesWritten() {
-//		return next.getBytesWritten();
-//	}
 
 	@Override
 	public boolean isTrailerFieldsSupported() {
 		return !((StreamChannel) processor.getChannel()).isOutputClosed();
 	}
-
-//	boolean isTrailerFieldsSupported() {
-//		return !endOfStreamSent;
-//	}
 
 	@Override
 	public final boolean isReadyForWrite() {
@@ -194,9 +150,9 @@ public class Http2OutputBuffer extends ResponseAction {
 		if (fileName != null) {
 			sendfileData = new SendfileData();
 			sendfileData.setPath(new File(fileName).toPath());
-			sendfileData.setPos(((Long) ((StreamChannel) processor.getChannel()).getExchangeData()
+			sendfileData.setPos(((Long) processor.getExchangeData()
 					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_START_ATTR)).longValue());
-			sendfileData.setEnd(((Long) ((StreamChannel) processor.getChannel()).getExchangeData()
+			sendfileData.setEnd(((Long) processor.getExchangeData()
 					.getAttribute(org.apache.coyote.Constants.SENDFILE_FILE_END_ATTR)).longValue());
 			sendfileData.setLeft(sendfileData.getEnd() - sendfileData.getPos());
 			sendfileData.setStream(((StreamChannel) processor.getChannel()));
@@ -232,6 +188,31 @@ public class Http2OutputBuffer extends ResponseAction {
 
 	@Override
 	protected boolean flushToChannel(boolean block) throws IOException {
+		return false;
+	}
+
+	@Override
+	public final boolean flushBufferedWrite() throws IOException {
+		if (log.isDebugEnabled()) {
+			log.debug(sm.getString("streamProcessor.flushBufferedWrite.entry",
+					((StreamChannel) processor.getChannel()).getConnectionId(),
+					((StreamChannel) processor.getChannel()).getIdentifier()));
+		}
+		// TODO check
+		if (flush(false)) {//
+			// The buffer wasn't fully flushed so re-register the
+			// stream for write. Note this does not go via the
+			// Response since the write registration state at
+			// that level should remain unchanged. Once the buffer
+			// has been emptied then the code below will call
+			// dispatch() which will enable the
+			// Response to respond to this event.
+			if (((StreamChannel) processor.getChannel()).isReadyForWrite()) {
+				// Unexpected
+				throw new IllegalStateException();
+			}
+			return true;
+		}
 		return false;
 	}
 
@@ -290,21 +271,7 @@ public class Http2OutputBuffer extends ResponseAction {
 		return ((written == 0) && ((StreamChannel) processor.getChannel()).isOutputClosed());
 	}
 
-	// @Override
-	// protected final void flush() throws IOException {
-	// stream.getOutputBuffer().flush();
-	// }
-
-//	@Override
-//	public void end() throws IOException {
-//		next.end();
-//	}
-
-//	@Override
-//	public void flush() throws IOException {
-//		next.flush();
-//	}
-
+	@Override
 	public void recycle() {
 
 	}

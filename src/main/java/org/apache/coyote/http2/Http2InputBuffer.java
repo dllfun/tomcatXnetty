@@ -9,6 +9,7 @@ import org.apache.coyote.RequestAction;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteChunk;
+import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -17,23 +18,15 @@ public class Http2InputBuffer extends RequestAction {
 	private static final Log log = LogFactory.getLog(Stream.class);
 	private static final StringManager sm = StringManager.getManager(Stream.class);
 
-	private AbstractProcessor processor;
-//	private StreamChannel stream;
-	// private StreamInputBuffer streamInputBuffer;
+	private StreamProcessor processor;
 	private ExchangeData exchangeData;
 
-	public Http2InputBuffer(AbstractProcessor processor) {
+	public Http2InputBuffer(StreamProcessor processor) {
 		super(processor);
 		this.processor = processor;
-//		this.stream = stream;
 		this.exchangeData = processor.getExchangeData();
-//		this.streamInputBuffer = stream.getInputBuffer();
 	}
 
-//	@Override
-//	public BufWrapper doRead() throws IOException {
-//		return streamInputBuffer.doRead();
-//	}
 	@Override
 	protected BufWrapper doReadFromChannel() throws IOException {
 		return ((StreamChannel) processor.getChannel()).doRead();
@@ -98,6 +91,29 @@ public class Http2InputBuffer extends RequestAction {
 		// control windows are correctly tracked.
 	}
 
+	@Override
+	public void finish() throws IOException {
+		if (((StreamChannel) processor.getChannel()).getHandler().hasAsyncIO()
+				&& !processor.isContentLengthInconsistent()) {
+			// Need an additional checks for asyncIO as the end of stream
+			// might have been set on the header frame but not processed
+			// yet. Checking for this here so the extra processing only
+			// occurs on the potential error condition rather than on every
+			// request.
+			return;
+		}
+		// The request has been processed but the request body has not been
+		// fully read. This typically occurs when Tomcat rejects an upload
+		// of some form (e.g. PUT or POST). Need to tell the client not to
+		// send any more data but only if a reset has not already been
+		// triggered.
+		StreamException se = new StreamException(
+				sm.getString("streamProcessor.cancel", ((StreamChannel) processor.getChannel()).getConnectionId(),
+						((StreamChannel) processor.getChannel()).getIdentifier()),
+				Http2Error.CANCEL, ((StreamChannel) processor.getChannel()).getIdAsInt());
+		((StreamChannel) processor.getChannel()).getHandler().getWriter().writeStreamReset(se);
+	}
+
 	/**
 	 * Populate the remote host request attribute. Processors (e.g. AJP) that
 	 * populate this from an alternative source should override this method.
@@ -160,7 +176,7 @@ public class Http2InputBuffer extends RequestAction {
 
 	@Override
 	public void actionREQ_SSL_ATTRIBUTE() {
-		((StreamChannel) processor.getChannel()).populateSslRequestAttributes();
+		populateSslRequestAttributes();
 	}
 
 	@Override
@@ -196,21 +212,43 @@ public class Http2InputBuffer extends RequestAction {
 		return ((StreamChannel) processor.getChannel()).available();// stream.getInputBuffer()
 	}
 
-	public void prepareRequest() {
-		// TODO Auto-generated method stub
-
+	/**
+	 * Populate the TLS related request attributes from the {@link SSLSupport}
+	 * instance associated with this processor. Protocols that populate TLS
+	 * attributes from a different source (e.g. AJP) should override this method.
+	 */
+	protected void populateSslRequestAttributes() {
+		try {
+			SSLSupport sslSupport = ((StreamChannel) processor.getChannel()).getHandler().getChannel().getSslSupport();// Stream.this
+			if (sslSupport != null) {
+				Object sslO = sslSupport.getCipherSuite();
+				if (sslO != null) {
+					exchangeData.setAttribute(SSLSupport.CIPHER_SUITE_KEY, sslO);
+				}
+				sslO = sslSupport.getPeerCertificateChain();
+				if (sslO != null) {
+					exchangeData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
+				}
+				sslO = sslSupport.getKeySize();
+				if (sslO != null) {
+					exchangeData.setAttribute(SSLSupport.KEY_SIZE_KEY, sslO);
+				}
+				sslO = sslSupport.getSessionId();
+				if (sslO != null) {
+					exchangeData.setAttribute(SSLSupport.SESSION_ID_KEY, sslO);
+				}
+				sslO = sslSupport.getProtocol();
+				if (sslO != null) {
+					exchangeData.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, sslO);
+				}
+				exchangeData.setAttribute(SSLSupport.SESSION_MGR, sslSupport);
+			}
+		} catch (Exception e) {
+			log.warn(sm.getString("abstractProcessor.socket.ssl"), e);
+		}
 	}
 
-	// @Override
-	// protected final boolean isReadyForRead() {
-	// return stream.getInputBuffer().isReadyForRead();
-	// }
-
-	// @Override
-	// protected final boolean isRequestBodyFullyRead() {
-	// return stream.getInputBuffer().isRequestBodyFullyRead();
-	// }
-
+	@Override
 	public void recycle() {
 
 	}

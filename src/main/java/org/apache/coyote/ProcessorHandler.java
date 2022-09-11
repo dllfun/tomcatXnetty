@@ -183,6 +183,7 @@ public class ProcessorHandler implements Handler {
 						// Assume direct HTTP/2 connection
 						UpgradeProtocol upgradeProtocol = protocol.getUpgradeProtocol("h2c");
 						if (upgradeProtocol != null) {
+							socketChannel.clearCurrentProcessor();
 							protocol.release(processor);
 							processor = upgradeProtocol.getProcessor(socketChannel, protocol.getAdapter());
 							socketChannel.unRead(leftOverInput);
@@ -199,6 +200,7 @@ public class ProcessorHandler implements Handler {
 					} else {
 						System.out.println(socketChannel.getRemotePort() + " upgrade");
 						HttpUpgradeHandler httpUpgradeHandler = upgradeToken.getHttpUpgradeHandler();
+						socketChannel.clearCurrentProcessor();
 						// Release the Http11 processor to be re-used
 						protocol.release(processor);
 						// Create the upgrade processor

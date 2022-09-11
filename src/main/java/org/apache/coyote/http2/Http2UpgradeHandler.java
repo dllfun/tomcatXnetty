@@ -203,6 +203,10 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 
 	}
 
+	public Adapter getAdapter() {
+		return adapter;
+	}
+
 	protected PingManager createPingManager() {
 		return new PingManager();
 	}
@@ -245,7 +249,8 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 			try {
 				// Process the initial settings frame
 				stream = zero.getStream(1, true);
-				String base64Settings = stream.getExchangeData().getRequestHeader(HTTP2_SETTINGS_HEADER);
+				String base64Settings = ((StreamProcessor) stream.getCurrentProcessor()).getExchangeData()
+						.getRequestHeader(HTTP2_SETTINGS_HEADER);
 				byte[] settings = Base64.decodeBase64URLSafe(base64Settings);
 
 				// Settings are only valid on stream 0
@@ -296,9 +301,9 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 	}
 
 	protected void processStreamOnContainerThread(StreamChannel stream) {
-		StreamProcessor streamProcessor = new StreamProcessor(this, stream, adapter);
+//		StreamProcessor streamProcessor = new StreamProcessor(this, stream, adapter);
 		// streamProcessor.setSslSupport(sslSupport);
-		stream.setCurrentProcessor(streamProcessor);
+//		stream.setCurrentProcessor(streamProcessor);
 		protocol.getHttp11Protocol().getHandler().processSocket(stream, SocketEvent.OPEN_READ, true);
 		// processStreamOnContainerThread(stream, streamProcessor,
 		// SocketEvent.OPEN_READ);
@@ -596,12 +601,54 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		return SendfileState.DONE;
 	}
 
-	private void reduceOverheadCount() {
-		overheadCount.decrementAndGet();
+//	private void reduceOverheadCount() {
+//		overheadCount.decrementAndGet();
+//	}
+
+//	private void increaseOverheadCount() {
+//		overheadCount.addAndGet(getProtocol().getOverheadCountFactor());
+//	}
+
+	private void reduceOverheadCount(FrameType frameType) {
+		// A non-overhead frame reduces the overhead count by
+		// Http2Protocol.DEFAULT_OVERHEAD_REDUCTION_FACTOR. A simple browser
+		// request is likely to have one non-overhead frame (HEADERS) and one
+		// overhead frame (REPRIORITISE). With the default settings the overhead
+		// count will reduce by 10 for each simple request.
+		// Requests and responses with bodies will create additional
+		// non-overhead frames, further reducing the overhead count.
+		updateOverheadCount(frameType, Http2Protocol.DEFAULT_OVERHEAD_REDUCTION_FACTOR);
 	}
 
-	private void increaseOverheadCount() {
-		overheadCount.addAndGet(getProtocol().getOverheadCountFactor());
+	private void increaseOverheadCount(FrameType frameType) {
+		// An overhead frame increases the overhead count by
+		// overheadCountFactor. By default, this means an overhead frame
+		// increases the overhead count by 10. A simple browser request is
+		// likely to have one non-overhead frame (HEADERS) and one overhead
+		// frame (REPRIORITISE). With the default settings the overhead count
+		// will reduce by 10 for each simple request.
+		updateOverheadCount(frameType, getProtocol().getOverheadCountFactor());
+	}
+
+	private void increaseOverheadCount(FrameType frameType, int increment) {
+		// Overhead frames that indicate inefficient (and potentially malicious)
+		// use of small frames trigger an increase that is inversely
+		// proportional to size. The default threshold for all three potential
+		// areas for abuse (HEADERS, DATA, WINDOW_UPDATE) is 1024 bytes. Frames
+		// with sizes smaller than this will trigger an increase of
+		// threshold/size.
+		// DATA and WINDOW_UPDATE take an average over the last two non-final
+		// frames to allow for client buffering schemes that can result in some
+		// small DATA payloads.
+		updateOverheadCount(frameType, increment);
+	}
+
+	private void updateOverheadCount(FrameType frameType, int increment) {
+		long newOverheadCount = overheadCount.addAndGet(increment);
+		if (log.isDebugEnabled()) {
+			log.debug(sm.getString("upgradeHandler.overheadChange", zero.getConnectionId(), zero.getIdAsString(),
+					frameType.name(), Long.valueOf(newOverheadCount)));
+		}
 	}
 
 	protected class ChannelWriter {
@@ -781,7 +828,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 						Integer.toString(len)));
 			}
 
-			reduceOverheadCount();
+			reduceOverheadCount(FrameType.DATA);
 
 			// Need to check this now since sending end of stream will change this.
 			boolean writeable = stream.canWrite();
@@ -1020,7 +1067,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		public StreamChannel startRequestBodyFrame(int streamId, int payloadSize, boolean endOfStream)
 				throws Http2Exception {
 			// DATA frames reduce the overhead count ...
-			reduceOverheadCount();
+			reduceOverheadCount(FrameType.DATA);
 
 			// .. but lots of small payloads are inefficient so that will increase
 			// the overhead count unless it is the final DATA frame where small
@@ -1039,7 +1086,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 					average = 1;
 				}
 				if (average < overheadThreshold) {
-					overheadCount.addAndGet(overheadThreshold / average);
+					increaseOverheadCount(FrameType.DATA, overheadThreshold / average);
 				}
 			}
 
@@ -1092,24 +1139,13 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 				stream.checkState(FrameType.HEADERS);
 				stream.receivedStartOfHeaders(headersEndStream);
 				closeIdleStreams(streamId);
-				if (localSettings.getMaxConcurrentStreams() < activeRemoteStreamCount.incrementAndGet()) {
-					setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
-					// Ignoring maxConcurrentStreams increases the overhead count
-					increaseOverheadCount();
-					throw new StreamException(
-							sm.getString("upgradeHandler.tooManyRemoteStreams",
-									Long.toString(localSettings.getMaxConcurrentStreams())),
-							Http2Error.REFUSED_STREAM, streamId);
-				}
-				// Valid new stream reduces the overhead count
-				reduceOverheadCount();
 				return stream.getHeaderEmitter();
 			} else {
 				if (log.isDebugEnabled()) {
 					log.debug(sm.getString("upgradeHandler.noNewStreams", zero.getConnectionId(),
 							Integer.toString(streamId)));
 				}
-				reduceOverheadCount();
+				reduceOverheadCount(FrameType.HEADERS);
 				// Stateless so a static can be used to save on GC
 				return HEADER_SINK;
 			}
@@ -1134,7 +1170,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 						Integer.valueOf(streamId)), Http2Error.PROTOCOL_ERROR);
 			}
 
-			increaseOverheadCount();
+			increaseOverheadCount(FrameType.PRIORITY);
 
 			Stream stream = zero.getStream(streamId, false);
 			if (stream == null) {
@@ -1158,21 +1194,33 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 				if (payloadSize < overheadThreshold) {
 					if (payloadSize == 0) {
 						// Avoid division by zero
-						overheadCount.addAndGet(overheadThreshold);
+						increaseOverheadCount(FrameType.HEADERS, overheadThreshold);
 					} else {
-						overheadCount.addAndGet(overheadThreshold / payloadSize);
+						increaseOverheadCount(FrameType.HEADERS, overheadThreshold / payloadSize);
 					}
 				}
 			}
 		}
 
 		@Override
-		public void headersEnd(int streamId) throws ConnectionException {
+		public void headersEnd(int streamId) throws ConnectionException, StreamException {
 			StreamChannel stream = zero.getStream(streamId, zero.getConnectionState().get().isNewStreamAllowed());
 			if (stream != null) {
 				setMaxProcessedStream(streamId);
 				if (stream.isActive()) {
 					if (stream.receivedEndOfHeaders()) {
+						if (localSettings.getMaxConcurrentStreams() < activeRemoteStreamCount.incrementAndGet()) {
+							setConnectionTimeoutForStreamCount(activeRemoteStreamCount.decrementAndGet());
+							// Ignoring maxConcurrentStreams increases the overhead count
+							increaseOverheadCount(FrameType.HEADERS);
+							throw new StreamException(
+									sm.getString("upgradeHandler.tooManyRemoteStreams",
+											Long.toString(localSettings.getMaxConcurrentStreams())),
+									Http2Error.REFUSED_STREAM, streamId);
+						}
+						// Valid new stream reduces the overhead count
+						reduceOverheadCount(FrameType.HEADERS);
+
 						processStreamOnContainerThread(stream);
 					}
 				}
@@ -1189,13 +1237,17 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		public void receiveReset(int streamId, long errorCode) throws Http2Exception {
 			Stream stream = zero.getStream(streamId, true);
 			stream.checkState(FrameType.RST);
+			boolean active = stream.isActive();
 			stream.receiveReset(errorCode);
+			if (active) {
+				activeRemoteStreamCount.decrementAndGet();
+			}
 		}
 
 		@Override
 		public void receiveSetting(Setting setting, long value) throws ConnectionException {
 
-			increaseOverheadCount();
+			increaseOverheadCount(FrameType.SETTINGS);
 
 			// Possible with empty settings frame
 			if (setting == null) {
@@ -1237,7 +1289,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		@Override
 		public void receivePing(byte[] payload, boolean ack) throws IOException {
 			if (!ack) {
-				increaseOverheadCount();
+				increaseOverheadCount(FrameType.PING);
 			}
 			pingManager.receivePing(payload, ack);
 		}
@@ -1271,7 +1323,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 				// Check for small increments which are inefficient
 				if (average < overheadThreshold) {
 					// The smaller the increment, the larger the overhead
-					overheadCount.addAndGet(overheadThreshold / average);
+					increaseOverheadCount(FrameType.WINDOW_UPDATE, overheadThreshold / average);
 				}
 
 				zero.incrementWindowSize(increment);
@@ -1285,7 +1337,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 //					BacklogTracker tracker = backlogManager.backLogStreams.get(stream);
 					if (increment < stream.getConnectionAllocationRequested()) {
 						// The smaller the increment, the larger the overhead
-						overheadCount.addAndGet(overheadThreshold / average);
+						increaseOverheadCount(FrameType.WINDOW_UPDATE, overheadThreshold / average);
 					}
 				}
 

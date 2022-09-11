@@ -57,6 +57,9 @@ public abstract class AbstractChannel implements Channel {
 		if (currentProcessor == null) {
 			throw new NullPointerException();
 		}
+		if (this.currentProcessor != null && this.currentProcessor != currentProcessor) {
+			throw new IllegalStateException();
+		}
 		if (currentProcessor instanceof Processor) {
 			((Processor) currentProcessor).setChannel(this);
 		}

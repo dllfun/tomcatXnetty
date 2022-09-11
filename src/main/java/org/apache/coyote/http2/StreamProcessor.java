@@ -17,26 +17,28 @@
 package org.apache.coyote.http2;
 
 import java.io.IOException;
-import java.io.InterruptedIOException;
+import java.nio.charset.StandardCharsets;
 import java.security.AccessController;
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
 import java.util.Iterator;
+import java.util.Locale;
 
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.Adapter;
 import org.apache.coyote.ContainerThreadMarker;
 import org.apache.coyote.ErrorState;
 import org.apache.coyote.ExchangeData;
-import org.apache.coyote.Request;
-import org.apache.coyote.RequestInfo;
-import org.apache.coyote.Response;
-import org.apache.coyote.http11.HeadersTooLargeException;
+import org.apache.coyote.RequestAction;
+import org.apache.coyote.ResponseAction;
+import org.apache.coyote.http2.HpackDecoder.HeaderEmitter;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.ExceptionUtils;
+import org.apache.tomcat.util.buf.ByteChunk;
+import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.FastHttpDateFormat;
 import org.apache.tomcat.util.http.MimeHeaders;
+import org.apache.tomcat.util.http.parser.Host;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
@@ -44,42 +46,289 @@ import org.apache.tomcat.util.net.SendfileState;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
-class StreamProcessor extends AbstractProcessor {
+class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
+
+	private static final int HEADER_STATE_START = 0;
+	private static final int HEADER_STATE_PSEUDO = 1;
+	private static final int HEADER_STATE_REGULAR = 2;
+	private static final int HEADER_STATE_TRAILER = 3;
 
 	private static final Log log = LogFactory.getLog(StreamProcessor.class);
 	private static final StringManager sm = StringManager.getManager(StreamProcessor.class);
 
 	private final Http2UpgradeHandler handler;
 	private final StreamChannel stream;
-	private final Http2InputBuffer http2InputBuffer;
-	private final Http2OutputBuffer http2OutputBuffer;
-	private Channel channel;
+	private int headerState = HEADER_STATE_START;
+	private StreamException headerException = null;
+	private StringBuilder cookieHeader = null;
 	private boolean repeat = true;
+	private volatile long contentLengthReceived = 0;
 
 	StreamProcessor(Http2UpgradeHandler handler, StreamChannel stream, Adapter adapter) {
-		super(handler.getProtocol().getHttp11Protocol(), adapter, stream.getExchangeData());
+		this(handler, stream, adapter, new ExchangeData());
+	}
+
+	StreamProcessor(Http2UpgradeHandler handler, StreamChannel stream, Adapter adapter, ExchangeData exchangeData) {
+		super(handler.getProtocol().getHttp11Protocol(), adapter, exchangeData);
 		this.handler = handler;
 		this.stream = stream;
 		this.stream.setCurrentProcessor(this);
-		this.http2InputBuffer = new Http2InputBuffer(this);
-		this.http2OutputBuffer = new Http2OutputBuffer(this);
-		// inputHandler = this.stream.getInputBuffer();
-		// setChannel(stream);
+		this.exchangeData.setSendfile(handler.hasAsyncIO() && handler.getProtocol().getUseSendfile());
+		// this.coyoteResponse.setOutputBuffer(http2OutputBuffer);
+//		this.exchangeData.setResponseData(responseData);
+		this.exchangeData.getProtocol().setString("HTTP/2.0");
+		if (this.exchangeData.getStartTime() < 0) {
+			this.exchangeData.setStartTime(System.currentTimeMillis());
+		}
 	}
 
 	@Override
-	protected Request createRequest() {
-		return new Request(this.exchangeData, this, http2InputBuffer);
+	protected RequestAction createRequestAction() {
+		return new Http2InputBuffer(this);
 	}
 
 	@Override
-	protected Response createResponse() {
-		return new Response(this.exchangeData, this, http2OutputBuffer);
+	protected ResponseAction createResponseAction() {
+		return new Http2OutputBuffer(this);
 	}
 
 	@Override
-	protected void initChannel(Channel channel) {
-		this.channel = channel;
+	protected void onChannelReady(Channel channel) {
+
+	}
+
+	@Override
+	public final void emitHeader(String name, String value) throws HpackException {
+		if (log.isDebugEnabled()) {
+			log.debug(
+					sm.getString("stream.header.debug", stream.getConnectionId(), stream.getIdentifier(), name, value));
+		}
+
+		// Header names must be lower case
+		if (!name.toLowerCase(Locale.US).equals(name)) {
+			throw new HpackException(
+					sm.getString("stream.header.case", stream.getConnectionId(), stream.getIdentifier(), name));
+		}
+
+		if ("connection".equals(name)) {
+			throw new HpackException(
+					sm.getString("stream.header.connection", stream.getConnectionId(), stream.getIdentifier()));
+		}
+
+		if ("te".equals(name)) {
+			if (!"trailers".equals(value)) {
+				throw new HpackException(
+						sm.getString("stream.header.te", stream.getConnectionId(), stream.getIdentifier(), value));
+			}
+		}
+
+		if (headerException != null) {
+			// Don't bother processing the header since the stream is going to
+			// be reset anyway
+			return;
+		}
+
+		if (name.length() == 0) {
+			throw new HpackException(
+					sm.getString("stream.header.empty", stream.getConnectionId(), stream.getIdentifier()));
+		}
+
+		boolean pseudoHeader = name.charAt(0) == ':';
+
+		if (pseudoHeader && headerState != HEADER_STATE_PSEUDO) {
+			headerException = new StreamException(sm.getString("stream.header.unexpectedPseudoHeader",
+					stream.getConnectionId(), stream.getIdentifier(), name), Http2Error.PROTOCOL_ERROR,
+					stream.getIdAsInt());
+			// No need for further processing. The stream will be reset.
+			return;
+		}
+
+		if (headerState == HEADER_STATE_PSEUDO && !pseudoHeader) {
+			headerState = HEADER_STATE_REGULAR;
+		}
+
+		switch (name) {
+		case ":method": {
+			if (exchangeData.getMethod().isNull()) {
+				exchangeData.getMethod().setString(value);
+			} else {
+				throw new HpackException(sm.getString("stream.header.duplicate", stream.getConnectionId(),
+						stream.getIdentifier(), ":method"));
+			}
+			break;
+		}
+		case ":scheme": {
+			if (exchangeData.getScheme().isNull()) {
+				exchangeData.getScheme().setString(value);
+			} else {
+				throw new HpackException(sm.getString("stream.header.duplicate", stream.getConnectionId(),
+						stream.getIdentifier(), ":scheme"));
+			}
+			break;
+		}
+		case ":path": {
+			if (!exchangeData.getRequestURI().isNull()) {
+				throw new HpackException(sm.getString("stream.header.duplicate", stream.getConnectionId(),
+						stream.getIdentifier(), ":path"));
+			}
+			if (value.length() == 0) {
+				throw new HpackException(
+						sm.getString("stream.header.noPath", stream.getConnectionId(), stream.getIdentifier()));
+			}
+			int queryStart = value.indexOf('?');
+			String uri;
+			if (queryStart == -1) {
+				uri = value;
+			} else {
+				uri = value.substring(0, queryStart);
+				String query = value.substring(queryStart + 1);
+				exchangeData.getQueryString().setString(query);
+			}
+			// Bug 61120. Set the URI as bytes rather than String so:
+			// - any path parameters are correctly processed
+			// - the normalization security checks are performed that prevent
+			// directory traversal attacks
+			byte[] uriBytes = uri.getBytes(StandardCharsets.ISO_8859_1);
+			exchangeData.getRequestURI().setBytes(uriBytes, 0, uriBytes.length);
+			break;
+		}
+		case ":authority": {
+			if (exchangeData.getServerName().isNull()) {
+				int i;
+				try {
+					i = Host.parse(value);
+				} catch (IllegalArgumentException iae) {
+					// Host value invalid
+					throw new HpackException(sm.getString("stream.header.invalid", stream.getConnectionId(),
+							stream.getIdentifier(), ":authority", value));
+				}
+				if (i > -1) {
+					exchangeData.getServerName().setString(value.substring(0, i));
+					exchangeData.setServerPort(Integer.parseInt(value.substring(i + 1)));
+				} else {
+					exchangeData.getServerName().setString(value);
+				}
+			} else {
+				throw new HpackException(sm.getString("stream.header.duplicate", stream.getConnectionId(),
+						stream.getIdentifier(), ":authority"));
+			}
+			break;
+		}
+		case "cookie": {
+			// Cookie headers need to be concatenated into a single header
+			// See RFC 7540 8.1.2.5
+			if (cookieHeader == null) {
+				cookieHeader = new StringBuilder();
+			} else {
+				cookieHeader.append("; ");
+			}
+			cookieHeader.append(value);
+			break;
+		}
+		default: {
+			if (headerState == HEADER_STATE_TRAILER && !handler.getProtocol().isTrailerHeaderAllowed(name)) {
+				break;
+			}
+			if ("expect".equals(name) && "100-continue".equals(value)) {
+				exchangeData.setExpectation(true);
+			}
+			if (pseudoHeader) {
+				headerException = new StreamException(sm.getString("stream.header.unknownPseudoHeader",
+						stream.getConnectionId(), stream.getIdentifier(), name), Http2Error.PROTOCOL_ERROR,
+						stream.getIdAsInt());
+			}
+
+			if (headerState == HEADER_STATE_TRAILER) {
+				// HTTP/2 headers are already always lower case
+				exchangeData.getTrailerFields().put(name, value);
+			} else {
+				exchangeData.getRequestHeaders().addValue(name).setString(value);
+			}
+		}
+		}
+	}
+
+	// @Override
+	public void receivedStartOfHeadersInternal(boolean headersEndStream) throws ConnectionException {
+		if (headerState == HEADER_STATE_START) {
+			headerState = HEADER_STATE_PSEUDO;
+			handler.getHpackDecoder().setMaxHeaderCount(handler.getProtocol().getMaxHeaderCount());
+			handler.getHpackDecoder().setMaxHeaderSize(handler.getProtocol().getMaxHeaderSize());
+		} else if (headerState == HEADER_STATE_PSEUDO || headerState == HEADER_STATE_REGULAR) {
+			// Trailer headers MUST include the end of stream flag
+			if (headersEndStream) {
+				headerState = HEADER_STATE_TRAILER;
+				handler.getHpackDecoder().setMaxHeaderCount(handler.getProtocol().getMaxTrailerCount());
+				handler.getHpackDecoder().setMaxHeaderSize(handler.getProtocol().getMaxTrailerSize());
+			} else {
+				throw new ConnectionException(sm.getString("stream.trailerHeader.noEndOfStream",
+						stream.getConnectionId(), stream.getIdentifier()), Http2Error.PROTOCOL_ERROR);
+			}
+		}
+	}
+
+	// @Override
+	public boolean receivedEndOfHeadersInternal() throws ConnectionException {
+		if (exchangeData.getMethod().isNull() || exchangeData.getScheme().isNull()
+				|| exchangeData.getRequestURI().isNull()) {
+			throw new ConnectionException(
+					sm.getString("stream.header.required", stream.getConnectionId(), stream.getIdentifier()),
+					Http2Error.PROTOCOL_ERROR);
+		}
+		// Cookie headers need to be concatenated into a single header
+		// See RFC 7540 8.1.2.5
+		// Can only do this once the headers are fully received
+		if (cookieHeader != null) {
+			exchangeData.getRequestHeaders().addValue("cookie").setString(cookieHeader.toString());
+		}
+		return headerState == HEADER_STATE_REGULAR || headerState == HEADER_STATE_PSEUDO;
+	}
+
+	@Override
+	public void setHeaderException(StreamException streamException) {
+		if (headerException == null) {
+			headerException = streamException;
+		}
+	}
+
+	@Override
+	public void validateHeaders() throws StreamException {
+		if (headerException == null) {
+			return;
+		}
+
+		throw headerException;
+	}
+
+//	@Override
+	protected void receivedDataInternal(int payloadSize) throws ConnectionException {
+		contentLengthReceived += payloadSize;
+		long contentLengthHeader = exchangeData.getRequestContentLengthLong();
+		if (contentLengthHeader > -1 && contentLengthReceived > contentLengthHeader) {
+			throw new ConnectionException(
+					sm.getString("stream.header.contentLength", stream.getConnectionId(), stream.getIdentifier(),
+							Long.valueOf(contentLengthHeader), Long.valueOf(contentLengthReceived)),
+					Http2Error.PROTOCOL_ERROR);
+		}
+	}
+
+//	@Override
+	protected void receivedEndOfStreamInternal() throws ConnectionException {
+//		System.out.println(
+//		"conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " receivedEndOfStream");
+		if (isContentLengthInconsistent()) {
+			throw new ConnectionException(sm.getString("stream.header.contentLength", stream.getConnectionId(),
+					stream.getIdentifier(), Long.valueOf(exchangeData.getRequestContentLengthLong()),
+					Long.valueOf(contentLengthReceived)), Http2Error.PROTOCOL_ERROR);
+		}
+	}
+
+	final boolean isContentLengthInconsistent() {
+		long contentLengthHeader = exchangeData.getRequestContentLengthLong();
+		if (contentLengthHeader > -1 && contentLengthReceived != contentLengthHeader) {
+			return true;
+		}
+		return false;
 	}
 
 	final void processOld(SocketEvent event) {
@@ -134,7 +383,7 @@ class StreamProcessor extends AbstractProcessor {
 	}
 
 	final void addOutputFilter(int id) {
-		http2OutputBuffer.addActiveFilter(id);
+		responseAction.addActiveFilter(id);
 	}
 
 	// Static so it can be used by Stream to build the MimeHeaders required for
@@ -200,21 +449,6 @@ class StreamProcessor extends AbstractProcessor {
 			headers.addValue("date").setString(FastHttpDateFormat.getCurrentDate());
 		}
 	}
-
-//	@Override
-//	public void processSocketEvent(SocketEvent event, boolean dispatch) {
-//		if (dispatch) {
-//			handler.processStreamOnContainerThread(stream, this, event);
-//		} else {
-//			handler.getProtocol().getHttp11Protocol().getHandler().processSocket(stream, event, dispatch);
-//			// this.process(event);
-//		}
-//	}
-
-//	@Override
-//	protected final boolean isReadyForWrite() {
-//		return stream.isReadyForWrite();
-//	}
 
 	@Override
 	protected final void executeDispatches() {
@@ -307,11 +541,6 @@ class StreamProcessor extends AbstractProcessor {
 		}
 	}
 
-//	@Override
-//	protected boolean isTrailerFieldsSupported() {
-//		return stream.isTrailerFieldsSupported();
-//	}
-
 	@Override
 	protected boolean repeat() {
 		if (repeat) {
@@ -319,158 +548,6 @@ class StreamProcessor extends AbstractProcessor {
 			return true;
 		} else {
 			return false;
-		}
-	}
-
-	@Override
-	public final SocketState serviceInternal() throws IOException {// Channel channel
-		RequestInfo rp = exchangeData.getRequestProcessor();
-		rp.setStage(org.apache.coyote.Constants.STAGE_PARSE);
-
-		SendfileState sendfileState = SendfileState.DONE;
-		// setChannel(channel);
-
-		while (!getErrorState().isError() && repeat() && !asyncStateMachine.isAsync() && !isUpgrade()
-				&& sendfileState == SendfileState.DONE && !protocol.isPaused()) {
-
-			if (!parsingHeader()) {
-				if (!getErrorState().isError()) {
-					if (isHttp2Preface()) {
-						return SocketState.UPGRADING;
-					} else {
-						if (canReleaseProcessor()) {
-							return SocketState.OPEN;
-						} else {
-							return SocketState.LONG;
-						}
-					}
-				}
-			}
-
-			if (getErrorState().isIoAllowed()) {
-				// Setting up filters, and parse some request headers
-				rp.setStage(org.apache.coyote.Constants.STAGE_PREPARE);
-				try {
-					http2InputBuffer.prepareRequest();
-				} catch (Throwable t) {
-					ExceptionUtils.handleThrowable(t);
-					if (log.isDebugEnabled()) {
-						getLog().debug(sm.getString("ajpprocessor.request.prepare"), t);
-					}
-					// 500 - Internal Server Error
-					exchangeData.setStatus(500);
-					setErrorState(ErrorState.CLOSE_CLEAN, t);
-				}
-			}
-
-			if (!getErrorState().isIoAllowed()) {
-				Request request = createRequest();
-				Response response = createResponse();
-				request.setResponse(response);
-				getAdapter().log(request, response, 0);
-			} else {
-
-				if (protocol.isPaused()) {// && !cping
-					// 503 - Service unavailable
-					exchangeData.setStatus(503);
-					setErrorState(ErrorState.CLOSE_CLEAN, null);
-				}
-			}
-
-			// Process the request in the adapter
-			if (getErrorState().isIoAllowed()) {
-				try {
-					rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
-					Request request = createRequest();
-					Response response = createResponse();
-					request.setResponse(response);
-					getAdapter().service(request, response);
-					// Handle when the response was committed before a serious
-					// error occurred. Throwing a ServletException should both
-					// set the status to 500 and set the errorException.
-					// If we fail here, then the response is likely already
-					// committed, so we can't try and set headers.
-					if (repeat() && !getErrorState().isError() && !asyncStateMachine.isAsync()
-							&& statusDropsConnection(this.exchangeData.getStatus())) {
-						setErrorState(ErrorState.CLOSE_CLEAN, null);
-					}
-				} catch (InterruptedIOException e) {
-					setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
-				} catch (HeadersTooLargeException e) {
-					log.error(sm.getString("streamprocessor.request.process"), e);
-					// The response should not have been committed but check it
-					// anyway to be safe
-					if (exchangeData.isCommitted()) {
-						setErrorState(ErrorState.CLOSE_NOW, e);
-					} else {
-						exchangeData.reset();
-						exchangeData.setStatus(500);
-						setErrorState(ErrorState.CLOSE_CLEAN, e);
-						exchangeData.setResponseHeader("Connection", "close"); // TODO: Remove
-					}
-				} catch (Throwable t) {
-					ExceptionUtils.handleThrowable(t);
-					log.error(sm.getString("streamprocessor.request.process"), t);
-					// 500 - Internal Server Error
-					exchangeData.setStatus(500);
-					setErrorState(ErrorState.CLOSE_CLEAN, t);
-					Request request = createRequest();
-					Response response = createResponse();
-					request.setResponse(response);
-					getAdapter().log(request, response, 0);
-				}
-			}
-
-			rp.setStage(org.apache.coyote.Constants.STAGE_ENDINPUT);
-			if (!asyncStateMachine.isAsync()) {
-				// If this is an async request then the request ends when it has
-				// been completed. The AsyncContext is responsible for calling
-				// endRequest() in that case.
-				endRequest();
-			}
-			rp.setStage(org.apache.coyote.Constants.STAGE_ENDOUTPUT);
-
-			if (getErrorState().isError()) {
-				exchangeData.setStatus(500);
-			}
-
-			if ((!asyncStateMachine.isAsync() && !isUpgrade()) || getErrorState().isError()) {
-				exchangeData.updateCounters();
-				if (getErrorState().isIoAllowed()) {
-					nextRequest();
-				}
-			}
-
-			if (repeat()) {
-				resetSocketReadTimeout();
-				rp.setStage(org.apache.coyote.Constants.STAGE_KEEPALIVE);
-			}
-
-			sendfileState = processSendfile();
-		}
-
-		rp.setStage(org.apache.coyote.Constants.STAGE_ENDED);
-
-		if (getErrorState().isError() || (protocol.isPaused() && !asyncStateMachine.isAsync())) {
-			return SocketState.CLOSED;
-		} else if (asyncStateMachine.isAsync()) {
-			return SocketState.SUSPENDED;
-		} else if (isUpgrade()) {
-			return SocketState.UPGRADING;
-		} else {
-			if (sendfileState == SendfileState.PENDING) {
-				return SocketState.SENDFILE;
-			} else {
-				if (repeat()) {
-//					if (readComplete) {
-					return SocketState.OPEN;
-//					} else {
-//						return SocketState.LONG;
-//					}
-				} else {
-					return SocketState.CLOSED;
-				}
-			}
 		}
 	}
 
@@ -490,6 +567,46 @@ class StreamProcessor extends AbstractProcessor {
 	}
 
 	@Override
+	public void prepareRequest() {
+		if (exchangeData.getServerName().isNull()) {
+			MessageBytes hostValueMB = exchangeData.getRequestHeaders().getUniqueValue("host");
+			if (hostValueMB == null) {
+				throw new IllegalArgumentException();
+			}
+			// This processing expects bytes. Server push will have used a String
+			// to trigger a conversion if required.
+			hostValueMB.toBytes();
+			ByteChunk valueBC = hostValueMB.getByteChunk();
+			byte[] valueB = valueBC.getBytes();
+			int valueL = valueBC.getLength();
+			int valueS = valueBC.getStart();
+
+			int colonPos = Host.parse(hostValueMB);
+			if (colonPos != -1) {
+				int port = 0;
+				for (int i = colonPos + 1; i < valueL; i++) {
+					char c = (char) valueB[i + valueS];
+					if (c < '0' || c > '9') {
+						throw new IllegalArgumentException();
+					}
+					port = port * 10 + c - '0';
+				}
+				exchangeData.setServerPort(port);
+
+				// Only need to copy the host name up to the :
+				valueL = colonPos;
+			}
+
+			// Extract the host name
+			char[] hostNameC = new char[valueL];
+			for (int i = 0; i < valueL; i++) {
+				hostNameC[i] = (char) valueB[i + valueS];
+			}
+			exchangeData.getServerName().setChars(hostNameC, 0, valueL);
+		}
+	}
+
+	@Override
 	protected void resetSocketReadTimeout() {
 
 	}
@@ -499,8 +616,8 @@ class StreamProcessor extends AbstractProcessor {
 //		openSocket = inputBuffer.keepAlive;
 		// Done is equivalent to sendfile not being used
 		SendfileState result = SendfileState.DONE;
-		SendfileData sendfileData = http2OutputBuffer.getSendfileData();
-		http2OutputBuffer.setSendfileData(null);
+		SendfileData sendfileData = ((Http2OutputBuffer) responseAction).getSendfileData();
+		((Http2OutputBuffer) responseAction).setSendfileData(null);
 		// Do sendfile as needed: add socket to sendfile and end
 		if (sendfileData != null && !getErrorState().isError()) {
 			result = stream.getHandler().processSendfile(sendfileData);
@@ -521,39 +638,15 @@ class StreamProcessor extends AbstractProcessor {
 	}
 
 	@Override
-	protected final boolean flushBufferedWrite() throws IOException {
-		if (log.isDebugEnabled()) {
-			log.debug(sm.getString("streamProcessor.flushBufferedWrite.entry", stream.getConnectionId(),
-					stream.getIdentifier()));
-		}
-		// TODO check
-		if (http2OutputBuffer.flush(false)) {//
-			// The buffer wasn't fully flushed so re-register the
-			// stream for write. Note this does not go via the
-			// Response since the write registration state at
-			// that level should remain unchanged. Once the buffer
-			// has been emptied then the code below will call
-			// dispatch() which will enable the
-			// Response to respond to this event.
-			if (stream.isReadyForWrite()) {
-				// Unexpected
-				throw new IllegalStateException();
-			}
-			return true;
-		}
-		return false;
-	}
-
-	@Override
-	protected final SocketState dispatchEndRequest() throws IOException {
-		endRequest();
+	protected final SocketState dispatchFinishActions() throws IOException {
+		finishActions();
 		return SocketState.CLOSED;
 	}
 
 	@Override
-	protected void endRequest() throws IOException {
+	protected void finishActions() throws IOException {
 		if (!stream.isInputFinished() && getErrorState().isIoAllowed()) {
-			if (handler.hasAsyncIO() && !stream.isContentLengthInconsistent()) {
+			if (handler.hasAsyncIO() && !isContentLengthInconsistent()) {
 				// Need an additional checks for asyncIO as the end of stream
 				// might have been set on the header frame but not processed
 				// yet. Checking for this here so the extra processing only
@@ -571,7 +664,7 @@ class StreamProcessor extends AbstractProcessor {
 					Http2Error.CANCEL, stream.getIdAsInt());
 			handler.getWriter().writeStreamReset(se);
 		}
-		http2OutputBuffer.close();
+		responseAction.finish();
 	}
 
 	@Override
@@ -596,8 +689,8 @@ class StreamProcessor extends AbstractProcessor {
 	@Override
 	protected void nextRequestInternal() {
 		// TODO Auto-generated method stub
-		http2InputBuffer.recycle();
-		http2OutputBuffer.recycle();
+		requestAction.recycle();
+		responseAction.recycle();
 	}
 
 	@Override
@@ -606,9 +699,8 @@ class StreamProcessor extends AbstractProcessor {
 		// Clear fields that can be cleared to aid GC and trigger NPEs if this
 		// is reused
 		// super.recycle();
-		channel = null;
-		http2InputBuffer.recycle();
-		http2OutputBuffer.recycle();
+		requestAction.recycle();
+		responseAction.recycle();
 	}
 
 	@Override

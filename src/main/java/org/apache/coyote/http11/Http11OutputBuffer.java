@@ -58,10 +58,6 @@ public class Http11OutputBuffer extends ResponseAction {
 
 	private Http11Processor processor;
 
-	// private AsyncState asyncState;
-
-	private Http11InputBuffer inputBuffer;
-
 	/**
 	 * Associated Coyote response.
 	 */
@@ -71,11 +67,6 @@ public class Http11OutputBuffer extends ResponseAction {
 	 * The buffer used for header composition.
 	 */
 	protected BufWrapper headerBuffer;
-
-	/**
-	 * Underlying output buffer.
-	 */
-//	protected HttpOutputBuffer channelOutputBuffer;
 
 	/**
 	 * Bytes written to client for the current request
@@ -91,17 +82,13 @@ public class Http11OutputBuffer extends ResponseAction {
 	 */
 	private SendfileDataBase sendfileData = null;
 
-	protected Http11OutputBuffer(Http11Processor processor, int headerBufferSize) {
+	protected Http11OutputBuffer(Http11Processor processor) {
 		super(processor);
 		this.processor = processor;
 
-		// this.asyncState = processor.getAsyncStateMachine();
-
 		this.exchangeData = processor.getExchangeData();
 
-		this.headerBufferSize = headerBufferSize;
-
-//		this.channelOutputBuffer = new SocketOutputBuffer();
+		this.headerBufferSize = processor.getProtocol().getMaxHttpHeaderSize();
 
 		// Create and add the identity filters.
 		addFilter(new IdentityOutputFilter(processor));
@@ -115,9 +102,9 @@ public class Http11OutputBuffer extends ResponseAction {
 
 	}
 
-	public void setInputBuffer(Http11InputBuffer inputBuffer) {
-		this.inputBuffer = inputBuffer;
-	}
+//	public void setInputBuffer(Http11InputBuffer inputBuffer) {
+//		this.inputBuffer = inputBuffer;
+//	}
 
 	public SendfileDataBase getSendfileData() {
 		return sendfileData;
@@ -128,13 +115,6 @@ public class Http11OutputBuffer extends ResponseAction {
 	}
 
 	// ------------------------------------------------------------- Properties
-
-	// --------------------------------------------------- OutputBuffer Methods
-
-//	@Override
-//	protected HttpOutputBuffer getBaseOutputBuffer() {
-//		return channelOutputBuffer;
-//	}
 
 	public void init(SocketChannel channel) {
 		// this.channel = channel;
@@ -162,7 +142,7 @@ public class Http11OutputBuffer extends ResponseAction {
 	@Override
 	public boolean isTrailerFieldsSupported() {
 		// Request must be HTTP/1.1 to support trailer fields
-		if (!inputBuffer.http11) {
+		if (!processor.http11) {
 			return false;
 		}
 
@@ -198,7 +178,7 @@ public class Http11OutputBuffer extends ResponseAction {
 
 		// OutputFilter[] outputFilters = this.getFilters();
 
-		if (inputBuffer.http09 == true) {
+		if (processor.http09 == true) {
 			// HTTP/0.9
 			this.addActiveFilter(Constants.IDENTITY_FILTER);
 			exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_FIXEDLENGTH);
@@ -258,7 +238,7 @@ public class Http11OutputBuffer extends ResponseAction {
 		boolean connectionClosePresent = Http11Processor.isConnectionToken(headers, Constants.CLOSE);
 		// System.out.println("http11:" + http11);
 		// System.out.println("contentLength:" + contentLength);
-		if (inputBuffer.http11 && exchangeData.getTrailerFieldsSupplier() != null) {
+		if (processor.http11 && exchangeData.getTrailerFieldsSupplier() != null) {
 			// If trailer fields are set, always use chunking
 			this.addActiveFilter(Constants.CHUNKED_FILTER);
 //			inputBuffer.contentDelimitation = true;
@@ -274,7 +254,7 @@ public class Http11OutputBuffer extends ResponseAction {
 			// HTTP 1.1 then we chunk unless we have a Connection: close header
 			// System.out.println("entityBody:" + entityBody);
 			// System.out.println("connectionClosePresent:" + connectionClosePresent);
-			if (inputBuffer.http11 && entityBody && !connectionClosePresent) {
+			if (processor.http11 && entityBody && !connectionClosePresent) {
 				this.addActiveFilter(Constants.CHUNKED_FILTER);
 //				inputBuffer.contentDelimitation = true;
 				exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_CHUNKED);
@@ -283,7 +263,7 @@ public class Http11OutputBuffer extends ResponseAction {
 				if ((entityBody) && (exchangeData.getResponseBodyType() == -1)) {// !inputBuffer.contentDelimitation
 					// Mark as close the connection after the request, and add the
 					// connection: close header
-					inputBuffer.keepAlive = false;
+					processor.keepAlive = false;
 				}
 				this.addActiveFilter(Constants.IDENTITY_FILTER);
 				exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_FIXEDLENGTH);
@@ -310,17 +290,17 @@ public class Http11OutputBuffer extends ResponseAction {
 
 		// If we know that the request is bad this early, add the
 		// Connection: close header.
-		if (inputBuffer.keepAlive && Http11Processor.statusDropsConnection(statusCode)) {
-			inputBuffer.keepAlive = false;
+		if (processor.keepAlive && Http11Processor.statusDropsConnection(statusCode)) {
+			processor.keepAlive = false;
 		}
 		// System.out.println("keepAlive:" + keepAlive);
-		if (!inputBuffer.keepAlive) {
+		if (!processor.keepAlive) {
 			// Avoid adding the close header twice
 			if (!connectionClosePresent) {
 				headers.addValue(Constants.CONNECTION).setString(Constants.CLOSE);
 			}
 		} else if (!processor.getErrorState().isError()) {
-			if (!inputBuffer.http11) {
+			if (!processor.http11) {
 				headers.addValue(Constants.CONNECTION).setString(Constants.KEEP_ALIVE_HEADER_VALUE_TOKEN);
 			}
 
@@ -335,7 +315,7 @@ public class Http11OutputBuffer extends ResponseAction {
 						String value = "timeout=" + keepAliveTimeout / 1000L;
 						headers.setValue(Constants.KEEP_ALIVE_HEADER_NAME).setString(value);
 
-						if (inputBuffer.http11) {
+						if (processor.http11) {
 							// Append if there is already a Connection header,
 							// else create the header
 							MessageBytes connectionHeaderValue = headers.getValue(Constants.CONNECTION);
@@ -413,7 +393,7 @@ public class Http11OutputBuffer extends ResponseAction {
 		// Send a 100 status back if it makes sense (response not committed
 		// yet, and client specified an expectation for 100-continue)
 		if (!exchangeData.isCommitted() && exchangeData.hasExpectation()) {
-			inputBuffer.setSwallowInput(true);
+			processor.getRequestAction().setSwallowInput(true);
 			try {
 				this.writeAckAndFlush();
 			} catch (IOException e) {
@@ -677,6 +657,24 @@ public class Http11OutputBuffer extends ResponseAction {
 		((SocketChannel) processor.getChannel()).registerWriteInterest();
 	}
 
+	@Override
+	public boolean flushBufferedWrite() throws IOException {
+		if (hasDataToWrite()) {
+			if (flushBuffer(false)) {
+				// The buffer wasn't fully flushed so re-register the
+				// socket for write. Note this does not go via the
+				// Response since the write registration state at
+				// that level should remain unchanged. Once the buffer
+				// has been emptied then the code below will call
+				// Adaptor.asyncDispatch() which will enable the
+				// Response to respond to this event.
+				registerWriteInterest();
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/**
 	 * Write chunk.
 	 */
@@ -751,6 +749,7 @@ public class Http11OutputBuffer extends ResponseAction {
 	/**
 	 * Recycle the output buffer. This should be called when closing the connection.
 	 */
+	@Override
 	public void recycle() {
 		nextRequest();
 		// channel = null;
@@ -762,12 +761,4 @@ public class Http11OutputBuffer extends ResponseAction {
 		}
 	}
 
-	// ------------------------------------------ SocketOutputBuffer Inner Class
-
-	/**
-	 * This class is an output buffer which will write data to a socket.
-	 */
-//	protected class SocketOutputBuffer implements HttpOutputBuffer {
-
-//	}
 }

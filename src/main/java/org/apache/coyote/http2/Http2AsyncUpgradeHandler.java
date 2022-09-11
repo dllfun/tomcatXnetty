@@ -150,7 +150,8 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 			// Actually perform the write
 			int frameSize = Integer.min(localSettings.getMaxFrameSize(), (int) sendfile.getConnectionReservation());
 			boolean finished = (frameSize == sendfile.getLeft())
-					&& sendfile.getStream().getExchangeData().getTrailerFieldsSupplier() == null;
+					&& ((StreamProcessor) sendfile.getStream().getCurrentProcessor()).getExchangeData()
+							.getTrailerFieldsSupplier() == null;
 
 			// Need to check this now since sending end of stream will change this.
 			boolean writeable = sendfile.getStream().canWrite();
@@ -384,7 +385,8 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 				// streamReservation
 				int frameSize = Integer.min(localSettings.getMaxFrameSize(), (int) sendfile.getConnectionReservation());
 				boolean finished = (frameSize == sendfile.getLeft())
-						&& sendfile.getStream().getExchangeData().getTrailerFields() == null;
+						&& ((StreamProcessor) sendfile.getStream().getCurrentProcessor()).getExchangeData()
+								.getTrailerFields() == null;
 
 				// Need to check this now since sending end of stream will change this.
 				boolean writable = sendfile.getStream().canWrite();

@@ -250,6 +250,8 @@ public abstract class RequestAction implements InputReader {
 
 	public abstract void disableSwallowRequest();
 
+	public abstract void finish() throws IOException;
+
 	public abstract void actionREQ_HOST_ADDR_ATTRIBUTE();
 
 	public abstract void actionREQ_HOST_ATTRIBUTE();
@@ -377,5 +379,7 @@ public abstract class RequestAction implements InputReader {
 		lastActiveFilter = -1;
 		swallowInput = true;
 	}
+
+	public abstract void recycle();
 
 }

@@ -813,7 +813,7 @@ class Http2Parser {
 
 		void headersContinue(int payloadSize, boolean endOfHeaders);
 
-		void headersEnd(int streamId) throws ConnectionException;
+		void headersEnd(int streamId) throws ConnectionException, StreamException;
 
 		// Priority frames (also headers)
 		void reprioritise(int streamId, int parentStreamId, boolean exclusive, int weight) throws Http2Exception;

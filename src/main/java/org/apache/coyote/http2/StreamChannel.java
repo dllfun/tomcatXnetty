@@ -2,12 +2,8 @@ package org.apache.coyote.http2;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.Locale;
-import java.util.concurrent.BlockingDeque;
-import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
@@ -17,23 +13,17 @@ import org.apache.coyote.ExchangeData;
 import org.apache.coyote.http2.HpackDecoder.HeaderEmitter;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.http.MimeHeaders;
-import org.apache.tomcat.util.http.parser.Host;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
-import io.netty.buffer.ByteBuf;
-
 public class StreamChannel extends Stream {
 
-	private static final int HEADER_STATE_START = 0;
-	private static final int HEADER_STATE_PSEUDO = 1;
-	private static final int HEADER_STATE_REGULAR = 2;
-	private static final int HEADER_STATE_TRAILER = 3;
+	private static final Integer HTTP_UPGRADE_STREAM = Integer.valueOf(1);
 
 	// State machine would be too much overhead
-	private int headerState = HEADER_STATE_START;
-	private StreamException headerException = null;
-	private StringBuilder cookieHeader = null;
+
+	// TODO: null these when finished to reduce memory used by closed stream
+	// protected final ExchangeData exchangeData;
 
 	// private volatile AbstractProcessor processor;
 	// private final SocketChannel channel;
@@ -71,224 +61,79 @@ public class StreamChannel extends Stream {
 	private volatile boolean inputClosed = false;
 	private volatile boolean outputClosed = false;
 	protected volatile StreamException resetException = null;
+
 //	private volatile boolean endOfStreamSent = false;
 
 	public StreamChannel(Integer identifier, Http2UpgradeHandler handler) {
-		super(identifier, handler);
+		this(identifier, handler, null);
 	}
 
 	public StreamChannel(Integer identifier, Http2UpgradeHandler handler, ExchangeData exchangeData) {
-		super(identifier, handler, exchangeData);
+		super(identifier, handler);
+		if (exchangeData == null) {
+			// HTTP/2 new request
+			// this.exchangeData = new ExchangeData();
+//			this.streamInputBuffer = new StreamInputBuffer();
+			// this.coyoteRequest.setInputBuffer(inputBuffer);
+		} else {
+			// HTTP/2 Push or HTTP/1.1 upgrade
+			setCurrentProcessor(new StreamProcessor(handler, this, handler.getAdapter(), exchangeData));
+//			this.exchangeData = exchangeData;
+//			this.streamInputBuffer = null;
+			// Headers have been read by this point
+			state.receivedStartOfHeaders();
+			if (HTTP_UPGRADE_STREAM.equals(identifier)) {
+				// Populate coyoteRequest from headers (HTTP/1.1 only)
+				try {
+					((StreamProcessor) getCurrentProcessor()).prepareRequest();
+				} catch (IllegalArgumentException iae) {
+					// Something in the headers is invalid
+					// Set correct return status
+					exchangeData.setStatus(400);
+					// Set error flag. This triggers error processing rather than
+					// the normal mapping
+					exchangeData.setError();
+				}
+			}
+			// TODO Assuming the body has been read at this point is not valid
+			state.receivedEndOfStream();
+		}
+
 	}
 
-	private final HeaderEmitter headerEmitter = new HeaderEmitter() {
-
-		@Override
-		public final void emitHeader(String name, String value) throws HpackException {
-			if (log.isDebugEnabled()) {
-				log.debug(sm.getString("stream.header.debug", getConnectionId(), getIdentifier(), name, value));
-			}
-
-			// Header names must be lower case
-			if (!name.toLowerCase(Locale.US).equals(name)) {
-				throw new HpackException(sm.getString("stream.header.case", getConnectionId(), getIdentifier(), name));
-			}
-
-			if ("connection".equals(name)) {
-				throw new HpackException(sm.getString("stream.header.connection", getConnectionId(), getIdentifier()));
-			}
-
-			if ("te".equals(name)) {
-				if (!"trailers".equals(value)) {
-					throw new HpackException(
-							sm.getString("stream.header.te", getConnectionId(), getIdentifier(), value));
-				}
-			}
-
-			if (headerException != null) {
-				// Don't bother processing the header since the stream is going to
-				// be reset anyway
-				return;
-			}
-
-			if (name.length() == 0) {
-				throw new HpackException(sm.getString("stream.header.empty", getConnectionId(), getIdentifier()));
-			}
-
-			boolean pseudoHeader = name.charAt(0) == ':';
-
-			if (pseudoHeader && headerState != HEADER_STATE_PSEUDO) {
-				headerException = new StreamException(
-						sm.getString("stream.header.unexpectedPseudoHeader", getConnectionId(), getIdentifier(), name),
-						Http2Error.PROTOCOL_ERROR, getIdAsInt());
-				// No need for further processing. The stream will be reset.
-				return;
-			}
-
-			if (headerState == HEADER_STATE_PSEUDO && !pseudoHeader) {
-				headerState = HEADER_STATE_REGULAR;
-			}
-
-			switch (name) {
-			case ":method": {
-				if (exchangeData.getMethod().isNull()) {
-					exchangeData.getMethod().setString(value);
-				} else {
-					throw new HpackException(
-							sm.getString("stream.header.duplicate", getConnectionId(), getIdentifier(), ":method"));
-				}
-				break;
-			}
-			case ":scheme": {
-				if (exchangeData.getScheme().isNull()) {
-					exchangeData.getScheme().setString(value);
-				} else {
-					throw new HpackException(
-							sm.getString("stream.header.duplicate", getConnectionId(), getIdentifier(), ":scheme"));
-				}
-				break;
-			}
-			case ":path": {
-				if (!exchangeData.getRequestURI().isNull()) {
-					throw new HpackException(
-							sm.getString("stream.header.duplicate", getConnectionId(), getIdentifier(), ":path"));
-				}
-				if (value.length() == 0) {
-					throw new HpackException(sm.getString("stream.header.noPath", getConnectionId(), getIdentifier()));
-				}
-				int queryStart = value.indexOf('?');
-				String uri;
-				if (queryStart == -1) {
-					uri = value;
-				} else {
-					uri = value.substring(0, queryStart);
-					String query = value.substring(queryStart + 1);
-					exchangeData.getQueryString().setString(query);
-				}
-				// Bug 61120. Set the URI as bytes rather than String so:
-				// - any path parameters are correctly processed
-				// - the normalization security checks are performed that prevent
-				// directory traversal attacks
-				byte[] uriBytes = uri.getBytes(StandardCharsets.ISO_8859_1);
-				exchangeData.getRequestURI().setBytes(uriBytes, 0, uriBytes.length);
-				break;
-			}
-			case ":authority": {
-				if (exchangeData.getServerName().isNull()) {
-					int i;
-					try {
-						i = Host.parse(value);
-					} catch (IllegalArgumentException iae) {
-						// Host value invalid
-						throw new HpackException(sm.getString("stream.header.invalid", getConnectionId(),
-								getIdentifier(), ":authority", value));
-					}
-					if (i > -1) {
-						exchangeData.getServerName().setString(value.substring(0, i));
-						exchangeData.setServerPort(Integer.parseInt(value.substring(i + 1)));
-					} else {
-						exchangeData.getServerName().setString(value);
-					}
-				} else {
-					throw new HpackException(
-							sm.getString("stream.header.duplicate", getConnectionId(), getIdentifier(), ":authority"));
-				}
-				break;
-			}
-			case "cookie": {
-				// Cookie headers need to be concatenated into a single header
-				// See RFC 7540 8.1.2.5
-				if (cookieHeader == null) {
-					cookieHeader = new StringBuilder();
-				} else {
-					cookieHeader.append("; ");
-				}
-				cookieHeader.append(value);
-				break;
-			}
-			default: {
-				if (headerState == HEADER_STATE_TRAILER && !handler.getProtocol().isTrailerHeaderAllowed(name)) {
-					break;
-				}
-				if ("expect".equals(name) && "100-continue".equals(value)) {
-					exchangeData.setExpectation(true);
-				}
-				if (pseudoHeader) {
-					headerException = new StreamException(
-							sm.getString("stream.header.unknownPseudoHeader", getConnectionId(), getIdentifier(), name),
-							Http2Error.PROTOCOL_ERROR, getIdAsInt());
-				}
-
-				if (headerState == HEADER_STATE_TRAILER) {
-					// HTTP/2 headers are already always lower case
-					exchangeData.getTrailerFields().put(name, value);
-				} else {
-					exchangeData.getRequestHeaders().addValue(name).setString(value);
-				}
-			}
-			}
-		}
-
-		@Override
-		public void setHeaderException(StreamException streamException) {
-			if (headerException == null) {
-				headerException = streamException;
-			}
-		}
-
-		@Override
-		public void validateHeaders() throws StreamException {
-			if (headerException == null) {
-				return;
-			}
-
-			throw headerException;
-		}
-	};
+//	final ExchangeData getExchangeData() {
+//		return exchangeData;
+//	}
 
 	public HeaderEmitter getHeaderEmitter() {
-		return headerEmitter;
+		return (StreamProcessor) getCurrentProcessor();
 	}
 
 	@Override
-	protected void receivedStartOfHeadersLocal(boolean headersEndStream) throws ConnectionException {
-		if (headerState == HEADER_STATE_START) {
-			headerState = HEADER_STATE_PSEUDO;
-			handler.getHpackDecoder().setMaxHeaderCount(handler.getProtocol().getMaxHeaderCount());
-			handler.getHpackDecoder().setMaxHeaderSize(handler.getProtocol().getMaxHeaderSize());
-		} else if (headerState == HEADER_STATE_PSEUDO || headerState == HEADER_STATE_REGULAR) {
-			// Trailer headers MUST include the end of stream flag
-			if (headersEndStream) {
-				headerState = HEADER_STATE_TRAILER;
-				handler.getHpackDecoder().setMaxHeaderCount(handler.getProtocol().getMaxTrailerCount());
-				handler.getHpackDecoder().setMaxHeaderSize(handler.getProtocol().getMaxTrailerSize());
-			} else {
-				throw new ConnectionException(
-						sm.getString("stream.trailerHeader.noEndOfStream", getConnectionId(), getIdentifier()),
-						Http2Error.PROTOCOL_ERROR);
-			}
-		}
+	protected void receivedStartOfHeadersInternal(boolean headersEndStream) throws ConnectionException {
+		setCurrentProcessor(new StreamProcessor(handler, this, handler.getAdapter()));
+		((StreamProcessor) getCurrentProcessor()).receivedStartOfHeadersInternal(headersEndStream);
 	}
 
 	@Override
-	protected boolean receivedEndOfHeadersLocal() throws ConnectionException {
-		if (exchangeData.getMethod().isNull() || exchangeData.getScheme().isNull()
-				|| exchangeData.getRequestURI().isNull()) {
-			throw new ConnectionException(sm.getString("stream.header.required", getConnectionId(), getIdentifier()),
-					Http2Error.PROTOCOL_ERROR);
-		}
-		// Cookie headers need to be concatenated into a single header
-		// See RFC 7540 8.1.2.5
-		// Can only do this once the headers are fully received
-		if (cookieHeader != null) {
-			exchangeData.getRequestHeaders().addValue("cookie").setString(cookieHeader.toString());
-		}
-		return headerState == HEADER_STATE_REGULAR || headerState == HEADER_STATE_PSEUDO;
+	protected boolean receivedEndOfHeadersInternal() throws ConnectionException {
+		return ((StreamProcessor) getCurrentProcessor()).receivedEndOfHeadersInternal();
+	}
+
+	@Override
+	protected void receivedDataInternal(int payloadSize) throws ConnectionException {
+		((StreamProcessor) getCurrentProcessor()).receivedDataInternal(payloadSize);
+	}
+
+	@Override
+	protected void receivedEndOfStreamInternal() throws ConnectionException {
+		((StreamProcessor) getCurrentProcessor()).receivedEndOfStreamInternal();
 	}
 
 	@Override
 	protected void closeInternal() throws IOException {
 		swallowUnread();
+		clearCurrentProcessor();
 	}
 
 //	@Override
@@ -438,7 +283,7 @@ public class StreamChannel extends Stream {
 						String msg = sm.getString("stream.inputBuffer.readTimeout");
 						StreamException se = new StreamException(msg, Http2Error.ENHANCE_YOUR_CALM, this.getIdAsInt());
 						// Trigger a reset once control returns to Tomcat
-						exchangeData.setError();
+						((StreamProcessor) getCurrentProcessor()).getExchangeData().setError();
 						resetException = se;
 						throw new CloseNowException(msg, se);
 					}
@@ -497,7 +342,12 @@ public class StreamChannel extends Stream {
 		}
 	}
 
-	protected final void receiveReset() {
+	@Override
+	protected final void receiveResetInternal(long errorCode) {
+		String uri = (getCurrentProcessor() == null ? ""
+				: " uri:" + ((StreamProcessor) getCurrentProcessor()).getExchangeData().getRequestURI().toString());
+		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")"
+				+ " receiveReset errorCode: " + errorCode + uri);
 //		if (bufferIndex != -1) {
 		try {// synchronized (buffers[bufferIndex.intValue()])
 			readLock.lock();
@@ -579,7 +429,6 @@ public class StreamChannel extends Stream {
 	}
 
 	private final void swallowUnread() throws IOException {
-		System.out.println("swallowUnread");
 		int unreadByteCount = 0;
 		try {
 			readLock.lock();
@@ -609,12 +458,16 @@ public class StreamChannel extends Stream {
 		// - if inside the sync it can trigger a deadlock
 		// https://markmail.org/message/vbglzkvj6wxlhh3p
 		if (unreadByteCount > 0) {
+			System.out.println("stream" + getIdentifier() + " swallowUnread: " + unreadByteCount);
 			handler.getWriter().writeWindowUpdate(this, unreadByteCount, false);
 		}
 	}
 
 	@Override
-	protected void cancelStream(StreamException se) {
+	protected void cancelStreamInternal(StreamException se) {
+		// Prevent Tomcat's error handling trying to write
+		((StreamProcessor) getCurrentProcessor()).getExchangeData().setError();
+		((StreamProcessor) getCurrentProcessor()).getExchangeData().setErrorReported();
 		outputClosed = true;
 		resetException = se;
 	}
@@ -650,6 +503,8 @@ public class StreamChannel extends Stream {
 			}
 			getHandler().getWriter().writeHeaders(this, 0, headers, finished,
 					org.apache.coyote.http2.Constants.DEFAULT_HEADERS_FRAME_SIZE);
+		} catch (Exception e) {
+			throw e;
 		} finally {
 			getWriteLock().unlock();
 		}

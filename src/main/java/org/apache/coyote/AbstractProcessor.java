@@ -19,18 +19,28 @@ package org.apache.coyote;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.servlet.RequestDispatcher;
+import javax.servlet.http.HttpServletResponse;
 
 import org.apache.coyote.AbstractProtocol.RegistrableProcessor;
+import org.apache.coyote.http11.Constants;
+import org.apache.coyote.http11.HeadersTooLargeException;
+import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.tomcat.util.ExceptionUtils;
+import org.apache.tomcat.util.buf.MessageBytes;
+import org.apache.tomcat.util.http.MimeHeaders;
+import org.apache.tomcat.util.http.parser.TokenList;
 import org.apache.tomcat.util.log.UserDataHelper;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SendfileState;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -58,6 +68,8 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	private volatile long asyncTimeoutGeneration = 0;
 	protected final AsyncStateMachineWrapper asyncStateMachine;
 	protected final ExchangeData exchangeData;
+	protected final RequestAction requestAction;
+	protected final ResponseAction responseAction;
 	// protected final ResponseData responseData;
 	// protected InputHandler inputHandler;
 	private volatile Channel channel = null;
@@ -74,15 +86,32 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	}
 
 	protected AbstractProcessor(AbstractProtocol<?> protocol, Adapter adapter, ExchangeData exchangeData) {
+		if (exchangeData == null) {
+			throw new IllegalArgumentException();
+		}
 		this.protocol = protocol;
 		this.adapter = adapter;
 		this.exchangeData = exchangeData;
+		this.requestAction = createRequestAction();
+		this.responseAction = createResponseAction();
 		// this.responseData = responseData;
 		// response.setHook(this);
 //		this.exchangeData.setResponseData(this.responseData);
 		// request.setHook(this);
 		this.asyncStateMachine = new AsyncStateMachineWrapper();
 		this.userDataHelper = new UserDataHelper(getLog());
+	}
+
+	protected abstract RequestAction createRequestAction();
+
+	protected abstract ResponseAction createResponseAction();
+
+	public final RequestAction getRequestAction() {
+		return requestAction;
+	}
+
+	public final ResponseAction getResponseAction() {
+		return responseAction;
 	}
 
 	public AbstractProtocol<?> getProtocol() {
@@ -99,11 +128,11 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	}
 
 	@Override
-	public ExchangeData getExchangeData() {
+	public final ExchangeData getExchangeData() {
 		return exchangeData;
 	}
 
-	public AsyncStateMachineWrapper getAsyncStateMachine() {
+	public final AsyncStateMachineWrapper getAsyncStateMachine() {
 		return asyncStateMachine;
 	}
 
@@ -180,10 +209,10 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	@Override
 	public final void setChannel(Channel channel) {
 		this.channel = channel;
-		initChannel(channel);
+		onChannelReady(channel);
 	}
 
-	protected abstract void initChannel(Channel channel);
+	protected abstract void onChannelReady(Channel channel);
 
 	/**
 	 * @return the socket wrapper being used.
@@ -299,7 +328,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 			if (event == SocketEvent.OPEN_WRITE && asyncStateMachine.getWriteListener() != null) {
 				asyncStateMachine.asyncOperation();
 				try {
-					if (flushBufferedWrite()) {
+					if (responseAction.flushBufferedWrite()) {
 						return SocketState.SUSPENDED;
 					}
 				} catch (IOException ioe) {
@@ -362,7 +391,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 				}
 			} else {
 				exchangeData.updateCounters();
-				state = dispatchEndRequest();
+				state = dispatchFinishActions();
 			}
 
 			if (getLog().isDebugEnabled()) {
@@ -381,16 +410,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	}
 
 	/**
-	 * Flush any pending writes. Used during non-blocking writes to flush any
-	 * remaining data from a previous incomplete write.
-	 *
-	 * @return <code>true</code> if data remains to be flushed at the end of method
-	 *
-	 * @throws IOException If an I/O error occurs while attempting to flush the data
-	 */
-	protected abstract boolean flushBufferedWrite() throws IOException;
-
-	/**
 	 * Perform any necessary clean-up processing if the dispatch resulted in the
 	 * completion of processing for the current request.
 	 *
@@ -400,7 +419,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	 * @throws IOException If an I/O error occurs while attempting to end the
 	 *                     request
 	 */
-	protected abstract SocketState dispatchEndRequest() throws IOException;
+	protected abstract SocketState dispatchFinishActions() throws IOException;
 
 	@Override
 	protected final SocketState service(SocketEvent event) throws IOException {
@@ -437,7 +456,217 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	 */
 	protected abstract boolean repeat();
 
-	protected abstract SocketState serviceInternal() throws IOException;
+	protected SocketState serviceInternal() throws IOException {
+		// Channel channel
+//		SocketChannel socketChannel = (SocketChannel) channel;
+		RequestInfo rp = exchangeData.getRequestProcessor();
+		rp.setStage(org.apache.coyote.Constants.STAGE_PARSE);
+
+		// Setting up the I/O
+		// setChannel(channel);
+
+		// Flags
+//		inputBuffer.keepAlive = true;
+//		openSocket = false;
+//		readComplete = true;
+		SendfileState sendfileState = SendfileState.DONE;
+
+		while (!getErrorState().isError() && repeat() && !asyncStateMachine.isAsync() && !isUpgrade()
+				&& sendfileState == SendfileState.DONE && !protocol.isPaused()) {
+
+			// Parsing the request header
+			if (!parsingHeader()) {
+				if (!getErrorState().isError()) {
+					if (isHttp2Preface()) {
+						return SocketState.UPGRADING;
+					} else {
+						if (canReleaseProcessor()) {
+							return SocketState.OPEN;
+						} else {
+							return SocketState.LONG;
+						}
+					}
+				}
+			}
+
+			if (!getErrorState().isError() && channel instanceof SocketChannel) {
+				SocketChannel socketChannel = (SocketChannel) channel;
+				// Has an upgrade been requested?
+				if (isConnectionToken(exchangeData.getRequestHeaders(), "upgrade")) {
+					// Check the protocol
+					String requestedProtocol = exchangeData.getRequestHeader("Upgrade");
+
+					UpgradeProtocol upgradeProtocol = protocol.getUpgradeProtocol(requestedProtocol);
+					if (upgradeProtocol != null) {
+						if (upgradeProtocol.accept(exchangeData)) {
+							exchangeData.setStatus(HttpServletResponse.SC_SWITCHING_PROTOCOLS);
+							exchangeData.setResponseHeader("Connection", "Upgrade");
+							exchangeData.setResponseHeader("Upgrade", requestedProtocol);
+							responseAction.finish();
+							Request request = createRequest();
+							Response response = createResponse();
+							request.setResponse(response);
+							getAdapter().log(request, response, 0);
+
+							InternalHttpUpgradeHandler upgradeHandler = upgradeProtocol.getInternalUpgradeHandler(
+									socketChannel, getAdapter(), cloneExchangeData(this.exchangeData));
+							UpgradeToken upgradeToken = new UpgradeToken(upgradeHandler, null, null);
+							upgrade(upgradeToken);
+							return SocketState.UPGRADING;
+						}
+					}
+				}
+			}
+
+			if (getErrorState().isIoAllowed()) {
+				// Setting up filters, and parse some request headers
+				rp.setStage(org.apache.coyote.Constants.STAGE_PREPARE);
+				try {
+					prepareRequest();
+				} catch (Throwable t) {
+					ExceptionUtils.handleThrowable(t);
+					if (getLog().isDebugEnabled()) {
+						getLog().debug(sm.getString("http11processor.request.prepare"), t);
+					}
+					// 500 - Internal Server Error
+					exchangeData.setStatus(500);
+					setErrorState(ErrorState.CLOSE_CLEAN, t);
+				}
+			}
+
+			if (!getErrorState().isIoAllowed()) {
+				Request request = createRequest();
+				Response response = createResponse();
+				request.setResponse(response);
+				getAdapter().log(request, response, 0);
+			} else {
+
+				if (protocol.isPaused()) {// && !cping
+					// 503 - Service unavailable
+					exchangeData.setStatus(503);
+					setErrorState(ErrorState.CLOSE_CLEAN, null);
+				}
+			}
+
+			// Process the request in the adapter
+			if (getErrorState().isIoAllowed()) {
+				try {
+					rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
+					Request request = createRequest();
+					Response response = createResponse();
+					request.setResponse(response);
+					getAdapter().service(request, response);
+					// Handle when the response was committed before a serious
+					// error occurred. Throwing a ServletException should both
+					// set the status to 500 and set the errorException.
+					// If we fail here, then the response is likely already
+					// committed, so we can't try and set headers.
+					if (repeat() && !getErrorState().isError() && !asyncStateMachine.isAsync()
+							&& statusDropsConnection(this.exchangeData.getStatus())) {
+						setErrorState(ErrorState.CLOSE_CLEAN, null);
+					}
+				} catch (InterruptedIOException e) {
+					setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
+				} catch (HeadersTooLargeException e) {
+					getLog().error(sm.getString("http11processor.request.process"), e);
+					// The response should not have been committed but check it
+					// anyway to be safe
+					if (exchangeData.isCommitted()) {
+						setErrorState(ErrorState.CLOSE_NOW, e);
+					} else {
+						exchangeData.reset();
+						exchangeData.setStatus(500);
+						setErrorState(ErrorState.CLOSE_CLEAN, e);
+						exchangeData.setResponseHeader("Connection", "close"); // TODO: Remove
+					}
+				} catch (Throwable t) {
+					ExceptionUtils.handleThrowable(t);
+					getLog().error(sm.getString("http11processor.request.process"), t);
+					// 500 - Internal Server Error
+					exchangeData.setStatus(500);
+					setErrorState(ErrorState.CLOSE_CLEAN, t);
+					Request request = createRequest();
+					Response response = createResponse();
+					request.setResponse(response);
+					getAdapter().log(request, response, 0);
+				}
+			}
+
+			// Finish the handling of the request
+			rp.setStage(org.apache.coyote.Constants.STAGE_ENDINPUT);
+			if (!asyncStateMachine.isAsync()) {
+				// If this is an async request then the request ends when it has
+				// been completed. The AsyncContext is responsible for calling
+				// endRequest() in that case.
+				finishActions();
+			}
+			rp.setStage(org.apache.coyote.Constants.STAGE_ENDOUTPUT);
+
+			// If there was an error, make sure the request is counted as
+			// and error, and update the statistics counter
+			if (getErrorState().isError()) {
+				exchangeData.setStatus(500);
+			}
+
+			if ((!asyncStateMachine.isAsync() && !isUpgrade()) || getErrorState().isError()) {
+				exchangeData.updateCounters();
+				if (getErrorState().isIoAllowed()) {
+					nextRequest();
+//					exchangeData.recycle();
+//					headParser.nextRequest();
+//					inputBuffer.nextRequest();
+//					outputBuffer.nextRequest();
+				}
+			}
+
+			if (repeat()) {
+				resetSocketReadTimeout();
+				rp.setStage(org.apache.coyote.Constants.STAGE_KEEPALIVE);
+			}
+
+			sendfileState = processSendfile();
+		}
+
+		rp.setStage(org.apache.coyote.Constants.STAGE_ENDED);
+
+		if (getErrorState().isError() || (protocol.isPaused() && !asyncStateMachine.isAsync())) {
+			return SocketState.CLOSED;
+		} else if (asyncStateMachine.isAsync()) {
+			return SocketState.SUSPENDED;
+		} else if (isUpgrade()) {
+			return SocketState.UPGRADING;
+		} else {
+			if (sendfileState == SendfileState.PENDING) {
+				return SocketState.SENDFILE;
+			} else {
+				if (repeat()) {
+//					if (readComplete) {
+					return SocketState.OPEN;
+//					} else {
+//						return SocketState.LONG;
+//					}
+				} else {
+					return SocketState.CLOSED;
+				}
+			}
+		}
+	};
+
+	private ExchangeData cloneExchangeData(ExchangeData source) throws IOException {
+		ExchangeData dest = new ExchangeData();
+
+		// Transfer the minimal information required for the copy of the Request
+		// that is passed to the HTTP upgrade process
+
+		dest.getDecodedURI().duplicate(source.getDecodedURI());
+		dest.getMethod().duplicate(source.getMethod());
+		dest.getRequestHeaders().duplicate(source.getRequestHeaders());
+		dest.getRequestURI().duplicate(source.getRequestURI());
+		dest.getQueryString().duplicate(source.getQueryString());
+
+		return dest;
+
+	}
 
 	/**
 	 * 解析报文头部
@@ -461,308 +690,13 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	 */
 	protected abstract boolean canReleaseProcessor();
 
+	protected abstract void prepareRequest() throws IOException;
+
 	protected abstract void resetSocketReadTimeout();
 
-	protected abstract void endRequest() throws IOException;
+	protected abstract void finishActions() throws IOException;
 
 	protected abstract SendfileState processSendfile() throws IOException;
-	// @Override
-	// public final void action(ActionCode actionCode, Object param) {
-	// switch (actionCode) {
-	// 'Normal' servlet support
-	// case COMMIT: {
-	// if (!responseData.isCommitted()) {
-	// try {
-	// // Validate and write response headers
-	// prepareResponse();
-	// } catch (IOException e) {
-	// handleIOException(e);
-	// }
-	// }
-	// break;
-	// }
-	// case CLOSE: {
-	// action(ActionCode.COMMIT, null);
-	// try {
-	// finishResponse();
-	// } catch (IOException e) {
-	// handleIOException(e);
-	// }
-	// break;
-	// }
-	// case ACK: {
-	// ack();
-	// break;
-	// }
-	// case CLIENT_FLUSH: {
-	// action(ActionCode.COMMIT, null);
-	// try {
-	// flush();
-	// } catch (IOException e) {
-	// handleIOException(e);
-	// responseData.setErrorException(e);
-	// }
-	// break;
-	// }
-	// case AVAILABLE: {
-	// exchangeData.setAvailable(available(Boolean.TRUE.equals(param)));
-	// break;
-	// }
-	// case REQ_SET_BODY_REPLAY: {
-	// ByteChunk body = (ByteChunk) param;
-	// setRequestBody(body);
-	// break;
-	// }
-
-	// Error handling
-	// case IS_ERROR: {
-	// ((AtomicBoolean) param).set(getErrorState().isError());
-	// break;
-	// }
-	// case IS_IO_ALLOWED: {
-	// ((AtomicBoolean) param).set(getErrorState().isIoAllowed());
-	// break;
-	// }
-	// case CLOSE_NOW: {
-	// // Prevent further writes to the response
-	// setSwallowResponse();
-	// if (param instanceof Throwable) {
-	// setErrorState(ErrorState.CLOSE_NOW, (Throwable) param);
-	// } else {
-	// setErrorState(ErrorState.CLOSE_NOW, null);
-	// }
-	// break;
-	// }
-	// case DISABLE_SWALLOW_INPUT: {
-	// // Aborted upload or similar.
-	// // No point reading the remainder of the request.
-	// disableSwallowRequest();
-	// // This is an error state. Make sure it is marked as such.
-	// setErrorState(ErrorState.CLOSE_CLEAN, null);
-	// break;
-	// }
-
-	// Request attribute support
-	// case REQ_HOST_ADDR_ATTRIBUTE: {
-	// if (getPopulateRequestAttributesFromSocket() && channel != null) {
-	// exchangeData.remoteAddr().setString(channel.getRemoteAddr());
-	// }
-	// break;
-	// }
-	// case REQ_HOST_ATTRIBUTE: {
-	// populateRequestAttributeRemoteHost();
-	// break;
-	// }
-	// case REQ_LOCALPORT_ATTRIBUTE: {
-	// if (getPopulateRequestAttributesFromSocket() && channel != null) {
-	// exchangeData.setLocalPort(channel.getLocalPort());
-	// }
-	// break;
-	// }
-	// case REQ_LOCAL_ADDR_ATTRIBUTE: {
-	// if (getPopulateRequestAttributesFromSocket() && channel != null) {
-	// exchangeData.localAddr().setString(channel.getLocalAddr());
-	// }
-	// break;
-	// }
-	// case REQ_LOCAL_NAME_ATTRIBUTE: {
-	// if (getPopulateRequestAttributesFromSocket() && channel != null) {
-	// exchangeData.localName().setString(channel.getLocalName());
-	// }
-	// break;
-	// }
-	// case REQ_REMOTEPORT_ATTRIBUTE: {
-	// if (getPopulateRequestAttributesFromSocket() && channel != null) {
-	// exchangeData.setRemotePort(channel.getRemotePort());
-	// }
-	// break;
-	// }
-
-	// SSL request attribute support
-	// case REQ_SSL_ATTRIBUTE: {
-	// populateSslRequestAttributes();
-	// break;
-	// }
-	// case REQ_SSL_CERTIFICATE: {
-	// try {
-	// sslReHandShake();
-	// } catch (IOException ioe) {
-	// setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
-	// }
-	// break;
-	// }
-
-	// Servlet 3.0 asynchronous support
-	// case ASYNC_START: {
-	// asyncStateMachine.asyncStart((AsyncContextCallback) param);
-	// break;
-	// }
-	// case ASYNC_COMPLETE: {
-	// clearDispatches();
-	// if (asyncStateMachine.asyncComplete()) {
-	// processSocketEvent(SocketEvent.OPEN_READ, true);
-	// }
-	// break;
-	// }
-	// case ASYNC_DISPATCH: {
-	// if (asyncStateMachine.asyncDispatch()) {
-	// processSocketEvent(SocketEvent.OPEN_READ, true);
-	// }
-	// break;
-	// }
-	// case ASYNC_DISPATCHED: {
-	// asyncStateMachine.asyncDispatched();
-	// break;
-	// }
-	// case ASYNC_ERROR: {
-	// asyncStateMachine.asyncError();
-	// break;
-	// }
-	// case ASYNC_IS_ASYNC: {
-	// ((AtomicBoolean) param).set(asyncStateMachine.isAsync());
-	// break;
-	// }
-	// case ASYNC_IS_COMPLETING: {
-	// ((AtomicBoolean) param).set(asyncStateMachine.isCompleting());
-	// break;
-	// }
-	// case ASYNC_IS_DISPATCHING: {
-	// ((AtomicBoolean) param).set(asyncStateMachine.isAsyncDispatching());
-	// break;
-	// }
-	// case ASYNC_IS_ERROR: {
-	// ((AtomicBoolean) param).set(asyncStateMachine.isAsyncError());
-	// break;
-	// }
-	// case ASYNC_IS_STARTED: {
-	// ((AtomicBoolean) param).set(asyncStateMachine.isAsyncStarted());
-	// break;
-	// }
-	// case ASYNC_IS_TIMINGOUT: {
-	// ((AtomicBoolean) param).set(asyncStateMachine.isAsyncTimingOut());
-	// break;
-	// }
-	// case ASYNC_RUN: {
-	// asyncStateMachine.asyncRun((Runnable) param);
-	// break;
-	// }
-	// case ASYNC_SETTIMEOUT: {
-	// if (param == null) {
-	// return;
-	// }
-	// long timeout = ((Long) param).longValue();
-	// setAsyncTimeout(timeout);
-	// break;
-	// }
-	// case ASYNC_TIMEOUT: {
-	// AtomicBoolean result = (AtomicBoolean) param;
-	// result.set(asyncStateMachine.asyncTimeout());
-	// break;
-	// }
-	// case ASYNC_POST_PROCESS: {
-	// asyncStateMachine.asyncPostProcess();
-	// break;
-	// }
-
-	// Servlet 3.1 non-blocking I/O
-	// case REQUEST_BODY_FULLY_READ: {
-	// AtomicBoolean result = (AtomicBoolean) param;
-	// result.set(isRequestBodyFullyRead());
-	// break;
-	// }
-	// case NB_READ_INTEREST: {
-	// AtomicBoolean isReady = (AtomicBoolean) param;
-	// isReady.set(isReadyForRead());
-	// break;
-	// }
-	// case NB_WRITE_INTEREST: {
-	// AtomicBoolean isReady = (AtomicBoolean) param;
-	// isReady.set(isReadyForWrite());
-	// break;
-	// }
-	// case DISPATCH_READ: {
-	// addDispatch(DispatchType.NON_BLOCKING_READ);
-	// break;
-	// }
-	// case DISPATCH_WRITE: {
-	// addDispatch(DispatchType.NON_BLOCKING_WRITE);
-	// break;
-	// }
-	// case DISPATCH_EXECUTE: {
-	// executeDispatches();
-	// break;
-	// }
-
-	// Servlet 3.1 HTTP Upgrade
-	// case UPGRADE: {
-	// doHttpUpgrade((UpgradeToken) param);
-	// break;
-	// }
-
-	// Servlet 4.0 Push requests
-	// case IS_PUSH_SUPPORTED: {
-	// AtomicBoolean result = (AtomicBoolean) param;
-	// result.set(isPushSupported());
-	// break;
-	// }
-	// case PUSH_REQUEST: {
-	// doPush((RequestData) param);
-	// break;
-	// }
-
-	// Servlet 4.0 Trailers
-	// case IS_TRAILER_FIELDS_READY: {
-	// AtomicBoolean result = (AtomicBoolean) param;
-	// result.set(isTrailerFieldsReady());
-	// break;
-	// }
-	// case IS_TRAILER_FIELDS_SUPPORTED: {
-	// AtomicBoolean result = (AtomicBoolean) param;
-	// result.set(isTrailerFieldsSupported());
-	// break;
-	// }
-
-	// Identifiers associated with multiplexing protocols like HTTP/2
-	// case CONNECTION_ID: {
-	// @SuppressWarnings("unchecked")
-	// AtomicReference<Object> result = (AtomicReference<Object>) param;
-	// result.set(getConnectionID());
-	// break;
-	// }
-	// case STREAM_ID: {
-	// @SuppressWarnings("unchecked")
-	// AtomicReference<Object> result = (AtomicReference<Object>) param;
-	// result.set(getStreamID());
-	// break;
-	// }
-	// }
-	// }
-
-	// @Override
-	// public void actionREQ_SET_BODY_REPLAY(ByteChunk param) {
-
-	// }
-
-	// @Override
-	// public void disableSwallowInput() {
-
-	// }
-
-	// @Override
-	// public void actionREQUEST_BODY_FULLY_READ(AtomicBoolean param) {
-
-	// }
-
-	// @Override
-	// public void actionNB_READ_INTEREST(AtomicBoolean param) {
-
-	// }
-
-	// @Override
-//	public void actionNB_WRITE_INTEREST(AtomicBoolean param) {
-//		AtomicBoolean isReady = param;
-//		isReady.set(isReadyForWrite());
-//	}
 
 	// @Override
 	public void dispatchRead() {
@@ -863,12 +797,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 		throw new UnsupportedOperationException(sm.getString("abstractProcessor.pushrequest.notsupported"));
 	}
 
-	// @Override
-//	public void actionIS_TRAILER_FIELDS_SUPPORTED(AtomicBoolean param) {
-//		AtomicBoolean result = param;
-//		result.set(isTrailerFieldsSupported());
-//	}
-
 	@Override
 	public final void nextRequest() {
 		errorState = ErrorState.NONE;
@@ -896,31 +824,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	public Exception collectCloseException() {
 		return null;
 	}
-
-//	protected abstract void ack();
-
-	// protected abstract void flush() throws IOException;
-
-	// protected abstract int available(boolean doRead);
-
-	// protected abstract void setRequestBody(ByteChunk body);
-
-	// protected abstract void setSwallowResponse();
-
-	// protected abstract void disableSwallowRequest();
-
-	// @Override
-//	public void processSocketEvent(SocketEvent event, boolean dispatch) {
-//		Channel channel = getChannel();
-//		if (channel != null) {
-//
-//			// TODO sads
-//			// channel.processSocket(event, dispatch);
-//			protocol.getHandler().processSocket(channel, event, dispatch);
-//		}
-//	}
-
-//	protected abstract boolean isReadyForWrite();
 
 	/**
 	 * {@inheritDoc} Processors that implement HTTP upgrade must override this
@@ -951,19 +854,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 		return false;
 	}
 
-	// protected abstract boolean isTrailerFieldsReady();
-
-	/**
-	 * Protocols that support trailer fields should override this method and return
-	 * {@code true}.
-	 *
-	 * @return {@code true} if trailer fields are supported by this processor,
-	 *         otherwise {@code false}.
-	 */
-//	protected boolean isTrailerFieldsSupported() {
-//		return false;
-//	}
-
 	@Override
 	protected final void logAccess() throws IOException {
 		// Set the socket wrapper so the access log can read the socket related
@@ -987,9 +877,24 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 		}
 	}
 
-	protected abstract Request createRequest();
+	public final Request createRequest() {
+		return new Request(exchangeData, this, requestAction);
+	}
 
-	protected abstract Response createResponse();
+	public final Response createResponse() {
+		return new Response(exchangeData, this, responseAction);
+	}
+
+	public static boolean isConnectionToken(MimeHeaders headers, String token) throws IOException {
+		MessageBytes connection = headers.getValue(Constants.CONNECTION);
+		if (connection == null) {
+			return false;
+		}
+
+		Set<String> tokens = new HashSet<>();
+		TokenList.parseTokenList(headers.values(Constants.CONNECTION), tokens);
+		return tokens.contains(token);
+	}
 
 	/**
 	 * Determine if we must drop the connection because of the HTTP status code. Use

@@ -2,6 +2,7 @@ package org.apache.coyote.ajp;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.coyote.ErrorState;
 import org.apache.coyote.ExchangeData;
@@ -83,7 +84,7 @@ public class SocketOutputBuffer extends ResponseAction {
 	/**
 	 * Finished response.
 	 */
-	private boolean responseFinished = false;
+//	private boolean responseFinished = false;
 
 	/**
 	 * Should any response body be swallowed and not sent to the client.
@@ -99,7 +100,7 @@ public class SocketOutputBuffer extends ResponseAction {
 	 */
 	private final MessageBytes tmpMB = MessageBytes.newInstance();
 
-	private final SocketInputReader inputReader;
+//	private final SocketInputReader inputReader;
 
 	public SocketOutputBuffer(AjpProcessor processor) {
 		super(processor);
@@ -110,17 +111,13 @@ public class SocketOutputBuffer extends ResponseAction {
 		// the default (Constants.MAX_PACKET_SIZE)
 		this.outputMaxChunkSize = packetSize - Constants.SEND_HEAD_LEN;
 		this.responseMessage = new AjpMessage(packetSize);
-		this.inputReader = processor.getInputReader();
+//		this.inputReader = processor.getInputReader();
 	}
 
 //	@Override
 //	protected HttpOutputBuffer getBaseOutputBuffer() {
 //		return this;
 //	}
-
-	public boolean isResponseFinished() {
-		return responseFinished;
-	}
 
 	public int getResponseMsgPos() {
 		return responseMsgPos;
@@ -286,16 +283,14 @@ public class SocketOutputBuffer extends ResponseAction {
 		responseFinished = true;
 
 		// Swallow the unread body packet if present
-		if (inputReader.isWaitingForBodyMessage()
-				|| inputReader.isFirst() && exchangeData.getRequestContentLengthLong() > 0) {
-			inputReader.refillBodyBuffer(true);
-		}
+//		if (((SocketInputReader) processor.getRequestAction()).isWaitingForBodyMessage()
+//				|| ((SocketInputReader) processor.getRequestAction()).isFirst()
+//						&& exchangeData.getRequestContentLengthLong() > 0) {
+//			((SocketInputReader) processor.getRequestAction()).refillBodyBuffer(true);
+//		}
 
 		// Add the end message
 		if (processor.getErrorState().isError()) {
-			if (((SocketChannel) processor.getChannel()) == null) {
-				System.out.println();
-			}
 			((SocketChannel) processor.getChannel()).write(true, endAndCloseMessageArray, 0,
 					endAndCloseMessageArray.length);
 		} else {
@@ -332,6 +327,32 @@ public class SocketOutputBuffer extends ResponseAction {
 	}
 
 	@Override
+	public boolean flushBufferedWrite() throws IOException {
+		if (hasDataToWrite()) {
+			((SocketChannel) processor.getChannel()).flush(false);
+			if (hasDataToWrite()) {
+				// There is data to write but go via Response to
+				// maintain a consistent view of non-blocking state
+				// response.checkRegisterForWrite();
+				AtomicBoolean ready = new AtomicBoolean(false);
+				synchronized (processor.getAsyncStateMachine().getNonBlockingStateLock()) {
+					if (!processor.getAsyncStateMachine().isRegisteredForWrite()) {
+						// actionNB_WRITE_INTEREST(ready);
+						ready.set(isReadyForWrite());
+						processor.getAsyncStateMachine().setRegisteredForWrite(!ready.get());
+					}
+				}
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean hasDataToWrite() {
+		return getResponseMsgPos() != -1 || ((SocketChannel) processor.getChannel()).hasDataToWrite();
+	}
+
+	@Override
 	public void endToChannel() throws IOException {
 		// NO-OP for AJP
 	}
@@ -341,7 +362,8 @@ public class SocketOutputBuffer extends ResponseAction {
 		swallowResponse = true;
 	}
 
-	void recycle() {
+	@Override
+	public void recycle() {
 		bytesWritten = 0;
 		responseFinished = false;
 		swallowResponse = false;

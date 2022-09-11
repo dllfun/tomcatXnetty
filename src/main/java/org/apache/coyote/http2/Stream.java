@@ -21,12 +21,8 @@ import java.util.Iterator;
 
 import org.apache.coyote.CloseNowException;
 import org.apache.coyote.DispatchHandler.ConcurrencyControlled;
-import org.apache.coyote.ExchangeData;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.buf.ByteChunk;
-import org.apache.tomcat.util.buf.MessageBytes;
-import org.apache.tomcat.util.http.parser.Host;
 import org.apache.tomcat.util.net.AbstractLogicChannel;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.SSLSupport;
@@ -39,66 +35,28 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 	protected static final Log log = LogFactory.getLog(Stream.class);
 	protected static final StringManager sm = StringManager.getManager(Stream.class);
 
-	private static final Integer HTTP_UPGRADE_STREAM = Integer.valueOf(1);
-
 	private volatile int weight = Constants.DEFAULT_WEIGHT;
-	private volatile long contentLengthReceived = 0;
 
 	protected final Http2UpgradeHandler handler;
-	private final StreamStateMachine state;
+	protected final StreamStateMachine state;
 	protected final WindowAllocationManager allocationManager = new WindowAllocationManager(this);
 
-	// TODO: null these when finished to reduce memory used by closed stream
-	protected final ExchangeData exchangeData;
 //	private final ResponseData responseData = new ResponseData();
 //	private final StreamInputBuffer streamInputBuffer;
 //	protected final StreamOutputBuffer streamOutputBuffer = new StreamOutputBuffer();
 
-	Stream(Integer identifier, Http2UpgradeHandler handler) {
-		this(identifier, handler, null);
-	}
+//	Stream(Integer identifier, Http2UpgradeHandler handler) {
+//		this(identifier, handler, null);
+//	}
 
-	Stream(Integer identifier, Http2UpgradeHandler handler, ExchangeData exchangeData) {
+	Stream(Integer identifier, Http2UpgradeHandler handler) {
 		super(identifier);
 		// this.channel = channel;
 		this.handler = handler;
 		handler.getZero().addChild(this);
 		setWindowSize(handler.getRemoteSettings().getInitialWindowSize());
 		state = new StreamStateMachine(this);
-		if (exchangeData == null) {
-			// HTTP/2 new request
-			this.exchangeData = new ExchangeData();
-//			this.streamInputBuffer = new StreamInputBuffer();
-			// this.coyoteRequest.setInputBuffer(inputBuffer);
-		} else {
-			// HTTP/2 Push or HTTP/1.1 upgrade
-			this.exchangeData = exchangeData;
-//			this.streamInputBuffer = null;
-			// Headers have been read by this point
-			state.receivedStartOfHeaders();
-			if (HTTP_UPGRADE_STREAM.equals(identifier)) {
-				// Populate coyoteRequest from headers (HTTP/1.1 only)
-				try {
-					prepareRequest();
-				} catch (IllegalArgumentException iae) {
-					// Something in the headers is invalid
-					// Set correct return status
-					exchangeData.setStatus(400);
-					// Set error flag. This triggers error processing rather than
-					// the normal mapping
-					exchangeData.setError();
-				}
-			}
-			// TODO Assuming the body has been read at this point is not valid
-			state.receivedEndOfStream();
-		}
-		this.exchangeData.setSendfile(handler.hasAsyncIO() && handler.getProtocol().getUseSendfile());
-		// this.coyoteResponse.setOutputBuffer(http2OutputBuffer);
-//		this.exchangeData.setResponseData(responseData);
-		this.exchangeData.getProtocol().setString("HTTP/2.0");
-		if (this.exchangeData.getStartTime() < 0) {
-			this.exchangeData.setStartTime(System.currentTimeMillis());
-		}
+
 		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " created");
 	}
 
@@ -114,43 +72,6 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 
 	public Http2UpgradeHandler getHandler() {
 		return handler;
-	}
-
-	private void prepareRequest() {
-		MessageBytes hostValueMB = exchangeData.getRequestHeaders().getUniqueValue("host");
-		if (hostValueMB == null) {
-			throw new IllegalArgumentException();
-		}
-		// This processing expects bytes. Server push will have used a String
-		// to trigger a conversion if required.
-		hostValueMB.toBytes();
-		ByteChunk valueBC = hostValueMB.getByteChunk();
-		byte[] valueB = valueBC.getBytes();
-		int valueL = valueBC.getLength();
-		int valueS = valueBC.getStart();
-
-		int colonPos = Host.parse(hostValueMB);
-		if (colonPos != -1) {
-			int port = 0;
-			for (int i = colonPos + 1; i < valueL; i++) {
-				char c = (char) valueB[i + valueS];
-				if (c < '0' || c > '9') {
-					throw new IllegalArgumentException();
-				}
-				port = port * 10 + c - '0';
-			}
-			exchangeData.setServerPort(port);
-
-			// Only need to copy the host name up to the :
-			valueL = colonPos;
-		}
-
-		// Extract the host name
-		char[] hostNameC = new char[valueL];
-		for (int i = 0; i < valueL; i++) {
-			hostNameC[i] = (char) valueB[i + valueS];
-		}
-		exchangeData.getServerName().setChars(hostNameC, 0, valueL);
 	}
 
 	final void rePrioritise(AbstractStream parent, boolean exclusive, int weight) {
@@ -197,8 +118,6 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 	}
 
 	final void receiveReset(long errorCode) {
-		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")"
-				+ " receiveReset errorCode: " + errorCode + " uri:" + exchangeData.getRequestURI().toString());
 		if (log.isDebugEnabled()) {
 			log.debug(
 					sm.getString("stream.reset.receive", getConnectionId(), getIdentifier(), Long.toString(errorCode)));
@@ -206,11 +125,11 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 		// Set the new state first since read and write both check this
 		state.receivedReset();
 		// Reads wait internally so need to call a method to break the wait()
-		receiveReset();
+		receiveResetInternal(errorCode);
 		cancelAllocationRequests();
 	}
 
-	protected abstract void receiveReset();
+	protected abstract void receiveResetInternal(long errorCode);
 
 	final void cancelAllocationRequests() {
 		allocationManager.notifyAny();
@@ -271,15 +190,12 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 	void doStreamCancel(String msg, Http2Error error) throws CloseNowException {
 		StreamException se = new StreamException(msg, error, getIdAsInt());
 		// Prevent the application making further writes
-		cancelStream(se);
-		// Prevent Tomcat's error handling trying to write
-		exchangeData.setError();
-		exchangeData.setErrorReported();
+		cancelStreamInternal(se);
 		// Trigger a reset once control returns to Tomcat
 		throw new CloseNowException(msg, se);
 	}
 
-	protected abstract void cancelStream(StreamException se);
+	protected abstract void cancelStreamInternal(StreamException se);
 
 //	void doWriteTimeout() throws CloseNowException {
 //		String msg = sm.getString("stream.writeTimeout");
@@ -321,61 +237,40 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 		return weight;
 	}
 
-	final ExchangeData getExchangeData() {
-		return exchangeData;
-	}
-
 //	final ResponseData getResponseData() {
 //		return responseData;
 //	}
 
 	final void receivedStartOfHeaders(boolean headersEndStream) throws Http2Exception {
-		receivedStartOfHeadersLocal(headersEndStream);
+		receivedStartOfHeadersInternal(headersEndStream);
 		// Parser will catch attempt to send a headers frame after the stream
 		// has closed.
 		state.receivedStartOfHeaders();
 	}
 
-	protected abstract void receivedStartOfHeadersLocal(boolean headersEndStream) throws ConnectionException;
+	protected abstract void receivedStartOfHeadersInternal(boolean headersEndStream) throws ConnectionException;
 
 	final boolean receivedEndOfHeaders() throws ConnectionException {
-		return receivedEndOfHeadersLocal();
+		return receivedEndOfHeadersInternal();
 	}
 
-	protected abstract boolean receivedEndOfHeadersLocal() throws ConnectionException;
+	protected abstract boolean receivedEndOfHeadersInternal() throws ConnectionException;
 
 	final void receivedData(int payloadSize) throws ConnectionException {
-		contentLengthReceived += payloadSize;
-		long contentLengthHeader = exchangeData.getRequestContentLengthLong();
-		if (contentLengthHeader > -1 && contentLengthReceived > contentLengthHeader) {
-			throw new ConnectionException(
-					sm.getString("stream.header.contentLength", getConnectionId(), getIdentifier(),
-							Long.valueOf(contentLengthHeader), Long.valueOf(contentLengthReceived)),
-					Http2Error.PROTOCOL_ERROR);
-		}
+		receivedDataInternal(payloadSize);
 	}
 
+	protected abstract void receivedDataInternal(int payloadSize) throws ConnectionException;
+
 	final void receivedEndOfStream() throws ConnectionException {
-//		System.out.println(
-//				"conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " receivedEndOfStream");
-		if (isContentLengthInconsistent()) {
-			throw new ConnectionException(sm.getString("stream.header.contentLength", getConnectionId(),
-					getIdentifier(), Long.valueOf(exchangeData.getRequestContentLengthLong()),
-					Long.valueOf(contentLengthReceived)), Http2Error.PROTOCOL_ERROR);
-		}
+		receivedEndOfStreamInternal();
 		state.receivedEndOfStream();
 		notifyEof();
 	}
 
-	protected abstract void notifyEof();
+	protected abstract void receivedEndOfStreamInternal() throws ConnectionException;
 
-	final boolean isContentLengthInconsistent() {
-		long contentLengthHeader = exchangeData.getRequestContentLengthLong();
-		if (contentLengthHeader > -1 && contentLengthReceived != contentLengthHeader) {
-			return true;
-		}
-		return false;
-	}
+	protected abstract void notifyEof();
 
 	final void sentHeaders() {
 		state.sentHeaders();
@@ -415,42 +310,6 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 
 	final boolean isInputFinished() {
 		return !state.isFrameTypePermitted(FrameType.DATA);
-	}
-
-	/**
-	 * Populate the TLS related request attributes from the {@link SSLSupport}
-	 * instance associated with this processor. Protocols that populate TLS
-	 * attributes from a different source (e.g. AJP) should override this method.
-	 */
-	protected void populateSslRequestAttributes() {
-		try {
-			SSLSupport sslSupport = handler.getChannel().getSslSupport();// Stream.this
-			if (sslSupport != null) {
-				Object sslO = sslSupport.getCipherSuite();
-				if (sslO != null) {
-					exchangeData.setAttribute(SSLSupport.CIPHER_SUITE_KEY, sslO);
-				}
-				sslO = sslSupport.getPeerCertificateChain();
-				if (sslO != null) {
-					exchangeData.setAttribute(SSLSupport.CERTIFICATE_KEY, sslO);
-				}
-				sslO = sslSupport.getKeySize();
-				if (sslO != null) {
-					exchangeData.setAttribute(SSLSupport.KEY_SIZE_KEY, sslO);
-				}
-				sslO = sslSupport.getSessionId();
-				if (sslO != null) {
-					exchangeData.setAttribute(SSLSupport.SESSION_ID_KEY, sslO);
-				}
-				sslO = sslSupport.getProtocol();
-				if (sslO != null) {
-					exchangeData.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, sslO);
-				}
-				exchangeData.setAttribute(SSLSupport.SESSION_MGR, sslSupport);
-			}
-		} catch (Exception e) {
-			log.warn(sm.getString("abstractProcessor.socket.ssl"), e);
-		}
 	}
 
 	@Override

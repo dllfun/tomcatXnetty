@@ -17,9 +17,7 @@ import javax.servlet.http.HttpServletResponse;
 
 import org.apache.coyote.ErrorState;
 import org.apache.coyote.ExchangeData;
-import org.apache.coyote.Request;
 import org.apache.coyote.RequestAction;
-import org.apache.coyote.Response;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteChunk;
@@ -139,19 +137,10 @@ public class SocketInputReader extends RequestAction {
 	 */
 	private final MessageBytes tmpMB = MessageBytes.newInstance();
 
-	private final MessageBytes certificates;
-
-	// @Override
-	/*
-	 * public int doRead(PreInputBuffer handler) throws IOException {
-	 * 
-	 * if (endOfStream) { return -1; } if (empty) { if (!refillReadBuffer(true)) {
-	 * return -1; } } ByteChunk bc = bodyBytes.getByteChunk();
-	 * handler.setBufWrapper(
-	 * ByteBufferWrapper.wrapper(ByteBuffer.wrap(bc.getBuffer(), bc.getStart(),
-	 * bc.getLength()))); empty = true; return
-	 * handler.getBufWrapper().getRemaining(); }
+	/**
+	 * Byte chunk for certs.
 	 */
+	private final MessageBytes certificates = MessageBytes.newInstance();
 
 	public SocketInputReader(AjpProcessor processor) {
 		super(processor);
@@ -160,7 +149,6 @@ public class SocketInputReader extends RequestAction {
 		this.exchangeData = processor.getExchangeData();
 		this.requestHeaderMessage = new AjpMessage(packetSize);
 		this.bodyMessage = new AjpMessage(packetSize);
-		this.certificates = processor.getCertificates();
 		// Set the getBody message buffer
 		AjpMessage getBodyMessage = new AjpMessage(16);
 		getBodyMessage.reset();
@@ -365,6 +353,7 @@ public class SocketInputReader extends RequestAction {
 	/**
 	 * After reading the request headers, we have to setup the request filters.
 	 */
+	// @Override
 	protected void prepareRequest() {
 
 		// Translate the HTTP method code to a String.
@@ -706,6 +695,14 @@ public class SocketInputReader extends RequestAction {
 		return true;
 	}
 
+	@Override
+	public void finish() throws IOException {
+		// Swallow the unread body packet if present
+		if (isWaitingForBodyMessage() || isFirst() && exchangeData.getRequestContentLengthLong() > 0) {
+			refillBodyBuffer(true);
+		}
+	}
+
 	/**
 	 * Processors that populate request attributes directly (e.g. AJP) should
 	 * over-ride this method and return {@code false}.
@@ -888,11 +885,13 @@ public class SocketInputReader extends RequestAction {
 		// NO-OP
 	}
 
-	void recycle() {
+	@Override
+	public void recycle() {
 		endOfStream = false;
 		first = true;
 		empty = true;
 		replay = false;
 		waitingForBodyMessage = false;
+		certificates.recycle();
 	}
 }

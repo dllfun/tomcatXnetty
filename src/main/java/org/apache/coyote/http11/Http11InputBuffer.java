@@ -18,19 +18,9 @@ package org.apache.coyote.http11;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.regex.Pattern;
-
-import javax.servlet.http.HttpServletResponse;
-
 import org.apache.coyote.ErrorState;
 import org.apache.coyote.ExchangeData;
-import org.apache.coyote.Request;
 import org.apache.coyote.RequestAction;
-import org.apache.coyote.Response;
 import org.apache.coyote.http11.filters.BufferedInputFilter;
 import org.apache.coyote.http11.filters.ChunkedInputFilter;
 import org.apache.coyote.http11.filters.IdentityInputFilter;
@@ -39,10 +29,6 @@ import org.apache.coyote.http11.filters.VoidInputFilter;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteChunk;
-import org.apache.tomcat.util.buf.MessageBytes;
-import org.apache.tomcat.util.http.MimeHeaders;
-import org.apache.tomcat.util.http.parser.HttpParser;
-import org.apache.tomcat.util.http.parser.TokenList;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
@@ -70,61 +56,14 @@ public class Http11InputBuffer extends RequestAction {
 	 */
 	private final ExchangeData exchangeData;
 
-	/**
-	 * The read buffer.
-	 */
-	// private BufWrapper appReadBuffer;
-
-	/**
-	 * Pos of the end of the header in the buffer, which is also the start of the
-	 * body.
-	 */
-	// private int end;
-
-	private final HttpParser httpParser;
-
-	/**
-	 * Wrapper that provides access to the underlying socket.
-	 */
-	// private SocketChannel channel;
-
-	/**
-	 * Underlying input buffer.
-	 */
-//	private InputReader channelInputBuffer;
-
-	/**
-	 * HTTP/1.1 flag.
-	 */
-	protected boolean http11 = true;
-
-	/**
-	 * HTTP/0.9 flag.
-	 */
-	protected boolean http09 = false;
-
-	/**
-	 * Keep-alive.
-	 */
-	protected volatile boolean keepAlive = true;
-
-	/**
-	 * Content delimiter for the request (if false, the connection will be closed at
-	 * the end of the request).
-	 */
-	// protected boolean contentDelimitation = true;
-
 	// ----------------------------------------------------------- Constructors
 
-	public Http11InputBuffer(Http11Processor processor, HttpParser httpParser) {
+	public Http11InputBuffer(Http11Processor processor) {
 		super(processor);
 		this.processor = processor;
 		this.exchangeData = processor.getExchangeData();
-		this.httpParser = httpParser;
 
-//		channelInputBuffer = new SocketInputReader();
-
-		AbstractHttp11Protocol<?> protocol = (AbstractHttp11Protocol<?>) processor.getProtocol();
+		AbstractHttp11Protocol<?> protocol = processor.getProtocol();
 
 		// Create and add the identity filters.
 		addFilter(new IdentityInputFilter(processor, protocol.getMaxSwallowSize()));
@@ -141,374 +80,6 @@ public class Http11InputBuffer extends RequestAction {
 	}
 
 	// ------------------------------------------------------------- Properties
-
-	// ---------------------------------------------------- InputBuffer Methods
-
-	// @Override
-	// public int doRead(PreInputBuffer handler) throws IOException {
-
-	// if (lastActiveFilter == -1)
-	// return channelInputBuffer.doRead(handler);
-	// else
-	// return activeFilters[lastActiveFilter].doRead(handler);
-
-	// }
-
-	// ------------------------------------------------------- Protected Methods
-
-//	@Override
-//	protected InputReader getBaseInputReader() {
-//		return channelInputBuffer;
-//	}
-
-	protected void prepareRequestProtocol() {
-
-		MessageBytes protocolMB = exchangeData.getProtocol();
-		if (protocolMB.equals(Constants.HTTP_11)) {
-			http09 = false;
-			http11 = true;
-			protocolMB.setString(Constants.HTTP_11);
-		} else if (protocolMB.equals(Constants.HTTP_10)) {
-			http09 = false;
-			http11 = false;
-			keepAlive = false;
-			protocolMB.setString(Constants.HTTP_10);
-		} else if (protocolMB.equals("")) {
-			// HTTP/0.9
-			http09 = true;
-			http11 = false;
-			keepAlive = false;
-		} else {
-			// Unsupported protocol
-			http09 = false;
-			http11 = false;
-			// Send 505; Unsupported HTTP version
-			exchangeData.setStatus(505);
-			processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
-			if (log.isDebugEnabled()) {
-				log.debug(sm.getString("http11processor.request.prepare") + " Unsupported HTTP version \"" + protocolMB
-						+ "\"");
-			}
-		}
-	}
-
-	public boolean isHttp11() {
-		return http11;
-	}
-
-	public boolean isHttp09() {
-		return http09;
-	}
-
-	public boolean isKeepAlive() {
-		return keepAlive;
-	}
-
-	/**
-	 * After reading the request headers, we have to setup the request filters.
-	 */
-	protected void prepareRequest() throws IOException {
-
-//		contentDelimitation = false;
-		if (exchangeData.getRequestBodyType() != -1) {
-			throw new RuntimeException();
-		}
-
-		AbstractHttp11Protocol<?> protocol = (AbstractHttp11Protocol<?>) processor.getProtocol();
-
-		if (protocol.isSSLEnabled()) {
-			exchangeData.getScheme().setString("https");
-		}
-
-		MimeHeaders headers = exchangeData.getRequestHeaders();
-
-		// Check connection header
-		MessageBytes connectionValueMB = headers.getValue(Constants.CONNECTION);
-		if (connectionValueMB != null && !connectionValueMB.isNull()) {
-			Set<String> tokens = new HashSet<>();
-			TokenList.parseTokenList(headers.values(Constants.CONNECTION), tokens);
-			if (tokens.contains(Constants.CLOSE)) {
-				keepAlive = false;
-			} else if (tokens.contains(Constants.KEEP_ALIVE_HEADER_VALUE_TOKEN)) {
-				keepAlive = true;
-			}
-		}
-
-		if (http11) {
-			MessageBytes expectMB = headers.getValue("expect");
-			if (expectMB != null && !expectMB.isNull()) {
-				if (expectMB.toString().trim().equalsIgnoreCase("100-continue")) {
-					this.setSwallowInput(false);
-					exchangeData.setExpectation(true);
-				} else {
-					exchangeData.setStatus(HttpServletResponse.SC_EXPECTATION_FAILED);
-					processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
-				}
-			}
-		}
-
-		// Check user-agent header
-		Pattern restrictedUserAgents = protocol.getRestrictedUserAgentsPattern();
-		if (restrictedUserAgents != null && (http11 || keepAlive)) {
-			MessageBytes userAgentValueMB = headers.getValue("user-agent");
-			// Check in the restricted list, and adjust the http11
-			// and keepAlive flags accordingly
-			if (userAgentValueMB != null && !userAgentValueMB.isNull()) {
-				String userAgentValue = userAgentValueMB.toString();
-				if (restrictedUserAgents.matcher(userAgentValue).matches()) {
-					http11 = false;
-					keepAlive = false;
-				}
-			}
-		}
-
-		// Check host header
-		MessageBytes hostValueMB = null;
-		try {
-			hostValueMB = headers.getUniqueValue("host");
-		} catch (IllegalArgumentException iae) {
-			// Multiple Host headers are not permitted
-			badRequest("http11processor.request.multipleHosts");
-		}
-		if (http11 && hostValueMB == null) {
-			badRequest("http11processor.request.noHostHeader");
-		}
-
-		// Check for an absolute-URI less the query string which has already
-		// been removed during the parsing of the request line
-		ByteChunk uriBC = exchangeData.getRequestURI().getByteChunk();
-		byte[] uriB = uriBC.getBytes();
-		if (uriBC.startsWithIgnoreCase("http", 0)) {
-			int pos = 4;
-			// Check for https
-			if (uriBC.startsWithIgnoreCase("s", pos)) {
-				pos++;
-			}
-			// Next 3 characters must be "://"
-			if (uriBC.startsWith("://", pos)) {
-				pos += 3;
-				int uriBCStart = uriBC.getStart();
-
-				// '/' does not appear in the authority so use the first
-				// instance to split the authority and the path segments
-				int slashPos = uriBC.indexOf('/', pos);
-				// '@' in the authority delimits the userinfo
-				int atPos = uriBC.indexOf('@', pos);
-				if (slashPos > -1 && atPos > slashPos) {
-					// First '@' is in the path segments so no userinfo
-					atPos = -1;
-				}
-
-				if (slashPos == -1) {
-					slashPos = uriBC.getLength();
-					// Set URI as "/". Use 6 as it will always be a '/'.
-					// 01234567
-					// http://
-					// https://
-					exchangeData.getRequestURI().setBytes(uriB, uriBCStart + 6, 1);
-				} else {
-					exchangeData.getRequestURI().setBytes(uriB, uriBCStart + slashPos, uriBC.getLength() - slashPos);
-				}
-
-				// Skip any user info
-				if (atPos != -1) {
-					// Validate the userinfo
-					for (; pos < atPos; pos++) {
-						byte c = uriB[uriBCStart + pos];
-						if (!HttpParser.isUserInfo(c)) {
-							// Strictly there needs to be a check for valid %nn
-							// encoding here but skip it since it will never be
-							// decoded because the userinfo is ignored
-							badRequest("http11processor.request.invalidUserInfo");
-							break;
-						}
-					}
-					// Skip the '@'
-					pos = atPos + 1;
-				}
-
-				if (http11) {
-					// Missing host header is illegal but handled above
-					if (hostValueMB != null) {
-						// Any host in the request line must be consistent with
-						// the Host header
-						if (!hostValueMB.getByteChunk().equals(uriB, uriBCStart + pos, slashPos - pos)) {
-							if (protocol.getAllowHostHeaderMismatch()) {
-								// The requirements of RFC 2616 are being
-								// applied. If the host header and the request
-								// line do not agree, the request line takes
-								// precedence
-								hostValueMB = headers.setValue("host");
-								hostValueMB.setBytes(uriB, uriBCStart + pos, slashPos - pos);
-							} else {
-								// The requirements of RFC 7230 are being
-								// applied. If the host header and the request
-								// line do not agree, trigger a 400 response.
-								badRequest("http11processor.request.inconsistentHosts");
-							}
-						}
-					}
-				} else {
-					// Not HTTP/1.1 - no Host header so generate one since
-					// Tomcat internals assume it is set
-					try {
-						hostValueMB = headers.setValue("host");
-						hostValueMB.setBytes(uriB, uriBCStart + pos, slashPos - pos);
-					} catch (IllegalStateException e) {
-						// Edge case
-						// If the request has too many headers it won't be
-						// possible to create the host header. Ignore this as
-						// processing won't reach the point where the Tomcat
-						// internals expect there to be a host header.
-					}
-				}
-			} else {
-				badRequest("http11processor.request.invalidScheme");
-			}
-		}
-
-		// Validate the characters in the URI. %nn decoding will be checked at
-		// the point of decoding.
-		for (int i = uriBC.getStart(); i < uriBC.getEnd(); i++) {
-			if (!httpParser.isAbsolutePathRelaxed(uriB[i])) {
-				badRequest("http11processor.request.invalidUri");
-				break;
-			}
-		}
-
-		// Input filter setup
-		// InputFilter[] inputFilters = this.getFilters();
-
-		// Parse transfer-encoding header
-		if (http11) {
-			MessageBytes transferEncodingValueMB = headers.getValue("transfer-encoding");
-			if (transferEncodingValueMB != null) {
-				List<String> encodingNames = new ArrayList<>();
-				if (TokenList.parseTokenList(headers.values("transfer-encoding"), encodingNames)) {
-					for (String encodingName : encodingNames) {
-						// "identity" codings are ignored
-						this.addInputFilter(encodingName);// inputFilters,
-					}
-				} else {
-					// Invalid transfer encoding
-					badRequest("http11processor.request.invalidTransferEncoding");
-				}
-			}
-		}
-
-		// Parse content-length header
-		long contentLength = -1;
-		try {
-			contentLength = exchangeData.getRequestContentLengthLong();
-		} catch (NumberFormatException e) {
-			badRequest("http11processor.request.nonNumericContentLength");
-		} catch (IllegalArgumentException e) {
-			badRequest("http11processor.request.multipleContentLength");
-		}
-		if (contentLength >= 0) {
-			if (exchangeData.getRequestBodyType() == ExchangeData.BODY_TYPE_CHUNKED) {
-				// contentDelimitation being true at this point indicates that
-				// chunked encoding is being used but chunked encoding should
-				// not be used with a content length. RFC 2616, section 4.4,
-				// bullet 3 states Content-Length must be ignored in this case -
-				// so remove it.
-				headers.removeHeader("content-length");
-				exchangeData.setRequestContentLength(-1);
-			} else {
-				this.addActiveFilter(Constants.IDENTITY_FILTER);
-//				contentDelimitation = true;
-				exchangeData.setRequestBodyType(ExchangeData.BODY_TYPE_FIXEDLENGTH);
-			}
-		}
-
-		// Validate host name and extract port if present
-		parseHost(hostValueMB);
-
-		if (exchangeData.getRequestBodyType() == -1) {
-			// If there's no content length
-			// (broken HTTP/1.0 or HTTP/1.1), assume
-			// the client is not broken and didn't send a body
-			this.addActiveFilter(Constants.VOID_FILTER);
-//			contentDelimitation = true;
-			exchangeData.setRequestBodyType(ExchangeData.BODY_TYPE_NOBODY);
-		}
-
-		if (!processor.getErrorState().isIoAllowed()) {
-			Request request = processor.createRequest();
-			Response response = processor.createResponse();
-			request.setResponse(response);
-			processor.getAdapter().log(request, response, 0);
-		}
-
-		int maxKeepAliveRequests = protocol.getMaxKeepAliveRequests();
-		if (maxKeepAliveRequests == 1) {
-			keepAlive = false;
-		} else if (maxKeepAliveRequests > 0
-				&& ((SocketChannel) processor.getChannel()).incrementKeepAlive() >= maxKeepAliveRequests) {
-			keepAlive = false;
-		}
-
-	}
-
-	/**
-	 * Add an input filter to the current request. If the encoding is not supported,
-	 * a 501 response will be returned to the client.
-	 */
-	private void addInputFilter(String encodingName) {// InputFilter[] inputFilters,
-
-		// Parsing trims and converts to lower case.
-
-		if (encodingName.equals("identity")) {
-			// Skip
-		} else if (encodingName.equals("chunked")) {
-			this.addActiveFilter(Constants.CHUNKED_FILTER);
-//			contentDelimitation = true;
-			exchangeData.setRequestBodyType(ExchangeData.BODY_TYPE_CHUNKED);
-		} else {
-			InputFilter filter = getFilterByEncodingName(encodingName);
-			if (filter != null) {
-				this.addActiveFilter(filter.getId());
-				return;
-			}
-//			for (int i = pluggableFilterIndex; i < inputFilters.length; i++) {
-//				if (inputFilters[i].getEncodingName().toString().equals(encodingName)) {
-//					this.addActiveFilter(inputFilters[i]);
-//					return;
-//				}
-//			}
-			// Unsupported transfer encoding
-			// 501 - Unimplemented
-			exchangeData.setStatus(501);
-			processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
-			if (log.isDebugEnabled()) {
-				log.debug(sm.getString("http11processor.request.prepare") + " Unsupported transfer encoding ["
-						+ encodingName + "]");
-			}
-		}
-	}
-
-	private void badRequest(String errorKey) {
-		exchangeData.setStatus(400);
-		processor.setErrorState(ErrorState.CLOSE_CLEAN, null);
-		if (log.isDebugEnabled()) {
-			log.debug(sm.getString(errorKey));
-		}
-	}
-
-	/**
-	 * End request (consumes leftover bytes).
-	 *
-	 * @throws IOException an underlying I/O error occurred
-	 */
-	void endRequest() throws IOException {
-
-		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
-		if (isSwallowInput() && (hasActiveFilters())) {
-			int extraBytes = (int) getLastActiveFilter().end();
-			byteBuffer.setPosition(byteBuffer.getPosition() - extraBytes);
-		}
-
-	}
 
 	@Override
 	protected BufWrapper doReadFromChannel() throws IOException {
@@ -537,7 +108,7 @@ public class Http11InputBuffer extends RequestAction {
 	 * Available bytes in the buffers (note that due to encoding, this may not
 	 * correspond).
 	 */
-	int available(boolean read) {
+	private int available(boolean read) {
 		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 
 		int available = byteBuffer.getRemaining();
@@ -588,13 +159,13 @@ public class Http11InputBuffer extends RequestAction {
 
 	@Override
 	public final boolean isRequestBodyFullyRead() {
-		return this.isFinished();
+		return this.requestBodyFullyRead();
 	}
 
 	@Override
 	public boolean isTrailerFieldsReady() {
 		if (this.isChunking()) {
-			return this.isFinished();
+			return this.requestBodyFullyRead();
 		} else {
 			return true;
 		}
@@ -605,7 +176,7 @@ public class Http11InputBuffer extends RequestAction {
 	 * this and available() &gt; 0 primarily because of having to handle faking
 	 * non-blocking reads with the blocking IO connector.
 	 */
-	boolean isFinished() {
+	private boolean requestBodyFullyRead() {
 		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 
 		if (byteBuffer.hasRemaining()) {
@@ -635,6 +206,20 @@ public class Http11InputBuffer extends RequestAction {
 	@Override
 	public final void registerReadInterest() {
 		((SocketChannel) processor.getChannel()).registerReadInterest();
+	}
+
+	/**
+	 * End request (consumes leftover bytes).
+	 *
+	 * @throws IOException an underlying I/O error occurred
+	 */
+	@Override
+	public void finish() throws IOException {
+		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
+		if (isSwallowInput() && (hasActiveFilters())) {
+			int extraBytes = (int) getLastActiveFilter().end();
+			byteBuffer.setPosition(byteBuffer.getPosition() - extraBytes);
+		}
 	}
 
 	/**
@@ -814,8 +399,6 @@ public class Http11InputBuffer extends RequestAction {
 
 	void init(SocketChannel channel) {
 
-		// this.channel = channel;
-
 	}
 
 	/**
@@ -834,45 +417,14 @@ public class Http11InputBuffer extends RequestAction {
 	/**
 	 * Recycle the input buffer. This should be called when closing the connection.
 	 */
-	void recycle() {
+	@Override
+	public void recycle() {
 		if (((SocketChannel) processor.getChannel()) != null) {
 			((SocketChannel) processor.getChannel()).getAppReadBuffer().reset();
 		}
 		// exchangeData.recycle();
 
-		keepAlive = true;
 		resetFilters();
 	}
-
-	// ------------------------------------- InputStreamInputBuffer Inner Class
-
-	/**
-	 * This class is an input buffer which will read its data from an input stream.
-	 */
-//	private class SocketInputReader implements InputReader {
-
-	// @Override
-	// public int doRead(PreInputBuffer handler) throws IOException {
-
-	// if (channel.getAppReadBuffer().hasNoRemaining()) {
-	// // The application is reading the HTTP request body which is
-	// // always a blocking operation.
-	// if (!channel.getAppReadBuffer().fill(true))
-	// return -1;
-	// }
-
-	// int length = channel.getAppReadBuffer().getRemaining();
-	// handler.setBufWrapper(channel.getAppReadBuffer().duplicate());
-	// channel.getAppReadBuffer().setPosition(channel.getAppReadBuffer().getLimit());
-
-	// return length;
-	// }
-
-//		@Override
-//		public BufWrapper doRead() throws IOException {
-
-//		}
-
-//	}
 
 }
