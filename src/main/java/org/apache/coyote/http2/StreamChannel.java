@@ -13,7 +13,7 @@ import org.apache.coyote.ExchangeData;
 import org.apache.coyote.http2.HpackDecoder.HeaderEmitter;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.http.MimeHeaders;
-import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
 public class StreamChannel extends Stream {
@@ -324,7 +324,7 @@ public class StreamChannel extends Stream {
 			log.debug(sm.getString("stream.inputBuffer.copy", Integer.toString(written)));
 		}
 		handler.getWriter().writeWindowUpdate(this, written, true);
-		ByteBufferWrapper toreturn = ByteBufferWrapper.wrapper(buffer);
+		ByteBufferWrapper toreturn = ByteBufferWrapper.wrapper(buffer, true);
 		System.out.println("stream" + getIdAsString() + " take:" + toreturn.getRemaining());
 		return toreturn;
 	}

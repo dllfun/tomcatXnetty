@@ -21,16 +21,24 @@ import java.nio.charset.StandardCharsets;
 import java.security.AccessController;
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
+import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Locale;
+import java.util.Set;
+
+import javax.servlet.http.HttpServletResponse;
 
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.Adapter;
 import org.apache.coyote.ContainerThreadMarker;
 import org.apache.coyote.ErrorState;
 import org.apache.coyote.ExchangeData;
+import org.apache.coyote.Request;
 import org.apache.coyote.RequestAction;
+import org.apache.coyote.Response;
 import org.apache.coyote.ResponseAction;
+import org.apache.coyote.http11.AbstractHttp11Protocol;
 import org.apache.coyote.http2.HpackDecoder.HeaderEmitter;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -39,6 +47,7 @@ import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.FastHttpDateFormat;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.parser.Host;
+import org.apache.tomcat.util.http.parser.HttpParser;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.DispatchType;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
@@ -56,6 +65,22 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 	private static final Log log = LogFactory.getLog(StreamProcessor.class);
 	private static final StringManager sm = StringManager.getManager(StreamProcessor.class);
 
+	private static final Set<String> H2_PSEUDO_HEADERS_REQUEST = new HashSet<>();
+	private static final Set<String> HTTP_CONNECTION_SPECIFIC_HEADERS = new HashSet<>();
+
+	static {
+		H2_PSEUDO_HEADERS_REQUEST.add(":method");
+		H2_PSEUDO_HEADERS_REQUEST.add(":scheme");
+		H2_PSEUDO_HEADERS_REQUEST.add(":authority");
+		H2_PSEUDO_HEADERS_REQUEST.add(":path");
+
+		HTTP_CONNECTION_SPECIFIC_HEADERS.add("connection");
+		HTTP_CONNECTION_SPECIFIC_HEADERS.add("proxy-connection");
+		HTTP_CONNECTION_SPECIFIC_HEADERS.add("keep-alive");
+		HTTP_CONNECTION_SPECIFIC_HEADERS.add("transfer-encoding");
+		HTTP_CONNECTION_SPECIFIC_HEADERS.add("upgrade");
+	}
+
 	private final Http2UpgradeHandler handler;
 	private final StreamChannel stream;
 	private int headerState = HEADER_STATE_START;
@@ -63,6 +88,7 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 	private StringBuilder cookieHeader = null;
 	private boolean repeat = true;
 	private volatile long contentLengthReceived = 0;
+	private volatile boolean hostHeaderSeen = false;
 
 	StreamProcessor(Http2UpgradeHandler handler, StreamChannel stream, Adapter adapter) {
 		this(handler, stream, adapter, new ExchangeData());
@@ -101,24 +127,24 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 	public final void emitHeader(String name, String value) throws HpackException {
 		if (log.isDebugEnabled()) {
 			log.debug(
-					sm.getString("stream.header.debug", stream.getConnectionId(), stream.getIdentifier(), name, value));
+					sm.getString("stream.header.debug", stream.getConnectionId(), stream.getIdAsString(), name, value));
 		}
 
 		// Header names must be lower case
 		if (!name.toLowerCase(Locale.US).equals(name)) {
 			throw new HpackException(
-					sm.getString("stream.header.case", stream.getConnectionId(), stream.getIdentifier(), name));
+					sm.getString("stream.header.case", stream.getConnectionId(), stream.getIdAsString(), name));
 		}
 
-		if ("connection".equals(name)) {
+		if (HTTP_CONNECTION_SPECIFIC_HEADERS.contains(name)) {
 			throw new HpackException(
-					sm.getString("stream.header.connection", stream.getConnectionId(), stream.getIdentifier()));
+					sm.getString("stream.header.connection", stream.getConnectionId(), stream.getIdAsString(), name));
 		}
 
 		if ("te".equals(name)) {
 			if (!"trailers".equals(value)) {
 				throw new HpackException(
-						sm.getString("stream.header.te", stream.getConnectionId(), stream.getIdentifier(), value));
+						sm.getString("stream.header.te", stream.getConnectionId(), stream.getIdAsString(), value));
 			}
 		}
 
@@ -130,14 +156,14 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 
 		if (name.length() == 0) {
 			throw new HpackException(
-					sm.getString("stream.header.empty", stream.getConnectionId(), stream.getIdentifier()));
+					sm.getString("stream.header.empty", stream.getConnectionId(), stream.getIdAsString()));
 		}
 
 		boolean pseudoHeader = name.charAt(0) == ':';
 
 		if (pseudoHeader && headerState != HEADER_STATE_PSEUDO) {
 			headerException = new StreamException(sm.getString("stream.header.unexpectedPseudoHeader",
-					stream.getConnectionId(), stream.getIdentifier(), name), Http2Error.PROTOCOL_ERROR,
+					stream.getConnectionId(), stream.getIdAsString(), name), Http2Error.PROTOCOL_ERROR,
 					stream.getIdAsInt());
 			// No need for further processing. The stream will be reset.
 			return;
@@ -153,7 +179,7 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 				exchangeData.getMethod().setString(value);
 			} else {
 				throw new HpackException(sm.getString("stream.header.duplicate", stream.getConnectionId(),
-						stream.getIdentifier(), ":method"));
+						stream.getIdAsString(), ":method"));
 			}
 			break;
 		}
@@ -162,18 +188,18 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 				exchangeData.getScheme().setString(value);
 			} else {
 				throw new HpackException(sm.getString("stream.header.duplicate", stream.getConnectionId(),
-						stream.getIdentifier(), ":scheme"));
+						stream.getIdAsString(), ":scheme"));
 			}
 			break;
 		}
 		case ":path": {
 			if (!exchangeData.getRequestURI().isNull()) {
 				throw new HpackException(sm.getString("stream.header.duplicate", stream.getConnectionId(),
-						stream.getIdentifier(), ":path"));
+						stream.getIdAsString(), ":path"));
 			}
 			if (value.length() == 0) {
 				throw new HpackException(
-						sm.getString("stream.header.noPath", stream.getConnectionId(), stream.getIdentifier()));
+						sm.getString("stream.header.noPath", stream.getConnectionId(), stream.getIdAsString()));
 			}
 			int queryStart = value.indexOf('?');
 			String uri;
@@ -194,23 +220,10 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 		}
 		case ":authority": {
 			if (exchangeData.getServerName().isNull()) {
-				int i;
-				try {
-					i = Host.parse(value);
-				} catch (IllegalArgumentException iae) {
-					// Host value invalid
-					throw new HpackException(sm.getString("stream.header.invalid", stream.getConnectionId(),
-							stream.getIdentifier(), ":authority", value));
-				}
-				if (i > -1) {
-					exchangeData.getServerName().setString(value.substring(0, i));
-					exchangeData.setServerPort(Integer.parseInt(value.substring(i + 1)));
-				} else {
-					exchangeData.getServerName().setString(value);
-				}
+				parseAuthority(value, false);
 			} else {
 				throw new HpackException(sm.getString("stream.header.duplicate", stream.getConnectionId(),
-						stream.getIdentifier(), ":authority"));
+						stream.getIdAsString(), ":authority"));
 			}
 			break;
 		}
@@ -225,6 +238,22 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 			cookieHeader.append(value);
 			break;
 		}
+		case "host": {
+			if (exchangeData.getServerName().isNull()) {
+				// No :authority header. This is first host header. Use it.
+				hostHeaderSeen = true;
+				parseAuthority(value, true);
+			} else if (!hostHeaderSeen) {
+				// First host header - must be consistent with :authority
+				hostHeaderSeen = true;
+				compareAuthority(value);
+			} else {
+				// Multiple hosts headers - illegal
+				throw new HpackException(sm.getString("stream.header.duplicate", stream.getConnectionId(),
+						stream.getIdAsString(), "host"));
+			}
+			break;
+		}
 		default: {
 			if (headerState == HEADER_STATE_TRAILER && !handler.getProtocol().isTrailerHeaderAllowed(name)) {
 				break;
@@ -234,7 +263,7 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 			}
 			if (pseudoHeader) {
 				headerException = new StreamException(sm.getString("stream.header.unknownPseudoHeader",
-						stream.getConnectionId(), stream.getIdentifier(), name), Http2Error.PROTOCOL_ERROR,
+						stream.getConnectionId(), stream.getIdAsString(), name), Http2Error.PROTOCOL_ERROR,
 						stream.getIdAsInt());
 			}
 
@@ -246,6 +275,43 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 			}
 		}
 		}
+	}
+
+	private void parseAuthority(String value, boolean host) throws HpackException {
+		int i;
+		try {
+			i = Host.parse(value);
+		} catch (IllegalArgumentException iae) {
+			// Host value invalid
+			throw new HpackException(sm.getString("stream.header.invalid", stream.getConnectionId(),
+					stream.getIdAsString(), host ? "host" : ":authority", value));
+		}
+		if (i > -1) {
+			exchangeData.getServerName().setString(value.substring(0, i));
+			exchangeData.setServerPort(Integer.parseInt(value.substring(i + 1)));
+		} else {
+			exchangeData.getServerName().setString(value);
+		}
+	}
+
+	private void compareAuthority(String value) throws HpackException {
+		int i;
+		try {
+			i = Host.parse(value);
+		} catch (IllegalArgumentException iae) {
+			// Host value invalid
+			throw new HpackException(sm.getString("stream.header.invalid", stream.getConnectionId(),
+					stream.getIdAsString(), "host", value));
+		}
+		if (i == -1 && (!value.equals(exchangeData.getServerName().getString()) || exchangeData.getServerPort() != -1)
+				|| i > -1 && ((!value.substring(0, i).equals(exchangeData.getServerName().getString())
+						|| Integer.parseInt(value.substring(i + 1)) != exchangeData.getServerPort()))) {
+			// Host value inconsistent
+			throw new HpackException(
+					sm.getString("stream.host.inconsistent", stream.getConnectionId(), stream.getIdAsString(), value,
+							exchangeData.getServerName().getString(), Integer.toString(exchangeData.getServerPort())));
+		}
+
 	}
 
 	// @Override
@@ -387,7 +453,7 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 	}
 
 	// Static so it can be used by Stream to build the MimeHeaders required for
-	// an ACK. For that use case coyoteRequest, protocol and stream will be null.
+	// an ACK. For that use case exchangeData, protocol and stream will be null.
 	static void prepareHeaders(ExchangeData exchangeData, boolean noSendfile, Http2Protocol protocol, Stream stream) {
 		MimeHeaders headers = exchangeData.getResponseHeaders();
 		int statusCode = exchangeData.getStatus();
@@ -396,20 +462,10 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 		headers.addValue(":status").setString(Integer.toString(statusCode));
 
 		if (noSendfile && stream != null) {
-			((StreamProcessor) stream.getCurrentProcessor())
-					.addOutputFilter(org.apache.coyote.http11.Constants.FLOWCTRL_FILTER);
-			((StreamProcessor) stream.getCurrentProcessor())
-					.addOutputFilter(org.apache.coyote.http11.Constants.BUFFEREDOUTPUT_FILTER);
-		}
-		// Compression can't be used with sendfile
-		// Need to check for compression (and set headers appropriately) before
-		// adding headers below
-		if (noSendfile && protocol != null && protocol.useCompression(exchangeData)) {
-			// Enable compression. Headers will have been set. Need to configure
-			// output filter at this point.
-			if (stream.getCurrentProcessor() != null) {
+			if ("HEAD".equals(exchangeData.getMethod().toString())) {
+				exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_NOBODY);
 				((StreamProcessor) stream.getCurrentProcessor())
-						.addOutputFilter(org.apache.coyote.http11.Constants.GZIP_FILTER);
+						.addOutputFilter(org.apache.coyote.http11.Constants.VOID_FILTER);
 			}
 		}
 
@@ -431,7 +487,7 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 					headers.addValue("content-length").setLong(contentLength);
 				}
 			} else {
-				exchangeData.setRequestContentLength(headers.getValue("content-length").getLong());
+				exchangeData.setResponseContentLength(headers.getValue("content-length").getLong());
 			}
 		} else {
 			if (statusCode == 205) {
@@ -440,6 +496,49 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 				exchangeData.setResponseContentLength(0);
 			} else {
 				exchangeData.setResponseContentLength(-1);
+			}
+		}
+
+		if (stream != null) {
+			if (noSendfile && exchangeData.getResponseBodyType() == -1) {
+				// Compression can't be used with sendfile
+				// Need to check for compression (and set headers appropriately) before
+				// adding headers below
+				if (protocol != null && protocol.useCompression(exchangeData)) {
+					exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_NOLIMIT);
+					((StreamProcessor) stream.getCurrentProcessor())
+							.addOutputFilter(org.apache.coyote.http11.Constants.FLOWCTRL_FILTER);
+					((StreamProcessor) stream.getCurrentProcessor())
+							.addOutputFilter(org.apache.coyote.http11.Constants.BUFFEREDOUTPUT_FILTER);
+					// Enable compression. Headers will have been set. Need to configure
+					// output filter at this point.
+					((StreamProcessor) stream.getCurrentProcessor())
+							.addOutputFilter(org.apache.coyote.http11.Constants.GZIP_FILTER);
+				}
+			}
+
+			if (exchangeData.getResponseBodyType() == -1) {
+				if (noSendfile && exchangeData.getResponseContentLengthLong() == 0) {
+					((StreamProcessor) stream.getCurrentProcessor())
+							.addOutputFilter(org.apache.coyote.http11.Constants.VOID_FILTER);
+					exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_NOBODY);
+				} else if (exchangeData.getResponseContentLengthLong() > 0) {
+					exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_FIXEDLENGTH);
+					((StreamProcessor) stream.getCurrentProcessor())
+							.addOutputFilter(org.apache.coyote.http11.Constants.FLOWCTRL_FILTER);
+					((StreamProcessor) stream.getCurrentProcessor())
+							.addOutputFilter(org.apache.coyote.http11.Constants.BUFFEREDOUTPUT_FILTER);
+				} else {
+					exchangeData.setResponseBodyType(ExchangeData.BODY_TYPE_NOLIMIT);
+					((StreamProcessor) stream.getCurrentProcessor())
+							.addOutputFilter(org.apache.coyote.http11.Constants.FLOWCTRL_FILTER);
+					((StreamProcessor) stream.getCurrentProcessor())
+							.addOutputFilter(org.apache.coyote.http11.Constants.BUFFEREDOUTPUT_FILTER);
+				}
+			}
+
+			if (exchangeData.getResponseBodyType() == -1) {
+				throw new RuntimeException();
 			}
 		}
 
@@ -604,6 +703,83 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 			}
 			exchangeData.getServerName().setChars(hostNameC, 0, valueL);
 		}
+		if (!validateRequest()) {
+			exchangeData.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+			Request request = createRequest();
+			Response response = createResponse();
+			request.setResponse(response);
+			getAdapter().log(request, response, 0);
+			setErrorState(ErrorState.CLOSE_CLEAN, null);
+		}
+	}
+
+	/*
+	 * In HTTP/1.1 some aspects of the request are validated as the request is
+	 * parsed and the request rejected immediately with a 400 response. These checks
+	 * are performed in Http11InputBuffer. Because, in Tomcat's HTTP/2
+	 * implementation, incoming frames are processed on one thread while the
+	 * corresponding request/response is processed on a separate thread, rejecting
+	 * invalid requests is more involved.
+	 *
+	 * One approach would be to validate the request during parsing, note any
+	 * validation errors and then generate a 400 response once processing moves to
+	 * the separate request/response thread. This would require refactoring to track
+	 * the validation errors.
+	 *
+	 * A second approach, and the one currently adopted, is to perform the
+	 * validation shortly after processing of the received request passes to the
+	 * separate thread and to generate a 400 response if validation fails.
+	 *
+	 * The checks performed below are based on the checks in Http11InputBuffer.
+	 */
+	private boolean validateRequest() {
+		HttpParser httpParser = new HttpParser(
+				((AbstractHttp11Protocol<?>) handler.getProtocol().getHttp11Protocol()).getRelaxedPathChars(),
+				((AbstractHttp11Protocol<?>) handler.getProtocol().getHttp11Protocol()).getRelaxedQueryChars());
+
+		// Method name must be a token
+		String method = exchangeData.getMethod().toString();
+		if (!HttpParser.isToken(method)) {
+			return false;
+		}
+
+		// Invalid character in request target
+		// (other checks such as valid %nn happen later)
+		ByteChunk bc = exchangeData.getRequestURI().getByteChunk();
+		for (int i = bc.getStart(); i < bc.getEnd(); i++) {
+			if (httpParser.isNotRequestTargetRelaxed(bc.getBuffer()[i])) {
+				return false;
+			}
+		}
+
+		// Ensure the query string doesn't contain invalid characters.
+		// (other checks such as valid %nn happen later)
+		String qs = exchangeData.getQueryString().toString();
+		if (qs != null) {
+			for (char c : qs.toCharArray()) {
+				if (!httpParser.isQueryRelaxed(c)) {
+					return false;
+				}
+			}
+		}
+
+		// HTTP header names must be tokens.
+		MimeHeaders headers = exchangeData.getRequestHeaders();
+		boolean previousHeaderWasPseudoHeader = true;
+		Enumeration<String> names = headers.names();
+		while (names.hasMoreElements()) {
+			String name = names.nextElement();
+			if (H2_PSEUDO_HEADERS_REQUEST.contains(name)) {
+				if (!previousHeaderWasPseudoHeader) {
+					return false;
+				}
+			} else if (!HttpParser.isToken(name)) {
+				previousHeaderWasPseudoHeader = false;
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	@Override

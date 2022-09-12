@@ -18,7 +18,7 @@ package org.apache.coyote;
 
 import java.io.IOException;
 
-import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
+import org.apache.tomcat.util.net.BufWrapper;
 
 /**
  * This class is only for internal use in the protocol implementation. All

@@ -5,14 +5,15 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentNavigableMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.coyote.CloseNowException;
 import org.apache.coyote.ExchangeData;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -27,7 +28,7 @@ public class StreamZero extends AbstractStream {
 	private static final AtomicInteger connectionIdGenerator = new AtomicInteger(0);
 	private final Http2UpgradeHandler handler;
 	private AtomicReference<ConnectionState> connectionState = new AtomicReference<>(ConnectionState.NEW);
-	private final Map<Integer, StreamChannel> streams = new ConcurrentHashMap<>();
+	private final ConcurrentNavigableMap<Integer, StreamChannel> streams = new ConcurrentSkipListMap<>();
 	private final AtomicInteger nextLocalStreamId = new AtomicInteger(2);
 	private volatile int newStreamsSinceLastPrune = 0;
 
@@ -258,7 +259,7 @@ public class StreamZero extends AbstractStream {
 		return connectionState;
 	}
 
-	public Map<Integer, StreamChannel> getStreams() {
+	public ConcurrentNavigableMap<Integer, StreamChannel> getStreams() {
 		return streams;
 	}
 

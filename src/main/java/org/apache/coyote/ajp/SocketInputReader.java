@@ -23,9 +23,9 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.MimeHeaders;
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketChannel;
-import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -180,7 +180,7 @@ public class SocketInputReader extends RequestAction {
 		}
 		ByteChunk bc = bodyBytes.getByteChunk();
 		empty = true;
-		return ByteBufferWrapper.wrapper(ByteBuffer.wrap(bc.getBuffer(), bc.getStart(), bc.getLength()));
+		return ByteBufferWrapper.wrapper(ByteBuffer.wrap(bc.getBuffer(), bc.getStart(), bc.getLength()), true);
 	}
 
 	/**

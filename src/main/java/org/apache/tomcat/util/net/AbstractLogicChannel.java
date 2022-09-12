@@ -5,7 +5,6 @@ import java.nio.ByteBuffer;
 
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.http.MimeHeaders;
-import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 
 public interface AbstractLogicChannel extends Channel {
 

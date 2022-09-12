@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map.Entry;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -555,10 +556,6 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		zero.close();
 	}
 
-	protected HeaderFrameBuffers getHeaderFrameBuffers(int initialPayloadSize) {
-		return new DefaultHeaderFrameBuffers(initialPayloadSize);
-	}
-
 	protected HpackDecoder getHpackDecoder() {
 		if (hpackDecoder == null) {
 			hpackDecoder = new HpackDecoder(localSettings.getHeaderTableSize());
@@ -795,6 +792,10 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 			return headerFrameBuffers;
 		}
 
+		protected HeaderFrameBuffers getHeaderFrameBuffers(int initialPayloadSize) {
+			return new DefaultHeaderFrameBuffers(initialPayloadSize);
+		}
+
 		void writePushHeader(ExchangeData exchangeData, Stream associatedStream) throws IOException {
 			if (localSettings.getMaxConcurrentStreams() < activeRemoteStreamCount.incrementAndGet()) {
 				// If there are too many open streams, simply ignore the push
@@ -867,29 +868,45 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		 * handling.
 		 */
 		void writeWindowUpdate(Stream stream, int increment, boolean applicationInitiated) throws IOException {
-			if (!stream.canWrite()) {
-				return;
+			if (log.isDebugEnabled()) {
+				log.debug(sm.getString("upgradeHandler.windowUpdateConnection", stream.getConnectionId(),
+						Integer.valueOf(increment)));
 			}
-//			System.out.println("stream" + stream.getIdAsString() + " writeWindowUpdate" + increment);
+			channel.getWriteLock().lock();
 			try {
-				channel.getWriteLock().lock();
 				// Build window update frame for stream 0
 				byte[] frame = new byte[13];
 				ByteUtil.setThreeBytes(frame, 0, 4);
 				frame[3] = FrameType.WINDOW_UPDATE.getIdByte();
 				ByteUtil.set31Bits(frame, 9, increment);
 				channel.write(true, frame, 0, frame.length);
-				// Change stream Id and re-use
-				ByteUtil.set31Bits(frame, 5, stream.getIdAsInt());
-				try {
-					channel.write(true, frame, 0, frame.length);
-					channel.flush(true);
-				} catch (IOException ioe) {
-					if (applicationInitiated) {
-						handleAppInitiatedIOException(ioe);
-					} else {
-						throw ioe;
+				boolean needFlush = true;
+				// No need to send update from closed stream
+				if (stream.canWrite()) {
+					int streamIncrement = stream.getWindowUpdateSizeToWrite(increment);
+					if (streamIncrement > 0) {
+						if (log.isDebugEnabled()) {
+							log.debug(sm.getString("upgradeHandler.windowUpdateStream", stream.getConnectionId(),
+									stream.getIdAsString(), Integer.valueOf(streamIncrement)));
+						}
+						// Re-use buffer as connection update has already been written
+						ByteUtil.set31Bits(frame, 5, stream.getIdAsInt());
+						ByteUtil.set31Bits(frame, 9, streamIncrement);
+						try {
+							channel.write(true, frame, 0, frame.length);
+							channel.flush(true);
+							needFlush = false;
+						} catch (IOException ioe) {
+							if (applicationInitiated) {
+								handleAppInitiatedIOException(ioe);
+							} else {
+								throw ioe;
+							}
+						}
 					}
+				}
+				if (needFlush) {
+					channel.flush(true);
 				}
 			} finally {
 				channel.getWriteLock().unlock();
@@ -1152,11 +1169,12 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		}
 
 		private void closeIdleStreams(int newMaxActiveRemoteStreamId) {
-			for (Entry<Integer, StreamChannel> entry : zero.getStreams().entrySet()) {
-				if (entry.getKey().intValue() > maxActiveRemoteStreamId
-						&& entry.getKey().intValue() < newMaxActiveRemoteStreamId) {
-					System.err.println("has bug, never happen");
-					entry.getValue().closeIfIdle();
+			final ConcurrentNavigableMap<Integer, StreamChannel> subMap = zero.getStreams().subMap(
+					Integer.valueOf(maxActiveRemoteStreamId), false, Integer.valueOf(newMaxActiveRemoteStreamId),
+					false);
+			for (StreamChannel stream : subMap.values()) {
+				if (stream instanceof Stream) {
+					((Stream) stream).closeIfIdle();
 				}
 			}
 			maxActiveRemoteStreamId = newMaxActiveRemoteStreamId;

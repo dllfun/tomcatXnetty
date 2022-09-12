@@ -41,6 +41,9 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 	protected final StreamStateMachine state;
 	protected final WindowAllocationManager allocationManager = new WindowAllocationManager(this);
 
+	private Object pendingWindowUpdateForStreamLock = new Object();
+	private int pendingWindowUpdateForStream = 0;
+
 //	private final ResponseData responseData = new ResponseData();
 //	private final StreamInputBuffer streamInputBuffer;
 //	protected final StreamOutputBuffer streamOutputBuffer = new StreamOutputBuffer();
@@ -185,6 +188,26 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 		}
 		decrementWindowSize(allocation);
 		return allocation;
+	}
+
+	int getWindowUpdateSizeToWrite(int increment) {
+		int result;
+		int threshold = handler.getProtocol().getOverheadWindowUpdateThreshold();
+		synchronized (pendingWindowUpdateForStreamLock) {
+			if (increment > threshold) {
+				result = increment + pendingWindowUpdateForStream;
+				pendingWindowUpdateForStream = 0;
+			} else {
+				pendingWindowUpdateForStream += increment;
+				if (pendingWindowUpdateForStream > threshold) {
+					result = pendingWindowUpdateForStream;
+					pendingWindowUpdateForStream = 0;
+				} else {
+					result = 0;
+				}
+			}
+		}
+		return result;
 	}
 
 	void doStreamCancel(String msg, Http2Error error) throws CloseNowException {
@@ -375,63 +398,5 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 	public Object getStreamID() {
 		return this.getIdentifier().toString();
 	}
-
-//	class StreamOutputBuffer implements HttpOutputBuffer {
-
-//		private StreamOutputBuffer() {
-
-//		}
-
-//	}
-
-//	class StreamInputBuffer implements InputReader, ByteBufferHandler {
-
-	// @Override
-	/*
-	 * public final int doRead(PreInputBuffer applicationBufferHandler) throws
-	 * IOException {
-	 * 
-	 * ensureBuffersExist();
-	 * 
-	 * int written = -1;
-	 * 
-	 * // Ensure that only one thread accesses inBuffer at a time synchronized
-	 * (inBuffer) { boolean canRead = false; while (inBuffer.position() == 0 &&
-	 * (canRead = isActive() && !isInputFinished())) { // Need to block until some
-	 * data is written try { if (log.isDebugEnabled()) {
-	 * log.debug(sm.getString("stream.inputBuffer.empty")); }
-	 * 
-	 * long readTimeout = handler.getProtocol().getStreamReadTimeout(); if
-	 * (readTimeout < 0) { inBuffer.wait(); } else { inBuffer.wait(readTimeout); }
-	 * 
-	 * if (resetReceived) { throw new
-	 * IOException(sm.getString("stream.inputBuffer.reset")); }
-	 * 
-	 * if (inBuffer.position() == 0 && isActive() && !isInputFinished()) { String
-	 * msg = sm.getString("stream.inputBuffer.readTimeout"); StreamException se =
-	 * new StreamException(msg, Http2Error.ENHANCE_YOUR_CALM, getIdAsInt()); //
-	 * Trigger a reset once control returns to Tomcat responseData.setError();
-	 * streamOutputBuffer.reset = se; throw new CloseNowException(msg, se); } }
-	 * catch (InterruptedException e) { // Possible shutdown / rst or similar. Use
-	 * an // IOException to signal to the client that further I/O // isn't possible
-	 * for this Stream. throw new IOException(e); } }
-	 * 
-	 * if (inBuffer.position() > 0) { // Data is available in the inBuffer. Copy it
-	 * to the // outBuffer. inBuffer.flip(); written = inBuffer.remaining(); if
-	 * (log.isDebugEnabled()) { log.debug(sm.getString("stream.inputBuffer.copy",
-	 * Integer.toString(written))); } inBuffer.get(outBuffer, 0, written);
-	 * inBuffer.clear(); } else if (!canRead) { return -1; } else { // Should never
-	 * happen throw new IllegalStateException(); } }
-	 * 
-	 * applicationBufferHandler.setBufWrapper(ByteBufferWrapper.wrapper(ByteBuffer.
-	 * wrap(outBuffer, 0, written)));
-	 * 
-	 * // Increment client-side flow control windows by the number of bytes // read
-	 * handler.writeWindowUpdate(Stream.this, written, true);
-	 * 
-	 * return written; }
-	 */
-
-//	}
 
 }

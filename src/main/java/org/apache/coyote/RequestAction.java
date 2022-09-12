@@ -11,7 +11,7 @@ import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.parser.Host;
 import org.apache.tomcat.util.log.UserDataHelper;
-import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 public abstract class RequestAction implements InputReader {

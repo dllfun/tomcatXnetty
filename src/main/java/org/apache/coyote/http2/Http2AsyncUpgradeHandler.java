@@ -25,6 +25,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.servlet.http.WebConnection;
 
@@ -44,8 +45,10 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 	// Because of the compression used, headers need to be written to the
 	// network in the same order they are generated.
 	private final Object headerWriteLock = new Object();
-	private Throwable error = null;
-	private IOException applicationIOE = null;
+//	private Throwable error = null;
+	private final AtomicReference<Throwable> error = new AtomicReference<>();
+//	private IOException applicationIOE = null;
+	private final AtomicReference<IOException> applicationIOE = new AtomicReference<>();
 	private final InputHandlerImpl inputHandler;
 	private final OutputHandlerAsyncImpl outputHandler;
 
@@ -62,7 +65,7 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 
 		@Override
 		public void failed(Throwable t, Void attachment) {
-			error = t;
+			error.set(t);
 		}
 	};
 	private CompletionHandler<Long, Void> applicationErrorCompletion = new CompletionHandler<Long, Void>() {
@@ -73,10 +76,10 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 		@Override
 		public void failed(Throwable t, Void attachment) {
 			if (t instanceof IOException) {
-				t.printStackTrace();
-				applicationIOE = (IOException) t;
+				System.err.println(t.getMessage());
+				applicationIOE.set((IOException) t);
 			}
-			error = t;
+			error.set(t);
 		}
 	};
 
@@ -109,23 +112,18 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 		super.processConnection(webConnection, stream);
 	}
 
-	@Override
-	protected HeaderFrameBuffers getHeaderFrameBuffers(int initialPayloadSize) {
-		return new AsyncHeaderFrameBuffers(initialPayloadSize);
-	}
-
 	private void handleAsyncException() throws IOException {
-		if (applicationIOE != null) {
-			IOException ioe = applicationIOE;
-			applicationIOE = null;
+		IOException ioe = applicationIOE.getAndSet(null);
+		if (ioe != null) {
 			handleAppInitiatedIOException(ioe);
-		} else if (error != null) {
-			Throwable error = this.error;
-			this.error = null;
-			if (error instanceof IOException) {
-				throw (IOException) error;
-			} else {
-				throw new IOException(error);
+		} else {
+			Throwable err = this.error.getAndSet(null);
+			if (err != null) {
+				if (err instanceof IOException) {
+					throw (IOException) err;
+				} else {
+					throw new IOException(err);
+				}
 			}
 		}
 	}
@@ -191,12 +189,13 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 					SocketChannel.COMPLETE_WRITE, errorCompletion,
 					ByteBuffer.wrap(localSettings.getSettingsFrameForPending()),
 					ByteBuffer.wrap(createWindowUpdateForSettings()));
-			if (error != null) {
+			Throwable err = error.get();
+			if (err != null) {
 				String msg = sm.getString("upgradeHandler.sendPrefaceFail", zero.getConnectionID());
 				if (log.isDebugEnabled()) {
 					log.debug(msg);
 				}
-				throw new ProtocolException(msg, error);
+				throw new ProtocolException(msg, err);
 			}
 		}
 
@@ -216,6 +215,11 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 			if (endOfStream) {
 				stream.sentEndOfStream();
 			}
+		}
+
+		@Override
+		protected HeaderFrameBuffers getHeaderFrameBuffers(int initialPayloadSize) {
+			return new AsyncHeaderFrameBuffers(initialPayloadSize);
 		}
 
 		@Override
@@ -249,23 +253,39 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 
 		@Override
 		void writeWindowUpdate(Stream stream, int increment, boolean applicationInitiated) throws IOException {
-			if (!stream.canWrite()) {
-				return;
+			if (log.isDebugEnabled()) {
+				log.debug(sm.getString("upgradeHandler.windowUpdateConnection", stream.getConnectionId(),
+						Integer.valueOf(increment)));
 			}
-//			System.out.println("stream" + stream.getIdAsString() + " writeWindowUpdate" + increment);
 			// Build window update frame for stream 0
 			byte[] frame = new byte[13];
 			ByteUtil.setThreeBytes(frame, 0, 4);
 			frame[3] = FrameType.WINDOW_UPDATE.getIdByte();
 			ByteUtil.set31Bits(frame, 9, increment);
-			// Change stream Id
-			byte[] frame2 = new byte[13];
-			ByteUtil.setThreeBytes(frame2, 0, 4);
-			frame2[3] = FrameType.WINDOW_UPDATE.getIdByte();
-			ByteUtil.set31Bits(frame2, 9, increment);
-			ByteUtil.set31Bits(frame2, 5, stream.getIdAsInt());
-			getChannel().write(BlockingMode.SEMI_BLOCK, protocol.getWriteTimeout(), TimeUnit.MILLISECONDS, null,
-					SocketChannel.COMPLETE_WRITE, errorCompletion, ByteBuffer.wrap(frame), ByteBuffer.wrap(frame2));
+			boolean neetToWriteConnectionUpdate = true;
+			// No need to send update from closed stream
+			if (stream.canWrite()) {
+				int streamIncrement = stream.getWindowUpdateSizeToWrite(increment);
+				if (streamIncrement > 0) {
+					if (log.isDebugEnabled()) {
+						log.debug(sm.getString("upgradeHandler.windowUpdateStream", stream.getConnectionId(),
+								stream.getIdAsString(), Integer.valueOf(streamIncrement)));
+					}
+					byte[] frame2 = new byte[13];
+					ByteUtil.setThreeBytes(frame2, 0, 4);
+					frame2[3] = FrameType.WINDOW_UPDATE.getIdByte();
+					ByteUtil.set31Bits(frame2, 9, streamIncrement);
+					ByteUtil.set31Bits(frame2, 5, stream.getIdAsInt());
+					getChannel().write(BlockingMode.SEMI_BLOCK, protocol.getWriteTimeout(), TimeUnit.MILLISECONDS, null,
+							SocketChannel.COMPLETE_WRITE, errorCompletion, ByteBuffer.wrap(frame),
+							ByteBuffer.wrap(frame2));
+					neetToWriteConnectionUpdate = false;
+				}
+			}
+			if (neetToWriteConnectionUpdate) {
+				getChannel().write(BlockingMode.SEMI_BLOCK, protocol.getWriteTimeout(), TimeUnit.MILLISECONDS, null,
+						SocketChannel.COMPLETE_WRITE, errorCompletion, ByteBuffer.wrap(frame));
+			}
 			handleAsyncException();
 		}
 

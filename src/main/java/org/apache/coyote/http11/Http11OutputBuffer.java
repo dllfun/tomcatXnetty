@@ -34,9 +34,9 @@ import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.FastHttpDateFormat;
 import org.apache.tomcat.util.http.MimeHeaders;
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.SendfileDataBase;
 import org.apache.tomcat.util.net.SocketChannel;
-import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -134,9 +134,7 @@ public class Http11OutputBuffer extends ResponseAction {
 				}
 			}
 		}
-		headerBuffer.switchToWriteMode();
-		headerBuffer.setPosition(0);
-		headerBuffer.setLimit(headerBuffer.getCapacity());
+		headerBuffer.switchToWriteMode(true);
 	}
 
 	@Override
@@ -417,16 +415,12 @@ public class Http11OutputBuffer extends ResponseAction {
 	 */
 	private void resetHeaderBuffer() {
 		if (headerBuffer.reuseable()) {
-			headerBuffer.switchToWriteMode();
-			headerBuffer.setPosition(0);
-			headerBuffer.setLimit(headerBuffer.getCapacity());
+			headerBuffer.switchToWriteMode(true);
 		} else {
 			if (headerBuffer.released()) {
 				headerBuffer = ((SocketChannel) processor.getChannel()).allocate(headerBufferSize);
 			}
-			headerBuffer.switchToWriteMode();
-			headerBuffer.setPosition(0);
-			headerBuffer.setLimit(headerBuffer.getCapacity());
+			headerBuffer.switchToWriteMode(true);
 		}
 	}
 
@@ -594,7 +588,7 @@ public class Http11OutputBuffer extends ResponseAction {
 	private void checkHeadBufferIfNull() {
 		// if (headerBuffer == null) {
 		// headerBuffer = channel.allocate(headerBufferSize);
-		// headerBuffer.switchToWriteMode();
+		// headerBuffer.switchToWriteMode(true);
 		// headerBuffer.setPosition(0);
 		// headerBuffer.setLimit(headerBuffer.getCapacity());
 		// }
@@ -619,7 +613,7 @@ public class Http11OutputBuffer extends ResponseAction {
 				}
 			} finally {
 				// if (headerBuffer.reuseable()) {
-				// headerBuffer.switchToWriteMode();
+				// headerBuffer.switchToWriteMode(true);
 				// headerBuffer.setPosition(0);
 				// headerBuffer.setLimit(headerBuffer.getCapacity());
 				// }
@@ -730,16 +724,12 @@ public class Http11OutputBuffer extends ResponseAction {
 		// responseData.recycle();
 		// Reset pointers
 		if (headerBuffer.reuseable()) {
-			headerBuffer.switchToWriteMode();
-			headerBuffer.setPosition(0);
-			headerBuffer.setLimit(headerBuffer.getCapacity());
+			headerBuffer.switchToWriteMode(true);
 		} else {
 			if (headerBuffer.released()) {
 				headerBuffer = ((SocketChannel) processor.getChannel()).allocate(headerBufferSize);
 			}
-			headerBuffer.switchToWriteMode();
-			headerBuffer.setPosition(0);
-			headerBuffer.setLimit(headerBuffer.getCapacity());
+			headerBuffer.switchToWriteMode(true);
 		}
 
 		ackSent = false;

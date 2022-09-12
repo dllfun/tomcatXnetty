@@ -45,9 +45,9 @@ import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.parser.HttpParser;
 import org.apache.tomcat.util.http.parser.TokenList;
 import org.apache.tomcat.util.log.UserDataHelper;
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
 import org.apache.tomcat.util.net.SendfileDataBase;
 import org.apache.tomcat.util.net.SendfileKeepAliveState;
 import org.apache.tomcat.util.net.SendfileState;
@@ -131,6 +131,37 @@ public class Http11Processor extends AbstractProcessor {
 
 		if (event != SocketEvent.OPEN_READ) {
 			return true;
+		}
+
+		if (checkHttp2Preface) {
+			BufWrapper byteBuffer = ((SocketChannel) getChannel()).getAppReadBuffer();
+			byteBuffer.startParsingHeader(CLIENT_PREFACE_START.length);
+			if (byteBuffer.hasNoRemaining() || byteBuffer.getRemaining() < CLIENT_PREFACE_START.length) {
+				if (!((SocketChannel) getChannel()).fillAppReadBuffer(false)) {
+					// A read is pending, so no longer in initial state
+					return false;
+				}
+				// At least one byte of the request has been received.
+				// Switch to the socket timeout.
+				int matchCount = 0;
+				for (int i = 0; i < byteBuffer.getRemaining() && i < CLIENT_PREFACE_START.length; i++) {
+					if (CLIENT_PREFACE_START[i] != byteBuffer.getByte(i)) {
+						checkHttp2Preface = false;
+						isHttp2Preface = false;
+						break;
+					} else {
+						matchCount++;
+					}
+				}
+				if (checkHttp2Preface) {
+					if (matchCount < CLIENT_PREFACE_START.length) {
+						return false;
+					} else {
+						isHttp2Preface = true;
+						return true;
+					}
+				}
+			}
 		}
 
 		// Setting up the I/O
@@ -238,6 +269,9 @@ public class Http11Processor extends AbstractProcessor {
 	@Override
 	protected boolean parsingHeader() throws IOException {
 
+		if (isHttp2Preface) {
+			return false;
+		}
 		if (checkHttp2Preface) {
 			BufWrapper byteBuffer = ((SocketChannel) getChannel()).getAppReadBuffer();
 			byteBuffer.startParsingHeader(CLIENT_PREFACE_START.length);

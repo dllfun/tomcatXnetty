@@ -41,7 +41,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	/**
 	 * The read buffer.
 	 */
-	private ByteBufferWrapper appReadBuffer = new ByteBufferWrapper(this, () -> ByteBuffer.allocate(0));
+	private ByteBufferWrapper appReadBuffer = new ByteBufferWrapper(this, () -> ByteBuffer.allocate(0), true);
 
 	/**
 	 * The max size of the individual buffered write buffers
@@ -116,7 +116,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	@Override
 	public BufWrapper allocate(int size) {
 		ByteBuffer byteBuffer = ByteBuffer.allocate(size);
-		ByteBufferWrapper byteBufferWrapper = ByteBufferWrapper.wrapper(byteBuffer);
+		ByteBufferWrapper byteBufferWrapper = ByteBufferWrapper.wrapper(byteBuffer, false);
 		return byteBufferWrapper;
 	}
 
@@ -219,29 +219,32 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		if (to instanceof ByteBufferWrapper) {
 			ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) to;
 
-			ByteBuffer delegate = byteBufferWrapper.getByteBuffer();
+			// ByteBuffer delegate = byteBufferWrapper.getByteBuffer();
 
 			if (byteBufferWrapper.parsingHeader) {
-				if (delegate.limit() >= byteBufferWrapper.headerBufferSize) {
+				if (byteBufferWrapper.getLimit() >= byteBufferWrapper.headerBufferSize) {
 					// if (parsingRequestLine) {
 					// Avoid unknown protocol triggering an additional error
 					// request.protocol().setString(Constants.HTTP_11);
 					// }
 					throw new IllegalArgumentException(sm.getString("iib.requestheadertoolarge.error"));
 				}
+				byteBufferWrapper.switchToWriteMode();
 			} else {
-				delegate.limit(byteBufferWrapper.headerPos).position(byteBufferWrapper.headerPos);
+				// delegate.limit(byteBufferWrapper.headerPos).position(byteBufferWrapper.headerPos);
+				byteBufferWrapper.switchToWriteMode(true, byteBufferWrapper.headerPos);
 			}
 
-			delegate.mark();
-			if (delegate.position() < delegate.limit()) {
-				delegate.position(delegate.limit());
-			}
-			delegate.limit(delegate.capacity());
-			int nRead = read(block, delegate);
+//			delegate.mark();
+//			if (delegate.position() < delegate.limit()) {
+//				delegate.position(delegate.limit());
+//			}
+//			delegate.limit(delegate.capacity());
+			int nRead = read(block, byteBufferWrapper.getByteBuffer());
+			byteBufferWrapper.switchToReadMode();
 			// after read buffer may has changed if buffer is appReadBuffer
-			delegate = byteBufferWrapper.getByteBuffer();
-			delegate.limit(delegate.position()).reset();
+//			delegate = byteBufferWrapper.getByteBuffer();
+//			delegate.limit(delegate.position()).reset();
 			if (nRead > 0) {
 				return nRead;
 			} else if (nRead == -1) {
@@ -563,10 +566,13 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 		private boolean readMode = true;
 
-		public ByteBufferWrapper(SocketWrapperBase<?> channel, ByteBufferProvider provider) {
+		private int readPosition = 0;
+
+		public ByteBufferWrapper(SocketWrapperBase<?> channel, ByteBufferProvider provider, boolean readMode) {
 			super();
 			this.channel = channel;
 			this.provider = provider;
+			this.readMode = readMode;
 		}
 
 		// @Override
@@ -580,19 +586,40 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		}
 
 		@Override
-		public void switchToWriteMode() {
+		public void switchToWriteMode(boolean compact, int retain) {
 			if (readMode) {
-				provider.getByteBuffer().position(provider.getByteBuffer().limit());
-				provider.getByteBuffer().limit(provider.getByteBuffer().capacity());
+				if (compact) {
+					System.arraycopy(provider.getByteBuffer().array(),
+							provider.getByteBuffer().position() + provider.getByteBuffer().arrayOffset() + retain,
+							provider.getByteBuffer().array(), provider.getByteBuffer().arrayOffset() + retain,
+							provider.getByteBuffer().remaining());
+					provider.getByteBuffer().position(provider.getByteBuffer().remaining() + retain);
+					provider.getByteBuffer().limit(provider.getByteBuffer().capacity());
+					readPosition = retain;
+				} else {
+					readPosition = provider.getByteBuffer().position();
+					provider.getByteBuffer().position(provider.getByteBuffer().limit());
+					provider.getByteBuffer().limit(provider.getByteBuffer().capacity());
+				}
 				readMode = false;
 			}
+		}
+
+		@Override
+		public void switchToWriteMode(boolean compact) {
+			switchToWriteMode(compact, 0);
+		}
+
+		@Override
+		public void switchToWriteMode() {
+			switchToWriteMode(false);
 		}
 
 		@Override
 		public void switchToReadMode() {
 			if (!readMode) {
 				provider.getByteBuffer().limit(provider.getByteBuffer().position());
-				provider.getByteBuffer().position(0);
+				provider.getByteBuffer().position(readPosition);
 				readMode = true;
 			}
 		}
@@ -737,6 +764,10 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 			this.headerBufferSize = headerBufferSize;
 		}
 
+		public int getHeaderBufferSize() {
+			return headerBufferSize;
+		}
+
 		@Override
 		public void startParsingRequestLine() {
 			parsingRequestLine = true;
@@ -753,6 +784,14 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 			if (keepHeadPos) {
 				headerPos = provider.getByteBuffer().position();
 			}
+		}
+
+		public boolean isParsingHeader() {
+			return parsingHeader;
+		}
+
+		public int getHeaderPos() {
+			return headerPos;
 		}
 
 //		@Override
@@ -794,11 +833,11 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		@Override
 		public BufWrapper duplicate() {
 			ByteBuffer buffer = provider.getByteBuffer().duplicate();
-			return new ByteBufferWrapper(channel, () -> (buffer));
+			return new ByteBufferWrapper(channel, () -> (buffer), true);
 		}
 
-		public static ByteBufferWrapper wrapper(ByteBuffer buffer) {
-			return new ByteBufferWrapper(null, () -> buffer);
+		public static ByteBufferWrapper wrapper(ByteBuffer buffer, boolean readMode) {
+			return new ByteBufferWrapper(null, () -> buffer, readMode);
 		}
 
 		@Override

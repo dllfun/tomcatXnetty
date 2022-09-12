@@ -27,7 +27,7 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
-import org.apache.tomcat.util.net.SocketChannel.BufWrapper;
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -187,7 +187,8 @@ public class B2CConverter {
 	 *
 	 * @throws IOException If the conversion can not be completed
 	 */
-	public void convert(BufWrapper bc, CharBuffer cc, ByteChunk.ByteInputChannel ic, boolean endOfInput)
+	public void convert(
+			BufWrapper bc, CharBuffer cc, ByteChunk.ByteInputChannel ic, boolean endOfInput)
 			throws IOException {
 
 		ByteBuffer bb = null;

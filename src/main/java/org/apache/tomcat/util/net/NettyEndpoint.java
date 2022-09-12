@@ -504,7 +504,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 						if (byteBufWrapper.delegate.readerIndex() >= byteBufWrapper.delegate.writerIndex()) {
 							// 正常情况
 						} else {
-							System.out.println("byteBuf还有未读数据");
+							System.err.println("byteBuf还有未读数据");
 							// delegate.readerIndex(delegate.writerIndex());
 						}
 						byteBufWrapper.delegate.release();
@@ -514,7 +514,22 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				return length;
 			} else if (to instanceof ByteBufferWrapper) {
 				ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) to;
-				return read(block, byteBufferWrapper.getByteBuffer());
+				if (byteBufferWrapper.isParsingHeader()) {
+					if (byteBufferWrapper.getLimit() >= byteBufferWrapper.getHeaderBufferSize()) {
+						// if (parsingRequestLine) {
+						// Avoid unknown protocol triggering an additional error
+						// request.protocol().setString(Constants.HTTP_11);
+						// }
+						throw new IllegalArgumentException(sm.getString("iib.requestheadertoolarge.error"));
+					}
+					byteBufferWrapper.switchToWriteMode();
+				} else {
+					// delegate.limit(byteBufferWrapper.headerPos).position(byteBufferWrapper.headerPos);
+					byteBufferWrapper.switchToWriteMode(true, byteBufferWrapper.getHeaderPos());
+				}
+				int read = read(block, byteBufferWrapper.getByteBuffer());
+				byteBufferWrapper.switchToReadMode();
+				return read;
 			} else {
 				throw new RuntimeException();
 			}
@@ -725,16 +740,28 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			}
 
 			@Override
-			public void switchToWriteMode() {
+			public void switchToWriteMode(boolean compact, int retain) {
 				if (readMode) {
+					if (compact) {
+						delegate.discardReadBytes();
+					}
 					readMode = false;
 				}
 			}
 
 			@Override
+			public void switchToWriteMode(boolean compact) {
+				switchToWriteMode(compact, 0);
+			}
+
+			@Override
+			public void switchToWriteMode() {
+				switchToWriteMode(false);
+			}
+
+			@Override
 			public void switchToReadMode() {
 				if (!readMode) {
-					delegate.readerIndex(0);
 					readMode = true;
 				}
 			}

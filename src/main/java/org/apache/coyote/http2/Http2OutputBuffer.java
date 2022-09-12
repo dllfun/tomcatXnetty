@@ -30,6 +30,7 @@ import org.apache.coyote.ExchangeData;
 import org.apache.coyote.ResponseAction;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.filters.GzipOutputFilter;
+import org.apache.coyote.http11.filters.VoidOutputFilter;
 import org.apache.coyote.http2.filters.BufferedOutputFilter;
 import org.apache.coyote.http2.filters.FlowCtrlOutputFilter;
 import org.apache.juli.logging.Log;
@@ -66,6 +67,7 @@ public class Http2OutputBuffer extends ResponseAction {
 //		this.stream = stream;
 		this.exchangeData = processor.getExchangeData();
 //		this.streamOutputBuffer = stream.getOutputBuffer();
+		addFilter(new VoidOutputFilter(processor));
 		addFilter(new GzipOutputFilter(processor));
 		addFilter(new FlowCtrlOutputFilter(processor));
 		addFilter(new BufferedOutputFilter(processor));
@@ -105,6 +107,13 @@ public class Http2OutputBuffer extends ResponseAction {
 		StreamProcessor.prepareHeaders(exchangeData, sendfileData == null,
 				((StreamChannel) processor.getChannel()).getHandler().getProtocol(),
 				((StreamChannel) processor.getChannel()));
+		if (!finished) {
+			finished = exchangeData.getResponseBodyType() == ExchangeData.BODY_TYPE_NOBODY;
+		} else {
+			if (sendfileData != null) {
+				finished = false;
+			}
+		}
 		writeHeaders(finished);
 
 	}
