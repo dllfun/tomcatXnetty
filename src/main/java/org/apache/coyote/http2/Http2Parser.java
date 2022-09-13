@@ -120,47 +120,36 @@ class Http2Parser {
 			case PARSING_BODY:
 				switch (frameType) {
 				case DATA:
-					System.out.println("DATA");
 					readDataFrame(streamId, flags, payloadSize, null);
 					break;
 				case HEADERS:
-					System.out.println("HEADERS");
 					readHeadersFrame(streamId, flags, payloadSize, null);
 					break;
 				case PRIORITY:
-					System.out.println("PRIORITY");
 					readPriorityFrame(streamId, null);
 					break;
 				case RST:
-					System.out.println("RST");
 					readRstFrame(streamId, null);
 					break;
 				case SETTINGS:
-					System.out.println("SETTINGS");
 					readSettingsFrame(flags, payloadSize, null);
 					break;
 				case PUSH_PROMISE:
-					System.out.println("PUSH_PROMISE");
 					readPushPromiseFrame(streamId, null);
 					break;
 				case PING:
-					System.out.println("PING");
 					readPingFrame(flags, null);
 					break;
 				case GOAWAY:
-					System.out.println("GOAWAY");
 					readGoawayFrame(payloadSize, null);
 					break;
 				case WINDOW_UPDATE:
-					System.out.println("WINDOW_UPDATE");
 					readWindowUpdateFrame(streamId, null);
 					break;
 				case CONTINUATION:
-					System.out.println("CONTINUATION");
 					readContinuationFrame(streamId, flags, payloadSize, null);
 					break;
 				case UNKNOWN:
-					System.out.println("UNKNOWN");
 					readUnknownFrame(streamId, frameTypeId, flags, payloadSize, null);
 				default:
 					break;
@@ -185,9 +174,9 @@ class Http2Parser {
 		int dataLength;
 		if (Flags.hasPadding(flags)) {
 			if (buffer == null) {
-				byte[] b = new byte[1];
-				input.fill(true, b);
-				padLength = b[0] & 0xFF;
+				ByteBuffer b = ByteBuffer.allocate(1);
+				input.fullFill(b);
+				padLength = b.get(0) & 0xFF;
 			} else {
 				padLength = buffer.get() & 0xFF;
 			}
@@ -241,10 +230,10 @@ class Http2Parser {
 			}
 			ByteBuffer dest = ByteBuffer.allocate(dataLength);
 			if (buffer == null) {
-				input.fill(true, dest, dataLength);
+				input.fullFill(dest);
 			} else {
 				int oldLimit = buffer.limit();
-				buffer.limit(buffer.position() + dataLength);
+				buffer.limit(buffer.position() + dest.remaining());
 				dest.put(buffer);
 				buffer.limit(oldLimit);
 			}
@@ -293,11 +282,15 @@ class Http2Parser {
 			optionalLen += 5;
 		}
 		if (optionalLen > 0) {
-			byte[] optional = new byte[optionalLen];
+			ByteBuffer optional = ByteBuffer.allocate(optionalLen);
 			if (buffer == null) {
-				input.fill(true, optional);
+				input.fullFill(optional);
 			} else {
-				buffer.get(optional);
+//				buffer.get(optional);
+				int oldLimit = buffer.limit();
+				buffer.limit(buffer.position() + optional.remaining());
+				optional.put(buffer);
+				buffer.limit(oldLimit);
 			}
 			int optionalPos = 0;
 			if (padding) {
@@ -309,7 +302,7 @@ class Http2Parser {
 				}
 			}
 			if (priority) {
-				boolean exclusive = ByteUtil.isBit7Set(optional[optionalPos]);
+				boolean exclusive = ByteUtil.isBit7Set(optional.get(optionalPos));
 				int parentStreamId = ByteUtil.get31Bits(optional, optionalPos);
 				int weight = ByteUtil.getOneByte(optional, optionalPos + 4) + 1;
 				output.reprioritise(streamId, parentStreamId, exclusive, weight);
@@ -331,14 +324,18 @@ class Http2Parser {
 	}
 
 	protected void readPriorityFrame(int streamId, ByteBuffer buffer) throws Http2Exception, IOException {
-		byte[] payload = new byte[5];
+		ByteBuffer payload = ByteBuffer.allocate(5);
 		if (buffer == null) {
-			input.fill(true, payload);
+			input.fullFill(payload);
 		} else {
-			buffer.get(payload);
+//			buffer.get(payload);
+			int oldLimit = buffer.limit();
+			buffer.limit(buffer.position() + payload.remaining());
+			payload.put(buffer);
+			buffer.limit(oldLimit);
 		}
 
-		boolean exclusive = ByteUtil.isBit7Set(payload[0]);
+		boolean exclusive = ByteUtil.isBit7Set(payload.get(0));
 		int parentStreamId = ByteUtil.get31Bits(payload, 0);
 		int weight = ByteUtil.getOneByte(payload, 4) + 1;
 
@@ -351,11 +348,15 @@ class Http2Parser {
 	}
 
 	protected void readRstFrame(int streamId, ByteBuffer buffer) throws Http2Exception, IOException {
-		byte[] payload = new byte[4];
+		ByteBuffer payload = ByteBuffer.allocate(4);
 		if (buffer == null) {
-			input.fill(true, payload);
+			input.fullFill(payload);
 		} else {
-			buffer.get(payload);
+//			buffer.get(payload);
+			int oldLimit = buffer.limit();
+			buffer.limit(buffer.position() + payload.remaining());
+			payload.put(buffer);
+			buffer.limit(oldLimit);
 		}
 
 		long errorCode = ByteUtil.getFourBytes(payload, 0);
@@ -376,12 +377,16 @@ class Http2Parser {
 			output.receiveSetting(null, 0);
 		} else {
 			// Process the settings
-			byte[] setting = new byte[6];
 			for (int i = 0; i < payloadSize / 6; i++) {
+				ByteBuffer setting = ByteBuffer.allocate(6);
 				if (buffer == null) {
-					input.fill(true, setting);
+					input.fullFill(setting);
 				} else {
-					buffer.get(setting);
+//					buffer.get(setting);
+					int oldLimit = buffer.limit();
+					buffer.limit(buffer.position() + setting.remaining());
+					setting.put(buffer);
+					buffer.limit(oldLimit);
 				}
 				int id = ByteUtil.getTwoBytes(setting, 0);
 				long value = ByteUtil.getFourBytes(setting, 2);
@@ -409,38 +414,50 @@ class Http2Parser {
 
 	protected void readPingFrame(int flags, ByteBuffer buffer) throws IOException {
 		// Read the payload
-		byte[] payload = new byte[8];
+		ByteBuffer payload = ByteBuffer.allocate(8);
 		if (buffer == null) {
-			input.fill(true, payload);
+			input.fullFill(payload);
 		} else {
-			buffer.get(payload);
+//			buffer.get(payload);
+			int oldLimit = buffer.limit();
+			buffer.limit(buffer.position() + payload.remaining());
+			payload.put(buffer);
+			buffer.limit(oldLimit);
 		}
-		output.receivePing(payload, Flags.isAck(flags));
+		output.receivePing(payload.array(), Flags.isAck(flags));
 	}
 
 	protected void readGoawayFrame(int payloadSize, ByteBuffer buffer) throws IOException {
-		byte[] payload = new byte[payloadSize];
+		ByteBuffer payload = ByteBuffer.allocate(payloadSize);
 		if (buffer == null) {
-			input.fill(true, payload);
+			input.fullFill(payload);
 		} else {
-			buffer.get(payload);
+//			buffer.get(payload);
+			int oldLimit = buffer.limit();
+			buffer.limit(buffer.position() + payload.remaining());
+			payload.put(buffer);
+			buffer.limit(oldLimit);
 		}
 
 		int lastStreamId = ByteUtil.get31Bits(payload, 0);
 		long errorCode = ByteUtil.getFourBytes(payload, 4);
 		String debugData = null;
 		if (payloadSize > 8) {
-			debugData = new String(payload, 8, payloadSize - 8, StandardCharsets.UTF_8);
+			debugData = new String(payload.array(), 8, payloadSize - 8, StandardCharsets.UTF_8);
 		}
 		output.receiveGoaway(lastStreamId, errorCode, debugData);
 	}
 
 	protected void readWindowUpdateFrame(int streamId, ByteBuffer buffer) throws Http2Exception, IOException {
-		byte[] payload = new byte[4];
+		ByteBuffer payload = ByteBuffer.allocate(4);
 		if (buffer == null) {
-			input.fill(true, payload);
+			input.fullFill(payload);
 		} else {
-			buffer.get(payload);
+//			buffer.get(payload);
+			int oldLimit = buffer.limit();
+			buffer.limit(buffer.position() + payload.remaining());
+			payload.put(buffer);
+			buffer.limit(oldLimit);
 		}
 		int windowSizeIncrement = ByteUtil.get31Bits(payload, 0);
 
@@ -513,7 +530,8 @@ class Http2Parser {
 			int toRead = Math.min(headerReadBuffer.remaining(), remaining);
 			// headerReadBuffer in write mode
 			if (buffer == null) {
-				input.fill(true, headerReadBuffer, toRead);
+				headerReadBuffer.limit(headerReadBuffer.position() + toRead);
+				input.fullFill(headerReadBuffer);
 			} else {
 				int oldLimit = buffer.limit();
 				buffer.limit(buffer.position() + toRead);
@@ -596,20 +614,27 @@ class Http2Parser {
 				byteBuffer.position(byteBuffer.position() + len);
 			} else {
 				int read = 0;
-				byte[] buffer = new byte[1024];
+				ByteBuffer buffer = ByteBuffer.allocate(1024);
 				while (read < len) {
-					int thisTime = Math.min(buffer.length, len - read);
+					buffer.clear();
+					int thisTime = Math.min(buffer.limit(), len - read);
+					buffer.limit(thisTime);
 					if (byteBuffer == null) {
-						input.fill(true, buffer, 0, thisTime);
+//						input.fill(true, buffer, 0, thisTime);
+						input.fullFill(buffer);
 					} else {
-						byteBuffer.get(buffer, 0, thisTime);
+//						byteBuffer.get(buffer, 0, thisTime);
+						int oldLimit = byteBuffer.limit();
+						byteBuffer.limit(byteBuffer.position() + buffer.remaining());
+						buffer.put(byteBuffer);
+						byteBuffer.limit(oldLimit);
 					}
 					if (isPadding) {
 						// Validate the padding is zero since receiving non-zero padding
 						// is a strong indication of either a faulty client or a server
 						// side bug.
 						for (int i = 0; i < thisTime; i++) {
-							if (buffer[i] != 0) {
+							if (buffer.get(i) != 0) {
 								throw new ConnectionException(sm.getString("http2Parser.nonZeroPadding", connectionId,
 										Integer.toString(streamId)), Http2Error.PROTOCOL_ERROR);
 							}
@@ -709,12 +734,12 @@ class Http2Parser {
 	 * @param stream        The current stream
 	 */
 	void readConnectionPreface(WebConnection webConnection, StreamChannel stream) throws Http2Exception {
-		byte[] data = new byte[CLIENT_PREFACE_START.length];
+		ByteBuffer data = ByteBuffer.allocate(CLIENT_PREFACE_START.length);
 		try {
-			input.fill(true, data);
+			input.fullFill(data);
 
 			for (int i = 0; i < CLIENT_PREFACE_START.length; i++) {
-				if (CLIENT_PREFACE_START[i] != data[i]) {
+				if (CLIENT_PREFACE_START[i] != data.get(i)) {
 					throw new ProtocolException(sm.getString("http2Parser.preface.invalid"));
 				}
 			}
@@ -733,6 +758,10 @@ class Http2Parser {
 
 		boolean fill(ByteBuffer buffer) throws IOException;
 
+		void fullFill(ByteBuffer buffer) throws IOException;
+
+//		void fill(byte[] data) throws IOException;
+
 		/**
 		 * Fill the given array with data unless non-blocking is requested and no data
 		 * is available. If any data is available then the buffer will be filled using
@@ -750,19 +779,19 @@ class Http2Parser {
 		 * @throws IOException If an I/O occurred while obtaining data with which to
 		 *                     fill the buffer
 		 */
-		boolean fill(boolean block, byte[] data, int offset, int length) throws IOException;
+//		boolean fill(boolean block, byte[] data, int offset, int length) throws IOException;
 
-		default boolean fill(boolean block, byte[] data) throws IOException {
-			return fill(block, data, 0, data.length);
-		}
+//		default boolean fill(boolean block, byte[] data) throws IOException {
+//			return fill(block, data, 0, data.length);
+//		}
 
-		default boolean fill(boolean block, ByteBuffer data, int len) throws IOException {
-			boolean result = fill(block, data.array(), data.arrayOffset() + data.position(), len);
-			if (result) {
-				data.position(data.position() + len);
-			}
-			return result;
-		}
+//		default boolean fill(boolean block, ByteBuffer data, int len) throws IOException {
+//			boolean result = fill(block, data.array(), data.arrayOffset() + data.position(), len);
+//			if (result) {
+//				data.position(data.position() + len);
+//			}
+//			return result;
+//		}
 
 		int getMaxFrameSize();
 	}

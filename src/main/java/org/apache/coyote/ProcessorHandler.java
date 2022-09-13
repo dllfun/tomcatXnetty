@@ -339,6 +339,7 @@ public class ProcessorHandler implements Handler {
 			// will trigger another OOME.
 			log.error(sm.getString("abstractConnectionHandler.oome"), oome);
 		} catch (Throwable e) {
+			e.printStackTrace();
 			ExceptionUtils.handleThrowable(e);
 			// any other exception or error is odd. Here we log it
 			// with "ERROR" level, so it will show up even on

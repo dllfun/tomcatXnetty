@@ -325,7 +325,7 @@ public class StreamChannel extends Stream {
 		}
 		handler.getWriter().writeWindowUpdate(this, written, true);
 		ByteBufferWrapper toreturn = ByteBufferWrapper.wrapper(buffer, true);
-		System.out.println("stream" + getIdAsString() + " take:" + toreturn.getRemaining());
+//		System.out.println("stream" + getIdAsString() + " take:" + toreturn.getRemaining());
 		return toreturn;
 	}
 
@@ -415,7 +415,7 @@ public class StreamChannel extends Stream {
 	}
 
 	public boolean offer(ByteBuffer buffer) throws IOException {
-		System.out.println("stream" + getIdAsString() + " offer " + buffer.remaining());
+//		System.out.println("stream" + getIdAsString() + " offer " + buffer.remaining());
 		try {
 			readLock.lock();
 			deque.offer(buffer);

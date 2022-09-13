@@ -1025,36 +1025,48 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		}
 
 		@Override
-		public boolean fill(boolean block, byte[] data, int offset, int length) throws IOException {
-			int len = length;
-			int pos = offset;
-			boolean nextReadBlock = block;
-			int thisRead = 0;
-
-			while (len > 0) {
-				thisRead = channel.read(nextReadBlock, data, pos, len);
-				if (thisRead == 0) {
-					if (nextReadBlock) {
-						// Should never happen
-						throw new IllegalStateException();
-					} else {
-						return false;
-					}
-				} else if (thisRead == -1) {
-					if (zero.getConnectionState().get().isNewStreamAllowed()) {
-						throw new EOFException();
-					} else {
-						return false;
-					}
-				} else {
-					pos += thisRead;
-					len -= thisRead;
-					nextReadBlock = true;
-				}
-			}
-
-			return true;
+		public void fullFill(ByteBuffer buffer) throws IOException {
+			do {
+				channel.read(true, buffer);
+			} while (buffer.hasRemaining());
 		}
+
+//		@Override
+//		public void fill(byte[] data) throws IOException {
+//			channel.read(true, data, 0, data.length);
+//		}
+
+//		@Override
+//		public boolean fill(boolean block, byte[] data, int offset, int length) throws IOException {
+//			int len = length;
+//			int pos = offset;
+//			boolean nextReadBlock = block;
+//			int thisRead = 0;
+//
+//			while (len > 0) {
+//				thisRead = channel.read(nextReadBlock, data, pos, len);
+//				if (thisRead == 0) {
+//					if (nextReadBlock) {
+//						// Should never happen
+//						throw new IllegalStateException();
+//					} else {
+//						return false;
+//					}
+//				} else if (thisRead == -1) {
+//					if (zero.getConnectionState().get().isNewStreamAllowed()) {
+//						throw new EOFException();
+//					} else {
+//						return false;
+//					}
+//				} else {
+//					pos += thisRead;
+//					len -= thisRead;
+//					nextReadBlock = true;
+//				}
+//			}
+//
+//			return true;
+//		}
 
 		@Override
 		public int getMaxFrameSize() {

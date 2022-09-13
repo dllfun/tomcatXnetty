@@ -3,6 +3,7 @@ package org.apache.tomcat.util.net;
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.channels.CompletionHandler;
 import java.nio.channels.SelectionKey;
@@ -378,6 +379,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 					int available = 0;
 					for (ByteBuf buf : queue) {
 						available += buf.readableBytes();
+						break;
 					}
 					return available;
 				}
@@ -417,61 +419,101 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		@Override
 		public int read(boolean block, byte[] b, int off, int len) throws IOException {
 			// return byteBufWrapper.read(block, b, off, len);
-			ByteBuf byteBuf = null;
-			if (block) {
-				while (byteBuf == null) {
-					try {
-						byteBuf = queue.take();
-					} catch (InterruptedException e) {
-						e.printStackTrace();
+			int read = 0;
+			do {
+				ByteBuf byteBuf = null;
+				if (block) {
+					long time = System.currentTimeMillis(); // start the timeout timer
+					while (byteBuf == null) {
+						try {
+							if (getReadTimeout() > 0) {
+								byteBuf = queue.poll(getReadTimeout(), TimeUnit.MICROSECONDS);
+							} else {
+								byteBuf = queue.take();
+							}
+
+							if (byteBuf == null) {
+								if (getReadTimeout() >= 0) {
+									boolean timedout = (System.currentTimeMillis() - time) >= getReadTimeout();
+									if (timedout) {
+										throw new SocketTimeoutException();
+									}
+								}
+							}
+						} catch (InterruptedException e) {
+							e.printStackTrace();
+							throw new EOFException();
+						}
+					}
+				} else {
+					byteBuf = queue.poll();
+					if (byteBuf == null) {
+						return read;
 					}
 				}
-			} else {
-				byteBuf = queue.poll();
-				if (byteBuf == null) {
-					return 0;
+				int minLength = Math.min(byteBuf.readableBytes(), len);
+				for (int index = 0; index < minLength; index++) {
+					b[off + index] = byteBuf.readByte();
 				}
-			}
-			int minLength = byteBuf.readableBytes() < len ? byteBuf.readableBytes() : len;
-			for (int index = 0; index < minLength; index++) {
-				b[off + index] = byteBuf.readByte();
-			}
-			if (byteBuf.readableBytes() > 0) {
-				queue.offerFirst(byteBuf);
-			} else {
-				byteBuf.release();
-			}
-			return minLength;
+				off += minLength;
+				len -= minLength;
+				read += minLength;
+				if (byteBuf.readableBytes() > 0) {
+					queue.offerFirst(byteBuf);
+				} else {
+					byteBuf.release();
+				}
+			} while (queue.size() > 0 && len > 0);
+			return read;
 		}
 
 		@Override
 		public int read(boolean block, ByteBuffer to) throws IOException {
 			// return byteBufWrapper.read(block, to);
-			ByteBuf byteBuf = null;
-			if (block) {
-				while (byteBuf == null) {
-					try {
-						byteBuf = queue.take();
-					} catch (InterruptedException e) {
-						e.printStackTrace();
+			int read = 0;
+			do {
+				ByteBuf byteBuf = null;
+				if (block) {
+					long time = System.currentTimeMillis(); // start the timeout timer
+					while (byteBuf == null) {
+						try {
+							if (getReadTimeout() > 0) {
+								byteBuf = queue.poll(getReadTimeout(), TimeUnit.MICROSECONDS);
+							} else {
+								byteBuf = queue.take();
+							}
+
+							if (byteBuf == null) {
+								if (getReadTimeout() >= 0) {
+									boolean timedout = (System.currentTimeMillis() - time) >= getReadTimeout();
+									if (timedout) {
+										throw new SocketTimeoutException();
+									}
+								}
+							}
+						} catch (InterruptedException e) {
+							e.printStackTrace();
+							throw new EOFException();
+						}
+					}
+				} else {
+					byteBuf = queue.poll();
+					if (byteBuf == null) {
+						return read;
 					}
 				}
-			} else {
-				byteBuf = queue.poll();
-				if (byteBuf == null) {
-					return 0;
+				int minLength = Math.min(byteBuf.readableBytes(), to.remaining());
+				for (int index = 0; index < minLength; index++) {
+					to.put(byteBuf.readByte());
 				}
-			}
-			int minLength = byteBuf.readableBytes() < to.remaining() ? byteBuf.readableBytes() : to.remaining();
-			for (int index = 0; index < minLength; index++) {
-				to.put(byteBuf.readByte());
-			}
-			if (byteBuf.readableBytes() > 0) {
-				queue.offerFirst(byteBuf);
-			} else {
-				byteBuf.release();
-			}
-			return minLength;
+				read += minLength;
+				if (byteBuf.readableBytes() > 0) {
+					queue.offerFirst(byteBuf);
+				} else {
+					byteBuf.release();
+				}
+			} while (queue.size() > 0 && to.hasRemaining());
+			return read;
 		}
 
 		@Override
@@ -558,6 +600,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				System.out.println(getRemotePort() + " processSocket again");
 				endpoint.getHandler().processSocket(this, SocketEvent.OPEN_READ, true);
 			} else {
+				System.err.println(getRemotePort() + " registerReadInterest");
 				channel.read();
 			}
 		}
@@ -1039,6 +1082,20 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 		protected HandshakeStatus handshakeStatus; // gets set by handshake
 
+		private ByteBuffer tempBuf = null;
+
+		public NettySslHandler() {
+
+		}
+
+		@Override
+		public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+
+			System.out.println("netInBuffer.isReadable()" + netInBuffer.isReadable());
+
+			super.channelInactive(ctx);
+		}
+
 		@Override
 		public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
 			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
@@ -1049,18 +1106,23 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				netInBuffer = cumulator.cumulate(ctx.alloc(), first ? Unpooled.EMPTY_BUFFER : netInBuffer,
 						(ByteBuf) msg);
 
-				while (netInBuffer.isReadable()) {
+				while (true) {
 					if (handshakeComplete) {
 
 						int readerIndex = netInBuffer.readerIndex();
 						ByteBuf unwraped = unwrap(nettyChannel, ctx);
-						if (readerIndex == netInBuffer.readerIndex() || unwraped == null) {
+						if (unwraped == null) {
 							break;
+						} else {
+							if (unwraped.isReadable()) {
+								ctx.fireChannelRead(unwraped);
+							} else {
+								unwraped.release();
+								if (readerIndex == netInBuffer.readerIndex()) {
+									break;
+								}
+							}
 						}
-						if (unwraped.isReadable()) {
-							ctx.fireChannelRead(unwraped);
-						}
-
 					} else {
 
 						if (!sniComplete) {
@@ -1306,23 +1368,39 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		}
 
 		private ByteBuf unwrap(NettyChannel nettyChannel, ChannelHandlerContext ctx) throws IOException {
-			ByteBuffer byteBuffer = netInBuffer.nioBuffer();
-			byteBuffer.position(netInBuffer.readerIndex());
-			byteBuffer.limit(netInBuffer.writerIndex());
+//			ByteBuffer byteBuffer = netInBuffer.nioBuffer();
+//			byteBuffer.position(netInBuffer.readerIndex());
+//			byteBuffer.limit(netInBuffer.writerIndex());
 
-			ByteBuf dstBuf = ctx.alloc().buffer(65535);
-			dstBuf.writerIndex(dstBuf.capacity());
-			ByteBuffer dst = dstBuf.nioBuffer();
-			dst.position(0);
-			dst.limit(dst.capacity());
+			ByteBuf dstBuf = ctx.alloc().buffer(1024);
+			ByteBuffer dst = getByteBufferForWrite(dstBuf);
+
 			// the data read
 			int read = 0;
 			// the SSL engine result
 			SSLEngineResult unwrap;
+			if (tempBuf == null) {
+				tempBuf = ctx.alloc().buffer(16384).writerIndex(16384).nioBuffer();
+			}
+//			while (read == 0) {
+			while (netInBuffer.isReadable() && tempBuf.hasRemaining()) {
+				tempBuf.put(netInBuffer.readByte());
+			}
 			do {
+
+				tempBuf.flip();
 				// prepare the buffer
 				// unwrap the data
-				unwrap = nettyChannel.sslEngine.unwrap(byteBuffer, dst);
+
+				if (tempBuf.remaining() == 0) {
+//					System.err.println("before tempBuf remaining" + tempBuf.remaining());
+				}
+				unwrap = nettyChannel.sslEngine.unwrap(tempBuf, dst);
+				if (dst.position() == 0 && tempBuf.remaining() != 0) {
+//					System.err.println("after tempBuf remaining" + tempBuf.remaining());
+				}
+				tempBuf.compact();
+
 				// if (netread > 0) {
 				// System.out.println(this + "read内容:" + new String(dst.array(), 0,
 				// dst.limit()));
@@ -1339,27 +1417,51 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 					}
 					// if we need more network data, then bail out for now.
 					if (unwrap.getStatus() == Status.BUFFER_UNDERFLOW) {
+//						System.err.println("underflow break" + tempBuf.remaining());
 						break;
 					}
 				} else if (unwrap.getStatus() == Status.BUFFER_OVERFLOW) {
+					if (read > 0) {
+						// Buffer overflow can happen if we have read data. Return
+						// so the destination buffer can be emptied before another
+						// read is attempted
+						break;
+					} else {
+						// Buffer overflow can happen if we have read data. Return
+						// so the destination buffer can be emptied before another
+						// read is attempted
+						System.err.println("overflow");
 
-					// Buffer overflow can happen if we have read data. Return
-					// so the destination buffer can be emptied before another
-					// read is attempted
-					break;
+						dstBuf.ensureWritable(dst.capacity() * 2, true);
+						dst = getByteBufferForWrite(dstBuf);
+					}
 
 				} else if (unwrap.getStatus() == Status.CLOSED) {
+					System.err.println("close return null");
 					return null;
 				} else {
 					// Something else went wrong
 					throw new IOException(sm.getString("channel.nio.ssl.unwrapFail", unwrap.getStatus()));
 				}
-			} while (byteBuffer.position() != 0); // continue to unwrapping as long as the input buffer has stuff
-			netInBuffer.readerIndex(byteBuffer.position());
-			netInBuffer.writerIndex(byteBuffer.limit());
+			} while (tempBuf.position() != 0); // continue to unwrapping as long
+
+			// as
+//			} // the input buffer has stuff
+//			netInBuffer.readerIndex(byteBuffer.position());
+//			netInBuffer.writerIndex(byteBuffer.limit());
 			dstBuf.readerIndex(0);
 			dstBuf.writerIndex(dst.position());
 			return dstBuf;
+		}
+
+		private ByteBuffer getByteBufferForWrite(ByteBuf byteBuf) {
+			int oldWriterIndex = byteBuf.writerIndex();
+			byteBuf.writerIndex(byteBuf.capacity());
+			ByteBuffer dst = byteBuf.nioBuffer();
+			dst.position(oldWriterIndex);
+			dst.limit(dst.capacity());
+			byteBuf.writerIndex(oldWriterIndex);
+			return dst;
 		}
 
 		@Override

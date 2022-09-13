@@ -632,11 +632,15 @@ public class Http11HeadParser {
 
 		while (headerParsePos == HeaderParsePosition.HEADER_NAME) {
 
+			int oldPosition = byteBuffer.getPosition();
 			// Read new bytes if needed
 			if (byteBuffer.hasNoRemaining()) {
 				if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(false)) { // parse header
 					return HeaderParseStatus.NEED_MORE_DATA;
 				}
+			}
+			if (byteBuffer.getPosition() != oldPosition) {
+				System.err.println(((SocketChannel) processor.getChannel()).getRemotePort() + "position changed");
 			}
 
 			int pos = byteBuffer.getPosition();
@@ -649,6 +653,9 @@ public class Http11HeadParser {
 				} else {
 					int start = headerData.start;
 					int length = pos - headerData.start;
+					if (length < 0) {
+						System.out.println();
+					}
 					byte[] array = new byte[length];
 					for (int index = 0; index < length; index++) {
 						array[index] = byteBuffer.getByte(start + index);
