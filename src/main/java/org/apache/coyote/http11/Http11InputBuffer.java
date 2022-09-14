@@ -16,8 +16,10 @@
  */
 package org.apache.coyote.http11;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+
 import org.apache.coyote.ErrorState;
 import org.apache.coyote.ExchangeData;
 import org.apache.coyote.RequestAction;
@@ -56,6 +58,10 @@ public class Http11InputBuffer extends RequestAction {
 	 */
 	private final ExchangeData exchangeData;
 
+	private BufWrapper appReadBuffer = null;
+
+	private boolean recycled = false;
+
 	// ----------------------------------------------------------- Constructors
 
 	public Http11InputBuffer(Http11Processor processor) {
@@ -79,21 +85,59 @@ public class Http11InputBuffer extends RequestAction {
 		markPluggableFilterIndex();
 	}
 
+	void onChannelReady(SocketChannel socketChannel) {
+		if (appReadBuffer != null) {
+			System.err.println("appReadBuffer not released in inputbuffer");
+		}
+		appReadBuffer = socketChannel.getAppReadBuffer();
+		if (appReadBuffer.released()) {
+			System.err.println("err occure");
+		}
+		appReadBuffer.retain();
+		recycled = false;
+	}
+
+	private boolean fillAppReadBuffer(boolean block) throws IOException {
+		appReadBuffer.switchToWriteMode();
+		boolean released = appReadBuffer.released();
+		if (released) {
+			throw new RuntimeException();
+		}
+		int nRead = ((SocketChannel) processor.getChannel()).read(block, appReadBuffer);
+		if (appReadBuffer.released()) {
+			System.err.println(appReadBuffer + "released after inputbuffer fill");
+		}
+		boolean success = false;
+		if (nRead > 0) {
+			success = true;
+		} else if (nRead == -1) {
+			throw new EOFException(sm.getString("iib.eof.error"));
+		} else {
+			success = false;
+		}
+		appReadBuffer.switchToReadMode();
+		return success;
+	}
+
 	// ------------------------------------------------------------- Properties
 
 	@Override
 	protected BufWrapper doReadFromChannel() throws IOException {
-		if (((SocketChannel) processor.getChannel()).getAppReadBuffer().hasNoRemaining()) {
+		appReadBuffer.switchToReadMode();
+		if (appReadBuffer.hasNoRemaining()) {
 			// The application is reading the HTTP request body which is
 			// always a blocking operation.
-			if (!((SocketChannel) processor.getChannel()).fillAppReadBuffer(true))
+			if (!fillAppReadBuffer(true))
 				return null;
+			appReadBuffer.switchToReadMode();
+		}
+		if (Constants.debug) {
+			System.out.println(((SocketChannel) processor.getChannel()).getRemotePort() + " 读取了请求体");
 		}
 
-		int length = ((SocketChannel) processor.getChannel()).getAppReadBuffer().getRemaining();
-		BufWrapper bufWrapper = ((SocketChannel) processor.getChannel()).getAppReadBuffer().duplicate();//
-		((SocketChannel) processor.getChannel()).getAppReadBuffer()
-				.setPosition(((SocketChannel) processor.getChannel()).getAppReadBuffer().getLimit());
+		int length = appReadBuffer.getRemaining();
+		BufWrapper bufWrapper = appReadBuffer.duplicate();//
+		appReadBuffer.setPosition(appReadBuffer.getLimit());
 		return bufWrapper;
 	}
 
@@ -109,9 +153,9 @@ public class Http11InputBuffer extends RequestAction {
 	 * correspond).
 	 */
 	private int available(boolean read) {
-		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
+		appReadBuffer.switchToReadMode();
 
-		int available = byteBuffer.getRemaining();
+		int available = appReadBuffer.getRemaining();
 		if (available == 0) {
 			available = getAvailableInFilters();
 		}
@@ -129,8 +173,9 @@ public class Http11InputBuffer extends RequestAction {
 
 		try {
 			if (((SocketChannel) processor.getChannel()).hasDataToRead()) {
-				((SocketChannel) processor.getChannel()).fillAppReadBuffer(false);
-				available = byteBuffer.getRemaining();
+				fillAppReadBuffer(false);
+				appReadBuffer.switchToReadMode();
+				available = appReadBuffer.getRemaining();
 			}
 		} catch (IOException ioe) {
 			if (log.isDebugEnabled()) {
@@ -177,12 +222,11 @@ public class Http11InputBuffer extends RequestAction {
 	 * non-blocking reads with the blocking IO connector.
 	 */
 	private boolean requestBodyFullyRead() {
-		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 
-		if (byteBuffer.hasRemaining()) {
-			// Data to read in the buffer so not finished
-			return false;
-		}
+//		if (appReadBuffer.hasRemaining()) {
+		// Data to read in the buffer so not finished
+//			return false;
+//		}
 
 		/*
 		 * Don't use fill(false) here because in the following circumstances BIO will
@@ -215,10 +259,9 @@ public class Http11InputBuffer extends RequestAction {
 	 */
 	@Override
 	public void finish() throws IOException {
-		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
 		if (isSwallowInput() && (hasActiveFilters())) {
 			int extraBytes = (int) getLastActiveFilter().end();
-			byteBuffer.setPosition(byteBuffer.getPosition() - extraBytes);
+			appReadBuffer.setPosition(appReadBuffer.getPosition() - extraBytes);
 		}
 	}
 
@@ -299,10 +342,17 @@ public class Http11InputBuffer extends RequestAction {
 	}
 
 	ByteBuffer getLeftover() {
-		BufWrapper byteBuffer = ((SocketChannel) processor.getChannel()).getAppReadBuffer();
-		int available = byteBuffer.getRemaining();
+		int available = appReadBuffer.getRemaining();
 		if (available > 0) {
-			return ByteBuffer.wrap(byteBuffer.getArray(), byteBuffer.getPosition(), available);
+			if (appReadBuffer.hasArray()) {
+				return ByteBuffer.wrap(appReadBuffer.getArray(), appReadBuffer.getPosition(), available);
+			} else {
+				ByteBuffer byteBuffer = ByteBuffer.allocate(appReadBuffer.getRemaining());
+				while (appReadBuffer.hasRemaining()) {
+					byteBuffer.put(appReadBuffer.getByte());
+				}
+				return byteBuffer;
+			}
 		} else {
 			return null;
 		}
@@ -397,20 +447,19 @@ public class Http11InputBuffer extends RequestAction {
 		}
 	}
 
-	void init(SocketChannel channel) {
-
-	}
-
 	/**
 	 * End processing of current HTTP request. Note: All bytes of the current
 	 * request should have been already consumed. This method only resets all the
 	 * pointers so that we are ready to parse the next HTTP request.
 	 */
 	void nextRequest() {
+		if (recycled) {
+			throw new RuntimeException();
+		}
 		// exchangeData.recycle();
-
-		((SocketChannel) processor.getChannel()).getAppReadBuffer().nextRequest();
-
+//		System.out.println(this + " nextRequest");
+		appReadBuffer.switchToWriteMode();
+		appReadBuffer.switchToReadMode();
 		resetFilters();
 	}
 
@@ -419,12 +468,24 @@ public class Http11InputBuffer extends RequestAction {
 	 */
 	@Override
 	public void recycle() {
-		if (((SocketChannel) processor.getChannel()) != null) {
-			((SocketChannel) processor.getChannel()).getAppReadBuffer().reset();
+		if (recycled) {
+			throw new RuntimeException();
+		}
+//		System.out.println(this + " recycle");
+		if (appReadBuffer != null) {
+			if (!appReadBuffer.released()) {
+				appReadBuffer.release();
+				if (Constants.debug) {
+					System.out.println(((SocketChannel) processor.getChannel()).getRemotePort() + " " + appReadBuffer
+							+ " released by inputBuffer!" + " info:" + appReadBuffer.printInfo());
+				}
+			}
+			appReadBuffer = null;
 		}
 		// exchangeData.recycle();
 
 		resetFilters();
+		recycled = true;
 	}
 
 }

@@ -37,6 +37,7 @@ import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.SendfileDataBase;
 import org.apache.tomcat.util.net.SocketChannel;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -116,25 +117,17 @@ public class Http11OutputBuffer extends ResponseAction {
 
 	// ------------------------------------------------------------- Properties
 
-	public void init(SocketChannel channel) {
+	public void onChannelReady(SocketChannel channel) {
 		// this.channel = channel;
 		if (headerBuffer == null) {
 			headerBuffer = channel.allocate(headerBufferSize);
 		} else {
-			if (headerBuffer.getCapacity() < headerBufferSize) {
-				if (!headerBuffer.reuseable()) {
-					if (!headerBuffer.released()) {
-						headerBuffer.release();
-					}
-				}
-				headerBuffer = channel.allocate(headerBufferSize);
-			} else {
-				if (headerBuffer.released()) {
-					headerBuffer = channel.allocate(headerBufferSize);
-				}
+			if (!headerBuffer.reuseable()) {
+				throw new RuntimeException();
 			}
 		}
-		headerBuffer.switchToWriteMode(true);
+		headerBuffer.switchToWriteMode();
+
 	}
 
 	@Override
@@ -356,7 +349,9 @@ public class Http11OutputBuffer extends ResponseAction {
 			ExceptionUtils.handleThrowable(t);
 			// If something goes wrong, reset the header buffer so the error
 			// response can be written instead.
-			this.resetHeaderBuffer();
+//			this.resetHeaderBuffer();
+			headerBuffer.switchToWriteMode();
+			headerBuffer.clearWrite();
 			throw t;
 		}
 
@@ -414,14 +409,8 @@ public class Http11OutputBuffer extends ResponseAction {
 	 * so the error response can be written.
 	 */
 	private void resetHeaderBuffer() {
-		if (headerBuffer.reuseable()) {
-			headerBuffer.switchToWriteMode(true);
-		} else {
-			if (headerBuffer.released()) {
-				headerBuffer = ((SocketChannel) processor.getChannel()).allocate(headerBufferSize);
-			}
-			headerBuffer.switchToWriteMode(true);
-		}
+		headerBuffer.switchToWriteMode();
+		headerBuffer.clearWrite();
 	}
 
 	private void writeAckAndFlush() throws IOException {
@@ -551,7 +540,15 @@ public class Http11OutputBuffer extends ResponseAction {
 		checkLengthBeforeWrite(b.length);
 
 		// Writing the byte chunk to the output buffer
-		headerBuffer.putBytes(b);
+		try {
+			if (headerBuffer.released()) {
+				System.err.println(headerBuffer + " 写入之前已被回收");
+			}
+			headerBuffer.putBytes(b);
+		} catch (Exception e) {
+			System.err.println(headerBuffer + " 无法写入");
+			throw e;
+		}
 	}
 
 	/**
@@ -678,7 +675,10 @@ public class Http11OutputBuffer extends ResponseAction {
 			int len = chunk.remaining();
 			SocketChannel channel = ((SocketChannel) processor.getChannel());
 			if (channel != null) {
-				channel.write(processor.isBlockingWrite(), chunk);
+				if (Constants.debug) {
+					System.out.println(((SocketChannel) processor.getChannel()).getRemotePort() + " 写出了响应体");
+				}
+				channel.write(processor.isBlockingWrite(), ByteBufferWrapper.wrapper(chunk, true));
 			} else {
 				throw new CloseNowException(sm.getString("iob.failedwrite"));
 			}
@@ -709,6 +709,9 @@ public class Http11OutputBuffer extends ResponseAction {
 
 	@Override
 	public void endToChannel() throws IOException {
+		if (Constants.debug) {
+			System.out.println(((SocketChannel) processor.getChannel()).getRemotePort() + " 写出响应完成");
+		}
 		((SocketChannel) processor.getChannel()).flush(true);
 	}
 
@@ -723,14 +726,8 @@ public class Http11OutputBuffer extends ResponseAction {
 		// Recycle response object
 		// responseData.recycle();
 		// Reset pointers
-		if (headerBuffer.reuseable()) {
-			headerBuffer.switchToWriteMode(true);
-		} else {
-			if (headerBuffer.released()) {
-				headerBuffer = ((SocketChannel) processor.getChannel()).allocate(headerBufferSize);
-			}
-			headerBuffer.switchToWriteMode(true);
-		}
+		headerBuffer.switchToWriteMode();
+		headerBuffer.clearWrite();
 
 		ackSent = false;
 		byteCount = 0;
@@ -747,7 +744,11 @@ public class Http11OutputBuffer extends ResponseAction {
 		if (!headerBuffer.reuseable()) {
 			if (!headerBuffer.released()) {
 				headerBuffer.release();
+				if (Constants.debug) {
+					System.err.println(headerBuffer + " 已回收 on recycle info: " + headerBuffer.printInfo());
+				}
 			}
+			headerBuffer = null;
 		}
 	}
 

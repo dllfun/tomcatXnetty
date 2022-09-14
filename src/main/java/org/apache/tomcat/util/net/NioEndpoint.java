@@ -51,6 +51,7 @@ import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.IntrospectionUtils;
 import org.apache.tomcat.util.collections.SynchronizedQueue;
 import org.apache.tomcat.util.collections.SynchronizedStack;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.net.jsse.JSSESupport;
 
 /**
@@ -827,7 +828,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 				// Configure output channel
 				sc = socketWrapper.getSocket();
 				// TLS/SSL channel is slightly different
-				WritableByteChannel wc = ((sc instanceof SecureNioChannel) ? sc : sc.getIOChannel());
+				WritableByteChannel wc = sc.getWritableByteChannel();// ((sc instanceof SecureNioChannel) ? sc :
 
 				// We still have data in the buffer
 				if (sc.getOutboundRemaining() > 0) {
@@ -1152,28 +1153,43 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 			return lastRead;
 		}
 
+//		@Override
+//		protected SocketBufferHandler getSocketBufferHandler() {
+//			return getSocket();
+//		}
+
 		@Override
-		protected SocketBufferHandler getSocketBufferHandler() {
-			return getSocket();
+		protected ByteBufferWrapper getSocketAppReadBuffer() {
+			return getSocket().getAppReadBuffer();
+		}
+
+		@Override
+		protected ByteBufferWrapper getSocketReadBuffer() {
+			return getSocket().getReadBuffer();
+		}
+
+		@Override
+		protected ByteBufferWrapper getSocketWriteBuffer() {
+			return getSocket().getWriteBuffer();
 		}
 
 		@Override
 		public int getAvailable() {
 			getSocket().configureReadBufferForRead();
-			return getSocket().getReadBuffer().remaining();
+			return getSocket().getReadBuffer().getRemaining();
 		}
 
 		@Override
 		public boolean isReadyForRead() throws IOException {
 			getSocket().configureReadBufferForRead();
 
-			if (getSocket().getReadBuffer().remaining() > 0) {
+			if (getSocket().getReadBuffer().getRemaining() > 0) {
 				return true;
 			}
 
 			fillReadBuffer(false);
 
-			boolean isReady = getSocket().getReadBuffer().position() > 0;
+			boolean isReady = getSocket().getReadBuffer().getPosition() > 0;
 			return isReady;
 		}
 
@@ -1199,13 +1215,13 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 			if (nRead > 0) {
 				getSocket().configureReadBufferForRead();
 				nRead = Math.min(nRead, len);
-				getSocket().getReadBuffer().get(b, off, nRead);
+				getSocket().getReadBuffer().getBytes(b, off, nRead);
 			}
 			return nRead;
 		}
 
 		@Override
-		public int read(boolean block, ByteBuffer to) throws IOException {
+		public int read(boolean block, ByteBufferWrapper to) throws IOException {
 			int nRead = populateReadBuffer(to);
 			if (nRead > 0) {
 				return nRead;
@@ -1218,9 +1234,9 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 			}
 
 			// The socket read buffer capacity is socket.appReadBufSize
-			int limit = getSocket().getReadBuffer().capacity();
-			if (to.remaining() >= limit) {
-				to.limit(to.position() + limit);
+			int limit = getSocket().getReadBuffer().getCapacity();
+			if (to.getRemaining() >= limit) {
+				to.setLimit(to.getPosition() + limit);
 				nRead = fillReadBuffer(block, to);
 				if (log.isDebugEnabled()) {
 					log.debug("Socket: [" + this + "], Read direct from socket: [" + nRead + "]");
@@ -1248,7 +1264,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 			return fillReadBuffer(block, getSocket().getReadBuffer());
 		}
 
-		private int fillReadBuffer(boolean block, ByteBuffer to) throws IOException {
+		private int fillReadBuffer(boolean block, ByteBufferWrapper to) throws IOException {
 			int nRead;
 			NioChannel socket = getSocket();
 			if (socket == NioChannel.CLOSED_NIO_CHANNEL) {
@@ -1322,7 +1338,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		}
 
 		@Override
-		protected void doWrite(boolean block, ByteBuffer from) throws IOException {
+		protected void doWrite(boolean block, ByteBufferWrapper from) throws IOException {
 			NioChannel socket = getSocket();
 			if (socket == NioChannel.CLOSED_NIO_CHANNEL) {
 				throw new ClosedChannelException();
@@ -1337,6 +1353,9 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 						// Ignore
 					}
 					try {
+						if (!from.isReadMode()) {
+							throw new RuntimeException();
+						}
 						pool.write(from, this, selector, writeTimeout);
 						// Make sure we are flushed
 						do {
@@ -1590,8 +1609,8 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		// }
 
 		@Override
-		protected <A> OperationState<A> newOperationState(boolean read, ByteBuffer[] buffers, int offset, int length,
-				BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+		protected <A> OperationState<A> newOperationState(boolean read, ByteBufferWrapper[] buffers, int offset,
+				int length, BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 				CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 				VectoredIOCompletionHandler<A> completion) {
 			return new NioOperationState<>(read, buffers, offset, length, block, timeout, unit, attachment, check,
@@ -1601,8 +1620,8 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		private class NioOperationState<A> extends OperationState<A> {
 			private volatile boolean inline = true;
 
-			private NioOperationState(boolean read, ByteBuffer[] buffers, int offset, int length, BlockingMode block,
-					long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+			private NioOperationState(boolean read, ByteBufferWrapper[] buffers, int offset, int length,
+					BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 					CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 					VectoredIOCompletionHandler<A> completion) {
 				super(read, buffers, offset, length, block, timeout, unit, attachment, check, handler, semaphore,
@@ -1636,7 +1655,13 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 									// There is still data inside the main read buffer, it needs to be read first
 									getSocket().configureReadBufferForRead();
 									for (int i = 0; i < length && !getSocket().isReadBufferEmpty(); i++) {
-										nBytes += transfer(getSocket().getReadBuffer(), buffers[offset + i]);
+										if (!buffers[offset + i].isWriteMode()) {
+											throw new RuntimeException();
+										}
+										if (buffers[offset + i].hasRemaining()) {
+//											nBytes += transfer(getSocket().getReadBuffer(), buffers[offset + i]);
+											nBytes += getSocket().getReadBuffer().transferTo(buffers[offset + i]);
+										}
 									}
 								}
 								if (nBytes == 0) {

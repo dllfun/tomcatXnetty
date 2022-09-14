@@ -22,58 +22,51 @@ import java.util.concurrent.Future;
 import javax.websocket.RemoteEndpoint;
 import javax.websocket.SendHandler;
 
-public class WsRemoteEndpointAsync extends WsRemoteEndpointBase
-        implements RemoteEndpoint.Async {
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
-    WsRemoteEndpointAsync(WsRemoteEndpointImplBase base) {
-        super(base);
-    }
+public class WsRemoteEndpointAsync extends WsRemoteEndpointBase implements RemoteEndpoint.Async {
 
+	WsRemoteEndpointAsync(WsRemoteEndpointImplBase base) {
+		super(base);
+	}
 
-    @Override
-    public long getSendTimeout() {
-        return base.getSendTimeout();
-    }
+	@Override
+	public long getSendTimeout() {
+		return base.getSendTimeout();
+	}
 
+	@Override
+	public void setSendTimeout(long timeout) {
+		base.setSendTimeout(timeout);
+	}
 
-    @Override
-    public void setSendTimeout(long timeout) {
-        base.setSendTimeout(timeout);
-    }
+	@Override
+	public void sendText(String text, SendHandler completion) {
+		base.sendStringByCompletion(text, completion);
+	}
 
+	@Override
+	public Future<Void> sendText(String text) {
+		return base.sendStringByFuture(text);
+	}
 
-    @Override
-    public void sendText(String text, SendHandler completion) {
-        base.sendStringByCompletion(text, completion);
-    }
+	@Override
+	public Future<Void> sendBinary(ByteBuffer data) {
+		return base.sendBytesByFuture(ByteBufferWrapper.wrapper(data, true));
+	}
 
+	@Override
+	public void sendBinary(ByteBuffer data, SendHandler completion) {
+		base.sendBytesByCompletion(ByteBufferWrapper.wrapper(data, true), completion);
+	}
 
-    @Override
-    public Future<Void> sendText(String text) {
-        return base.sendStringByFuture(text);
-    }
+	@Override
+	public Future<Void> sendObject(Object obj) {
+		return base.sendObjectByFuture(obj);
+	}
 
-
-    @Override
-    public Future<Void> sendBinary(ByteBuffer data) {
-        return base.sendBytesByFuture(data);
-    }
-
-
-    @Override
-    public void sendBinary(ByteBuffer data, SendHandler completion) {
-        base.sendBytesByCompletion(data, completion);
-    }
-
-
-    @Override
-    public Future<Void> sendObject(Object obj) {
-        return base.sendObjectByFuture(obj);
-    }
-
-
-    @Override
-    public void sendObject(Object obj, SendHandler completion) {
-        base.sendObjectByCompletion(obj, completion);
-    }
+	@Override
+	public void sendObject(Object obj, SendHandler completion) {
+		base.sendObjectByCompletion(obj, completion);
+	}
 }

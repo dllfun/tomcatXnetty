@@ -37,114 +37,125 @@ public class ParseInIoHandler implements Handler {
 			return;
 		}
 		if (channel instanceof SocketChannel) {
-			SocketChannel socketChannel = (SocketChannel) channel;
-
-			if (log.isDebugEnabled()) {
-				log.debug(sm.getString("abstractConnectionHandler.process", channel, event));// .getSocket()
-			}
-
-			// S socket = channel.getSocket();
-
-			Processor processor = (Processor) socketChannel.getCurrentProcessor();
-			if (log.isDebugEnabled()) {
-				log.debug(sm.getString("abstractConnectionHandler.connectionsGet", processor, channel));// socket
-			}
-
-			// Timeouts are calculated on a dedicated thread and then
-			// dispatched. Because of delays in the dispatch process, the
-			// timeout may no longer be required. Check here and avoid
-			// unnecessary processing.
-//			if (SocketEvent.TIMEOUT == event && (processor == null || !processor.isAsync() && !processor.isUpgrade()
-//					|| processor.isAsync() && !processor.checkAsyncTimeoutGeneration())) {
-			// This is effectively a NO-OP
-//				next.processSocket(channel, event, dispatch);
-//				return;
-//			}
-
-			if (processor != null) {
-				// Make sure an async timeout doesn't fire
-				// removeWaitingProcessor(processor);
-			} else if (event == SocketEvent.TIMEOUT || event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
-				// Nothing to do. Endpoint requested a close and there is no
-				// longer a processor associated with this socket.
-				next.processSocket(channel, event, dispatch);
-				return;
-			}
-
-			boolean dispatched = false;
-			try {
-				if (processor == null) {
-					String negotiatedProtocol = socketChannel.getNegotiatedProtocol();
-					// OpenSSL typically returns null whereas JSSE typically
-					// returns "" when no protocol is negotiated
-					if (negotiatedProtocol != null && negotiatedProtocol.length() > 0) {
-						dispatched = true;
-						next.processSocket(channel, event, dispatch);
-						return;
-					}
-				}
-				if (processor == null) {
-					processor = protocol.popRecycledProcessors();
-					if (log.isDebugEnabled()) {
-						log.debug(sm.getString("abstractConnectionHandler.processorPop", processor));
-					}
-				}
-				if (processor == null) {
-					processor = protocol.createProcessor();
-					protocol.register(processor);
-					if (log.isDebugEnabled()) {
-						log.debug(sm.getString("abstractConnectionHandler.processorCreate", processor));
-					}
-				}
-
-				if (channel.getSslSupport() == null) {
-					channel.setSslSupport(socketChannel.initSslSupport(protocol.getClientCertProvider()));
-				}
-
-				// Associate the processor with the connection
-				socketChannel.setCurrentProcessor(processor);
-
-				if (processor.processInIoThread(event)) {
-					dispatched = true;
-					next.processSocket(channel, event, dispatch);
-				}
-
-			} catch (java.net.SocketException e) {
-				// SocketExceptions are normal
-				log.debug(sm.getString("abstractConnectionHandler.socketexception.debug"), e);
-			} catch (java.io.IOException e) {
-				// IOExceptions are normal
-				log.debug(sm.getString("abstractConnectionHandler.ioexception.debug"), e);
-			} catch (ProtocolException e) {
-				// Protocol exceptions normally mean the client sent invalid or
-				// incomplete data.
-				log.debug(sm.getString("abstractConnectionHandler.protocolexception.debug"), e);
-			}
-			// Future developers: if you discover any other
-			// rare-but-nonfatal exceptions, catch them here, and log as
-			// above.
-			catch (OutOfMemoryError oome) {
-				// Try and handle this here to give Tomcat a chance to close the
-				// connection and prevent clients waiting until they time out.
-				// Worst case, it isn't recoverable and the attempt at logging
-				// will trigger another OOME.
-				log.error(sm.getString("abstractConnectionHandler.oome"), oome);
-			} catch (Throwable e) {
-				ExceptionUtils.handleThrowable(e);
-				// any other exception or error is odd. Here we log it
-				// with "ERROR" level, so it will show up even on
-				// less-than-verbose logs.
-				log.error(sm.getString("abstractConnectionHandler.error"), e);
-			}
-
-			// Make sure socket/processor is removed from the list of current
-			// connections
-			if (!dispatched) {
-				next.processSocket(channel, event, dispatch);
+			synchronized (channel.getLock()) {
+				processInternal(channel, event, dispatch);
 			}
 		} else {
 			next.processSocket(channel, event, dispatch);
 		}
+	}
+
+	private void processInternal(Channel channel, SocketEvent event, boolean dispatch) {
+
+		SocketChannel socketChannel = (SocketChannel) channel;
+
+		if (log.isDebugEnabled()) {
+			log.debug(sm.getString("abstractConnectionHandler.process", channel, event));// .getSocket()
+		}
+
+		// S socket = channel.getSocket();
+
+		Processor processor = (Processor) socketChannel.getCurrentProcessor();
+		if (log.isDebugEnabled()) {
+			log.debug(sm.getString("abstractConnectionHandler.connectionsGet", processor, channel));// socket
+		}
+
+		// Timeouts are calculated on a dedicated thread and then
+		// dispatched. Because of delays in the dispatch process, the
+		// timeout may no longer be required. Check here and avoid
+		// unnecessary processing.
+//		if (SocketEvent.TIMEOUT == event && (processor == null || !processor.isAsync() && !processor.isUpgrade()
+//				|| processor.isAsync() && !processor.checkAsyncTimeoutGeneration())) {
+		// This is effectively a NO-OP
+//			next.processSocket(channel, event, dispatch);
+//			return;
+//		}
+
+		if (processor != null) {
+			// Make sure an async timeout doesn't fire
+			// removeWaitingProcessor(processor);
+		} else if (event == SocketEvent.TIMEOUT || event == SocketEvent.DISCONNECT || event == SocketEvent.ERROR) {
+			// Nothing to do. Endpoint requested a close and there is no
+			// longer a processor associated with this socket.
+			next.processSocket(channel, event, dispatch);
+			return;
+		}
+
+		try {
+			if (processor == null) {
+				String negotiatedProtocol = socketChannel.getNegotiatedProtocol();
+				// OpenSSL typically returns null whereas JSSE typically
+				// returns "" when no protocol is negotiated
+				if (negotiatedProtocol != null && negotiatedProtocol.length() > 0) {
+					next.processSocket(channel, event, dispatch);
+					return;
+				}
+			}
+			if (processor == null) {
+				processor = protocol.popRecycledProcessors();
+				if (log.isDebugEnabled()) {
+					log.debug(sm.getString("abstractConnectionHandler.processorPop", processor));
+				}
+			}
+			if (processor == null) {
+				processor = protocol.createProcessor();
+				protocol.register(processor);
+				if (log.isDebugEnabled()) {
+					log.debug(sm.getString("abstractConnectionHandler.processorCreate", processor));
+				}
+			}
+
+			if (channel.getSslSupport() == null) {
+				channel.setSslSupport(socketChannel.initSslSupport(protocol.getClientCertProvider()));
+			}
+
+			if (processor == null) {
+				if (!socketChannel.getAppReadBuffer().released()) {
+					System.out.println(socketChannel.getRemotePort() + " " + socketChannel.getAppReadBuffer()
+							+ " not released before process" + " info:" + socketChannel.getAppReadBuffer().printInfo());
+				}
+			}
+			// Associate the processor with the connection
+			socketChannel.setCurrentProcessor(processor);
+
+			boolean parseFinished = processor.processInIoThread(event);
+			if (parseFinished) {
+				next.processSocket(channel, event, dispatch);
+			} else {
+				socketChannel.registerReadInterest();
+			}
+
+		} catch (java.net.SocketException e) {
+			// SocketExceptions are normal
+			log.debug(sm.getString("abstractConnectionHandler.socketexception.debug"), e);
+		} catch (java.io.IOException e) {
+			// IOExceptions are normal
+			log.debug(sm.getString("abstractConnectionHandler.ioexception.debug"), e);
+		} catch (ProtocolException e) {
+			// Protocol exceptions normally mean the client sent invalid or
+			// incomplete data.
+			log.debug(sm.getString("abstractConnectionHandler.protocolexception.debug"), e);
+		}
+		// Future developers: if you discover any other
+		// rare-but-nonfatal exceptions, catch them here, and log as
+		// above.
+		catch (OutOfMemoryError oome) {
+			// Try and handle this here to give Tomcat a chance to close the
+			// connection and prevent clients waiting until they time out.
+			// Worst case, it isn't recoverable and the attempt at logging
+			// will trigger another OOME.
+			log.error(sm.getString("abstractConnectionHandler.oome"), oome);
+		} catch (Throwable e) {
+			ExceptionUtils.handleThrowable(e);
+			// any other exception or error is odd. Here we log it
+			// with "ERROR" level, so it will show up even on
+			// less-than-verbose logs.
+			log.error(sm.getString("abstractConnectionHandler.error"), e);
+			// Make sure socket/processor is removed from the list of current
+			// connections
+			next.processSocket(channel, event, dispatch);
+		}
+
 	}
 
 }

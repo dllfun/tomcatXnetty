@@ -23,8 +23,10 @@ import java.nio.channels.GatheringByteChannel;
 import java.nio.channels.ScatteringByteChannel;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
+import java.nio.channels.WritableByteChannel;
 
 import org.apache.tomcat.util.net.NioEndpoint.NioSocketWrapper;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -34,16 +36,16 @@ import org.apache.tomcat.util.res.StringManager;
  *
  * @version 1.0
  */
-public class NioChannel extends SocketBufferHandler
-		implements ByteChannel, ScatteringByteChannel, GatheringByteChannel {
+public class NioChannel extends SocketBufferHandler {// implements ByteChannel, ScatteringByteChannel,
+														// GatheringByteChannel
 
 	protected static final StringManager sm = StringManager.getManager(NioChannel.class);
 
 	protected static final ByteBuffer emptyBuf = ByteBuffer.allocate(0);
 
 	// protected final SocketBufferHandler socketBufferHandler;
-	protected SocketChannel socketChannel = null;
-	protected NioSocketWrapper socketWrapper = null;
+	private SocketChannel socketChannel = null;
+	private NioSocketWrapper socketWrapper = null;
 
 	public NioChannel(int readBufferSize, int writeBufferSize, boolean direct) {
 		super(readBufferSize, writeBufferSize, direct);
@@ -63,119 +65,30 @@ public class NioChannel extends SocketBufferHandler
 		System.out.println(socketChannel.socket().getPort() + " created");
 	}
 
-	/**
-	 * Free the channel memory
-	 */
-	public void free() {
-		super.free();
+	public final SocketChannel getIOChannel() {
+		return socketChannel;
 	}
 
-	/**
-	 * Returns true if the network buffer has been flushed out and is empty.
-	 *
-	 * @param block   Unused. May be used when overridden
-	 * @param s       Unused. May be used when overridden
-	 * @param timeout Unused. May be used when overridden
-	 * @return Always returns <code>true</code> since there is no network buffer in
-	 *         the regular channel
-	 *
-	 * @throws IOException Never for non-secure channel
-	 */
-	public boolean flush(boolean block, Selector s, long timeout) throws IOException {
-		return true;
+	protected NioSocketWrapper getSocketWrapper() {
+		return socketWrapper;
 	}
 
-	/**
-	 * Closes this channel.
-	 *
-	 * @throws IOException If an I/O error occurs
-	 */
-	@Override
-	public void close() throws IOException {
-		System.out.println(socketChannel.socket().getPort() + " closed");
-		socketChannel.close();
-	}
-
-	/**
-	 * Close the connection.
-	 *
-	 * @param force Should the underlying socket be forcibly closed?
-	 *
-	 * @throws IOException If closing the secure channel fails.
-	 */
-	public void close(boolean force) throws IOException {
-		if (isOpen() || force) {
-			close();
-		}
-	}
-
-	/**
-	 * Tells whether or not this channel is open.
-	 *
-	 * @return <code>true</code> if, and only if, this channel is open
-	 */
-	@Override
-	public boolean isOpen() {
-		return socketChannel.isOpen();
-	}
-
-	/**
-	 * Writes a sequence of bytes to this channel from the given buffer.
-	 *
-	 * @param src The buffer from which bytes are to be retrieved
-	 * @return The number of bytes written, possibly zero
-	 * @throws IOException If some other I/O error occurs
-	 */
-	@Override
-	public int write(ByteBuffer src) throws IOException {
-		checkInterruptStatus();
-		return socketChannel.write(src);
-	}
-
-	@Override
-	public long write(ByteBuffer[] srcs) throws IOException {
-		return write(srcs, 0, srcs.length);
-	}
-
-	@Override
-	public long write(ByteBuffer[] srcs, int offset, int length) throws IOException {
-		checkInterruptStatus();
-		return socketChannel.write(srcs, offset, length);
-	}
-
-	/**
-	 * Reads a sequence of bytes from this channel into the given buffer.
-	 *
-	 * @param dst The buffer into which bytes are to be transferred
-	 * @return The number of bytes read, possibly zero, or <code>-1</code> if the
-	 *         channel has reached end-of-stream
-	 * @throws IOException If some other I/O error occurs
-	 */
-	@Override
-	public int read(ByteBuffer dst) throws IOException {
-		return socketChannel.read(dst);
-	}
-
-	@Override
-	public long read(ByteBuffer[] dsts) throws IOException {
-		return read(dsts, 0, dsts.length);
-	}
-
-	@Override
-	public long read(ByteBuffer[] dsts, int offset, int length) throws IOException {
-		return socketChannel.read(dsts, offset, length);
+	public WritableByteChannel getWritableByteChannel() {
+		return socketChannel;
 	}
 
 	// protected SocketBufferHandler getBufHandler() {
 	// return socketBufferHandler;
 	// }
 
-	public SocketChannel getIOChannel() {
-		return socketChannel;
-	}
-
-	public boolean isClosing() {
-		return false;
+	/**
+	 * Tells whether or not this channel is open.
+	 *
+	 * @return <code>true</code> if, and only if, this channel is open
+	 */
+	// @Override
+	public boolean isOpen() {
+		return socketChannel.isOpen();
 	}
 
 	public boolean isHandshakeComplete() {
@@ -194,24 +107,71 @@ public class NioChannel extends SocketBufferHandler
 		return 0;
 	}
 
-	@Override
-	public String toString() {
-		return super.toString() + ":" + socketChannel.toString();
+	/**
+	 * Reads a sequence of bytes from this channel into the given buffer.
+	 *
+	 * @param dst The buffer into which bytes are to be transferred
+	 * @return The number of bytes read, possibly zero, or <code>-1</code> if the
+	 *         channel has reached end-of-stream
+	 * @throws IOException If some other I/O error occurs
+	 */
+	// @Override
+	public int read(ByteBufferWrapper dst) throws IOException {
+		if (!dst.isWriteMode()) {
+			throw new RuntimeException();
+		}
+		return socketChannel.read(dst.getByteBuffer());
 	}
 
-	public int getOutboundRemaining() {
-		return 0;
+	// @Override
+	public long read(ByteBufferWrapper[] dsts) throws IOException {
+		return read(dsts, 0, dsts.length);
+	}
+
+	// @Override
+	public long read(ByteBufferWrapper[] dsts, int offset, int length) throws IOException {
+		ByteBuffer[] buffers = new ByteBuffer[dsts.length];
+		for (int i = 0; i < dsts.length; i++) {
+			if (!dsts[i].isWriteMode()) {
+				throw new RuntimeException();
+			}
+			buffers[i] = dsts[i].getByteBuffer();
+		}
+		return socketChannel.read(buffers, offset, length);
 	}
 
 	/**
-	 * Return true if the buffer wrote data. NO-OP for non-secure channel.
+	 * Writes a sequence of bytes to this channel from the given buffer.
 	 *
-	 * @return Always returns {@code false} for non-secure channel
-	 *
-	 * @throws IOException Never for non-secure channel
+	 * @param src The buffer from which bytes are to be retrieved
+	 * @return The number of bytes written, possibly zero
+	 * @throws IOException If some other I/O error occurs
 	 */
-	public boolean flushOutbound() throws IOException {
-		return false;
+	// @Override
+	public int write(ByteBufferWrapper src) throws IOException {
+		checkInterruptStatus();
+		if (!src.isReadMode()) {
+			throw new RuntimeException();
+		}
+		return socketChannel.write(src.getByteBuffer());
+	}
+
+	// @Override
+	public long write(ByteBufferWrapper[] srcs) throws IOException {
+		return write(srcs, 0, srcs.length);
+	}
+
+	// @Override
+	public long write(ByteBufferWrapper[] srcs, int offset, int length) throws IOException {
+		checkInterruptStatus();
+		ByteBuffer[] buffers = new ByteBuffer[srcs.length];
+		for (int i = 0; i < srcs.length; i++) {
+			if (!srcs[i].isReadMode()) {
+				throw new RuntimeException();
+			}
+			buffers[i] = srcs[i].getByteBuffer();
+		}
+		return socketChannel.write(buffers, offset, length);
 	}
 
 	/**
@@ -230,6 +190,76 @@ public class NioChannel extends SocketBufferHandler
 		if (Thread.interrupted()) {
 			throw new IOException(sm.getString("channel.nio.interrupted"));
 		}
+	}
+
+	/**
+	 * Returns true if the network buffer has been flushed out and is empty.
+	 *
+	 * @param block   Unused. May be used when overridden
+	 * @param s       Unused. May be used when overridden
+	 * @param timeout Unused. May be used when overridden
+	 * @return Always returns <code>true</code> since there is no network buffer in
+	 *         the regular channel
+	 *
+	 * @throws IOException Never for non-secure channel
+	 */
+	public boolean flush(boolean block, Selector s, long timeout) throws IOException {
+		return true;
+	}
+
+	public int getOutboundRemaining() {
+		return 0;
+	}
+
+	/**
+	 * Return true if the buffer wrote data. NO-OP for non-secure channel.
+	 *
+	 * @return Always returns {@code false} for non-secure channel
+	 *
+	 * @throws IOException Never for non-secure channel
+	 */
+	public boolean flushOutbound() throws IOException {
+		return false;
+	}
+
+	public boolean isClosing() {
+		return false;
+	}
+
+	/**
+	 * Closes this channel.
+	 *
+	 * @throws IOException If an I/O error occurs
+	 */
+	// @Override
+	public void close() throws IOException {
+		System.out.println(socketChannel.socket().getPort() + " closed");
+		socketChannel.close();
+	}
+
+	/**
+	 * Close the connection.
+	 *
+	 * @param force Should the underlying socket be forcibly closed?
+	 *
+	 * @throws IOException If closing the secure channel fails.
+	 */
+	public void close(boolean force) throws IOException {
+		if (isOpen() || force) {
+			close();
+		}
+	}
+
+	@Override
+	public String toString() {
+		return super.toString() + ":" + socketChannel.toString();
+	}
+
+	/**
+	 * Free the channel memory
+	 */
+	public void free() {
+		super.free();
 	}
 
 	// private ApplicationBufferHandler appReadBufHandler;
@@ -270,23 +300,23 @@ public class NioChannel extends SocketBufferHandler
 		// }
 
 		@Override
-		public int read(ByteBuffer dst) throws IOException {
+		public int read(ByteBufferWrapper dst) throws IOException {
 			return -1;
 		}
 
 		@Override
-		public long read(ByteBuffer[] dsts, int offset, int length) throws IOException {
+		public long read(ByteBufferWrapper[] dsts, int offset, int length) throws IOException {
 			return -1L;
 		}
 
 		@Override
-		public int write(ByteBuffer src) throws IOException {
+		public int write(ByteBufferWrapper src) throws IOException {
 			checkInterruptStatus();
 			return -1;
 		}
 
 		@Override
-		public long write(ByteBuffer[] srcs, int offset, int length) throws IOException {
+		public long write(ByteBufferWrapper[] srcs, int offset, int length) throws IOException {
 			return -1L;
 		}
 

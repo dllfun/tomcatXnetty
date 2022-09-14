@@ -32,6 +32,7 @@ import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BlockingMode;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 import org.apache.tomcat.util.threads.TaskQueue;
 import org.apache.tomcat.util.threads.TaskThreadFactory;
@@ -51,7 +52,7 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 	private final SocketChannel socketChannel;
 	private final WsWriteTimeout wsWriteTimeout;
 	private volatile SendHandler handler = null;
-	private volatile ByteBuffer[] buffers = null;
+	private volatile ByteBufferWrapper[] buffers = null;
 	private Executor executor = null;
 
 	private volatile long timeoutExpiry = -1;
@@ -70,7 +71,7 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 	}
 
 	@Override
-	protected void doWrite(SendHandler handler, long blockingWriteTimeoutExpiry, ByteBuffer... buffers) {
+	protected void doWrite(SendHandler handler, long blockingWriteTimeoutExpiry, ByteBufferWrapper... buffers) {
 		if (socketChannel.hasAsyncIO()) {
 			final boolean block = (blockingWriteTimeoutExpiry != -1);
 			long timeout = -1;
@@ -129,7 +130,7 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 			} else {
 				// Blocking
 				try {
-					for (ByteBuffer buffer : buffers) {
+					for (ByteBufferWrapper buffer : buffers) {
 						long timeout = blockingWriteTimeoutExpiry - System.currentTimeMillis();
 						if (timeout <= 0) {
 							SendResult sr = new SendResult(new SocketTimeoutException());
@@ -158,7 +159,7 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 
 	public void onWritePossible(boolean useDispatch) {
 		// Note: Unused for async IO
-		ByteBuffer[] buffers = this.buffers;
+		ByteBufferWrapper[] buffers = this.buffers;
 		if (buffers == null) {
 			// Servlet 3.1 will call the write listener once even if nothing
 			// was written
@@ -170,7 +171,7 @@ public class WsRemoteEndpointImplServer extends WsRemoteEndpointImplBase {
 			// If this is false there will be a call back when it is true
 			while (socketChannel.isReadyForWrite()) {
 				complete = true;
-				for (ByteBuffer buffer : buffers) {
+				for (ByteBufferWrapper buffer : buffers) {
 					if (buffer.hasRemaining()) {
 						complete = false;
 						socketChannel.write(false, buffer);

@@ -18,7 +18,6 @@ package org.apache.coyote.http11.filters;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Map;

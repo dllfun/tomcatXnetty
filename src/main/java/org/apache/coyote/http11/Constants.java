@@ -25,6 +25,8 @@ import org.apache.tomcat.util.buf.ByteChunk;
  */
 public final class Constants {
 
+	public static final boolean debug = true;
+
 	public static final int DEFAULT_CONNECTION_TIMEOUT = 60000;
 
 	/**

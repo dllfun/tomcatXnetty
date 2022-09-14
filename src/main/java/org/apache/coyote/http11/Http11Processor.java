@@ -16,6 +16,7 @@
  */
 package org.apache.coyote.http11;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -99,7 +100,13 @@ public class Http11Processor extends AbstractProcessor {
 	/**
 	 * Keep-alive.
 	 */
-	protected volatile boolean keepAlive = true;
+	protected boolean keepAlive = true;
+
+	private int count = 0;
+
+	private boolean firstFill = true;
+
+	private BufWrapper appReadBuffer = null;
 
 	public Http11Processor(AbstractHttp11Protocol<?> protocol, Adapter adapter) {
 		super(protocol, adapter);
@@ -108,7 +115,7 @@ public class Http11Processor extends AbstractProcessor {
 
 		headParser = new Http11HeadParser(this, protocol.getMaxHttpHeaderSize(), protocol.getRejectIllegalHeader(),
 				httpParser);
-
+		System.out.println(this + "created");
 	}
 
 	@Override
@@ -127,6 +134,58 @@ public class Http11Processor extends AbstractProcessor {
 	}
 
 	@Override
+	protected final void onChannelReady(Channel channel) {
+		SocketChannel socketChannel = (SocketChannel) channel;
+		System.out.println(this + " onChannelReady " + socketChannel.getRemotePort());
+		if (appReadBuffer != null) {
+			System.err.println("appReadBuffer not released in processor");
+		}
+		socketChannel.initAppReadBuffer(getProtocol().getMaxHttpHeaderSize());
+		appReadBuffer = socketChannel.getAppReadBuffer();
+		if (appReadBuffer.released()) {
+			System.err.println("err occure");
+		}
+		appReadBuffer.retain();
+		firstFill = true;
+		headParser.onChannelReady(socketChannel);
+		((Http11InputBuffer) requestAction).onChannelReady(socketChannel);
+		((Http11OutputBuffer) responseAction).onChannelReady(socketChannel);
+	}
+
+	/**
+	 * Attempts to read some data into the input buffer.
+	 *
+	 * @return <code>true</code> if more data was added to the input buffer
+	 *         otherwise <code>false</code>
+	 * @throws IOException
+	 */
+	private boolean fillAppReadBuffer(boolean block) throws IOException {
+		appReadBuffer.switchToWriteMode(false);
+		boolean released = appReadBuffer.released();
+		if (released) {
+			throw new RuntimeException();
+		}
+		int nRead = ((SocketChannel) getChannel()).read(block, appReadBuffer);
+		if (appReadBuffer.released()) {
+			System.err.println(appReadBuffer + "released after processor fill");
+		}
+		boolean success = false;
+		if (nRead > 0) {
+			success = true;
+		} else if (nRead == -1) {
+			throw new EOFException(sm.getString("iib.eof.error"));
+		} else {
+			success = false;
+		}
+		if (!success && firstFill) {
+			System.out.println(((SocketChannel) getChannel()).getRemotePort() + " 未读取到数据");
+		}
+		firstFill = false;
+		appReadBuffer.switchToReadMode();
+		return success;
+	}
+
+	@Override
 	public boolean processInIoThread(SocketEvent event) throws IOException {// SocketChannel channel,
 
 		if (event != SocketEvent.OPEN_READ) {
@@ -134,41 +193,59 @@ public class Http11Processor extends AbstractProcessor {
 		}
 
 		if (checkHttp2Preface) {
-			BufWrapper byteBuffer = ((SocketChannel) getChannel()).getAppReadBuffer();
-			byteBuffer.startParsingHeader(CLIENT_PREFACE_START.length);
-			if (byteBuffer.hasNoRemaining() || byteBuffer.getRemaining() < CLIENT_PREFACE_START.length) {
-				if (!((SocketChannel) getChannel()).fillAppReadBuffer(false)) {
+			if (Constants.debug) {
+				System.out.println(((SocketChannel) getChannel()).getRemotePort() + " checkHttp2Preface in io thread");
+			}
+			appReadBuffer.switchToReadMode();
+			if (appReadBuffer.hasNoRemaining()) {
+				if (!fillAppReadBuffer(false)) {
 					// A read is pending, so no longer in initial state
 					return false;
 				}
-				// At least one byte of the request has been received.
-				// Switch to the socket timeout.
-				int matchCount = 0;
-				for (int i = 0; i < byteBuffer.getRemaining() && i < CLIENT_PREFACE_START.length; i++) {
-					if (CLIENT_PREFACE_START[i] != byteBuffer.getByte(i)) {
-						checkHttp2Preface = false;
-						isHttp2Preface = false;
-						break;
-					} else {
-						matchCount++;
-					}
-				}
-				if (checkHttp2Preface) {
-					if (matchCount < CLIENT_PREFACE_START.length) {
+			}
+			while (true) {
+				appReadBuffer.switchToReadMode();
+				if (appReadBuffer.getRemaining() < CLIENT_PREFACE_START.length) {
+					if (!fillAppReadBuffer(false)) {
+						// A read is pending, so no longer in initial state
 						return false;
-					} else {
-						isHttp2Preface = true;
-						return true;
 					}
+				} else {
+					break;
 				}
 			}
+			// At least one byte of the request has been received.
+			// Switch to the socket timeout.
+			int matchCount = 0;
+			for (int i = 0; i < appReadBuffer.getRemaining() && i < CLIENT_PREFACE_START.length; i++) {
+				if (CLIENT_PREFACE_START[i] != appReadBuffer.getByte(i)) {
+					checkHttp2Preface = false;
+					if (Constants.debug) {
+						System.out.println(((SocketChannel) getChannel()).getRemotePort()
+								+ " checkHttp2Preface false in io thread");
+					}
+					isHttp2Preface = false;
+					break;
+				} else {
+					matchCount++;
+				}
+			}
+			if (checkHttp2Preface) {
+				if (matchCount < CLIENT_PREFACE_START.length) {
+					return false;
+				} else {
+					isHttp2Preface = true;
+					return true;
+				}
+			}
+
 		}
 
 		// Setting up the I/O
 		// setChannel(channel);
 
 		try {
-			System.out.println("parse in io thread start");
+			System.out.println(((SocketChannel) getChannel()).getRemotePort() + " parse in io thread start");
 			if (!headParser.parseRequestLine(false, protocol.getConnectionTimeout(), protocol.getKeepAliveTimeout())) {
 				if (headParser.getParsingRequestLinePhase() == -1) {
 					return true;
@@ -243,22 +320,18 @@ public class Http11Processor extends AbstractProcessor {
 			setErrorState(ErrorState.CLOSE_CLEAN, t);
 			return true;
 		} finally {
-			System.out.println("parse in io thread end");
+			System.out.println(((SocketChannel) getChannel()).getRemotePort() + " parse in io thread end");
 		}
 
 	}
 
 	@Override
-	protected final void onChannelReady(Channel channel) {
-		SocketChannel socketChannel = (SocketChannel) channel;
-		headParser.init(socketChannel);
-		((Http11InputBuffer) requestAction).init(socketChannel);
-		((Http11OutputBuffer) responseAction).init(socketChannel);
-	}
-
-	@Override
 	protected boolean repeat() {
-		return keepAlive;
+		if (count == 0) {
+			return true;
+		} else {
+			return keepAlive;
+		}
 	}
 
 	@Override
@@ -268,39 +341,49 @@ public class Http11Processor extends AbstractProcessor {
 
 	@Override
 	protected boolean parsingHeader() throws IOException {
-
 		if (isHttp2Preface) {
 			return false;
 		}
 		if (checkHttp2Preface) {
-			BufWrapper byteBuffer = ((SocketChannel) getChannel()).getAppReadBuffer();
-			byteBuffer.startParsingHeader(CLIENT_PREFACE_START.length);
-			if (byteBuffer.hasNoRemaining() || byteBuffer.getRemaining() < CLIENT_PREFACE_START.length) {
-				if (!((SocketChannel) getChannel()).fillAppReadBuffer(false)) {
+			appReadBuffer.switchToReadMode();
+			if (appReadBuffer.hasNoRemaining()) {
+				if (!fillAppReadBuffer(false)) {
 					// A read is pending, so no longer in initial state
 					return false;
 				}
-				// At least one byte of the request has been received.
-				// Switch to the socket timeout.
-				int matchCount = 0;
-				for (int i = 0; i < byteBuffer.getRemaining() && i < CLIENT_PREFACE_START.length; i++) {
-					if (CLIENT_PREFACE_START[i] != byteBuffer.getByte(i)) {
-						checkHttp2Preface = false;
-						isHttp2Preface = false;
-						break;
-					} else {
-						matchCount++;
-					}
-				}
-				if (checkHttp2Preface) {
-					if (matchCount < CLIENT_PREFACE_START.length) {
-						return false;
-					} else {
-						isHttp2Preface = true;
+			}
+			while (true) {
+				appReadBuffer.switchToReadMode();
+				if (appReadBuffer.getRemaining() < CLIENT_PREFACE_START.length) {
+					if (!fillAppReadBuffer(false)) {
+						// A read is pending, so no longer in initial state
 						return false;
 					}
+				} else {
+					break;
 				}
 			}
+			// At least one byte of the request has been received.
+			// Switch to the socket timeout.
+			int matchCount = 0;
+			for (int i = 0; i < appReadBuffer.getRemaining() && i < CLIENT_PREFACE_START.length; i++) {
+				if (CLIENT_PREFACE_START[i] != appReadBuffer.getByte(i)) {
+					checkHttp2Preface = false;
+					isHttp2Preface = false;
+					break;
+				} else {
+					matchCount++;
+				}
+			}
+			if (checkHttp2Preface) {
+				if (matchCount < CLIENT_PREFACE_START.length) {
+					return false;
+				} else {
+					isHttp2Preface = true;
+					return false;
+				}
+			}
+
 		}
 
 		try {
@@ -385,6 +468,7 @@ public class Http11Processor extends AbstractProcessor {
 		if (protocolMB.equals(Constants.HTTP_11)) {
 			http09 = false;
 			http11 = true;
+			keepAlive = true;
 			protocolMB.setString(Constants.HTTP_11);
 		} else if (protocolMB.equals(Constants.HTTP_10)) {
 			http09 = false;
@@ -412,8 +496,7 @@ public class Http11Processor extends AbstractProcessor {
 
 	@Override
 	protected boolean canReleaseProcessor() {
-		BufWrapper byteBuffer = ((SocketChannel) getChannel()).getAppReadBuffer();
-		if (byteBuffer.getPosition() == 0 && byteBuffer.getRemaining() == 0) {
+		if (appReadBuffer.getPosition() == 0 && appReadBuffer.getRemaining() == 0) {
 			return true;
 		} else {
 			return false;
@@ -431,7 +514,7 @@ public class Http11Processor extends AbstractProcessor {
 			throw new RuntimeException();
 		}
 
-		AbstractHttp11Protocol<?> protocol = (AbstractHttp11Protocol<?>) getProtocol();
+		AbstractHttp11Protocol<?> protocol = getProtocol();
 
 		if (protocol.isSSLEnabled()) {
 			exchangeData.getScheme().setString("https");
@@ -657,12 +740,14 @@ public class Http11Processor extends AbstractProcessor {
 			getAdapter().log(request, response, 0);
 		}
 
-		int maxKeepAliveRequests = protocol.getMaxKeepAliveRequests();
-		if (maxKeepAliveRequests == 1) {
-			keepAlive = false;
-		} else if (maxKeepAliveRequests > 0
-				&& ((SocketChannel) getChannel()).incrementKeepAlive() >= maxKeepAliveRequests) {
-			keepAlive = false;
+		if (keepAlive) {
+			int maxKeepAliveRequests = protocol.getMaxKeepAliveRequests();
+			if (maxKeepAliveRequests == 1) {
+				keepAlive = false;
+			} else if (maxKeepAliveRequests > 0
+					&& ((SocketChannel) getChannel()).incrementKeepAlive() >= maxKeepAliveRequests) {
+				keepAlive = false;
+			}
 		}
 
 	}
@@ -904,6 +989,7 @@ public class Http11Processor extends AbstractProcessor {
 		Response response = createResponse();
 		request.setResponse(response);
 		getAdapter().checkRecycled(request, response);
+		count++;
 		// super.recycle();
 		headParser.nextRequest();
 		((Http11InputBuffer) requestAction).nextRequest();
@@ -913,6 +999,7 @@ public class Http11Processor extends AbstractProcessor {
 
 	@Override
 	protected void recycleInternal() {
+//		System.out.println(this + " recycleInternal");
 		Request request = createRequest();
 		Response response = createResponse();
 		request.setResponse(response);
@@ -926,8 +1013,23 @@ public class Http11Processor extends AbstractProcessor {
 		isHttp2Preface = false;
 		keptAlive = false;
 		keepAlive = true;
-
+		count = 0;
+		if (appReadBuffer != null) {
+			if (appReadBuffer.reuseable()) {
+				appReadBuffer.reset();
+			}
+			if (!appReadBuffer.released()) {
+				appReadBuffer.release();
+				if (Constants.debug) {
+					System.out.println(((SocketChannel) getChannel()).getRemotePort() + " " + appReadBuffer
+							+ " released by processor!" + " info:" + appReadBuffer.printInfo());
+				}
+			}
+			appReadBuffer = null;
+		}
 		// sslSupport = null;
+//		System.out.println(
+//				((SocketChannel) getChannel()).getRemotePort() + toString() + " recycled~~~~~~~~~~~~~~~~~~~~~~~");
 	}
 
 	@Override

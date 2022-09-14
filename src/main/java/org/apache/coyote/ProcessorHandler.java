@@ -13,6 +13,7 @@ import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.net.Endpoint.Handler;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -186,7 +187,7 @@ public class ProcessorHandler implements Handler {
 							socketChannel.clearCurrentProcessor();
 							protocol.release(processor);
 							processor = upgradeProtocol.getProcessor(socketChannel, protocol.getAdapter());
-							socketChannel.unRead(leftOverInput);
+							socketChannel.unRead(ByteBufferWrapper.wrapper(leftOverInput, true));
 							// Associate with the processor with the connection
 							socketChannel.setCurrentProcessor(processor);
 						} else {
@@ -208,7 +209,7 @@ public class ProcessorHandler implements Handler {
 						if (log.isDebugEnabled()) {
 							log.debug(sm.getString("abstractConnectionHandler.upgradeCreate", processor, channel));
 						}
-						socketChannel.unRead(leftOverInput);
+						socketChannel.unRead(ByteBufferWrapper.wrapper(leftOverInput, true));
 						// Mark the connection as upgraded
 						// socketChannel.setUpgraded(true);
 						// Associate with the processor with the connection

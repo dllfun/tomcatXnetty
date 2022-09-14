@@ -19,37 +19,37 @@ package org.apache.tomcat.util.buf;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
+
 /**
  * Simple wrapper for a {@link ByteBuffer} that remembers if the buffer has been
  * flipped or not.
  */
 public class ByteBufferHolder {
 
-    private final ByteBuffer buf;
-    private final AtomicBoolean flipped;
+	private final ByteBufferWrapper buf;
+	private final AtomicBoolean flipped;
 
-    public ByteBufferHolder(ByteBuffer buf, boolean flipped) {
-       this.buf = buf;
-       this.flipped = new AtomicBoolean(flipped);
-    }
+	public ByteBufferHolder(ByteBufferWrapper buf, boolean flipped) {
+		this.buf = buf;
+		this.flipped = new AtomicBoolean(flipped);
+	}
 
+	public ByteBufferWrapper getBuf() {
+		return buf;
+	}
 
-    public ByteBuffer getBuf() {
-        return buf;
-    }
+	public boolean isFlipped() {
+		return flipped.get();
+	}
 
-
-    public boolean isFlipped() {
-        return flipped.get();
-    }
-
-
-    public boolean flip() {
-        if (flipped.compareAndSet(false, true)) {
-            buf.flip();
-            return true;
-        } else {
-            return false;
-        }
-    }
+	public boolean flip() {
+		if (flipped.compareAndSet(false, true)) {
+			// buf.flip();//TODO check
+			buf.switchToReadMode();
+			return true;
+		} else {
+			return false;
+		}
+	}
 }

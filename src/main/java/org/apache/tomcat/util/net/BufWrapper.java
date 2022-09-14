@@ -4,13 +4,21 @@ import java.nio.ByteBuffer;
 
 public interface BufWrapper {
 
-	public void switchToWriteMode(boolean compact, int retain);
-
 	public void switchToWriteMode(boolean compact);
 
 	public void switchToWriteMode();
 
+	public void setRetain(int retain);
+
+	public void clearRetain();
+
+	public int getRetain();
+
+	public boolean isWriteMode();
+
 	public void switchToReadMode();
+
+	public boolean isReadMode();
 
 	public boolean reuseable();
 
@@ -20,7 +28,7 @@ public interface BufWrapper {
 
 	public byte getByte();
 
-	public void getByte(byte[] b, int off, int len);
+	public void getBytes(byte[] b, int off, int len);
 
 	public byte getByte(int index);
 
@@ -31,6 +39,10 @@ public interface BufWrapper {
 	public boolean hasArray();
 
 	public byte[] getArray();
+
+	public boolean isDirect();
+
+	public boolean isEmpty();
 
 	public int getRemaining();
 
@@ -50,6 +62,12 @@ public interface BufWrapper {
 
 	public void putBytes(byte[] b, int off, int len);
 
+	public void clearWrite();
+
+//	public void unread(ByteBufferWrapper returned);
+
+	public boolean isWritable();
+
 	// public boolean fill(boolean block) throws IOException;
 
 	// public int read(boolean block, byte[] b, int off, int len) throws
@@ -57,15 +75,13 @@ public interface BufWrapper {
 
 	// public int read(boolean block, ByteBuffer to) throws IOException;
 
-	public void startParsingHeader(int headerBufferSize);
+//	public void startParsingHeader(int headerBufferSize);
 
-	public void startParsingRequestLine();
+//	public void startParsingRequestLine();
 
-	public void finishParsingRequestLine();
+//	public void finishParsingRequestLine();
 
-	public void finishParsingHeader(boolean keepHeadPos);
-
-	public void nextRequest();
+//	public void finishParsingHeader(boolean keepHeadPos);
 
 	public void reset();
 
@@ -75,8 +91,16 @@ public interface BufWrapper {
 
 	public void startTrace();
 
+	public void retain();
+
 	public boolean released();
 
 	public void release();
+
+	public int refCount();
+
+	public String printInfo();
+
+	public void expand(int newSize);
 
 }

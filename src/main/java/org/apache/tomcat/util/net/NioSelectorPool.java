@@ -27,6 +27,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.tomcat.util.net.NioEndpoint.NioSocketWrapper;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
 /**
  * Thread safe non blocking selector pool
@@ -151,7 +152,7 @@ public class NioSelectorPool {
 	 * @throws IOException            if an IO Exception occurs in the underlying
 	 *                                socket logic
 	 */
-	public int write(ByteBuffer buf, NioSocketWrapper socketWrapper, Selector selector, long writeTimeout)
+	public int write(ByteBufferWrapper buf, NioSocketWrapper socketWrapper, Selector selector, long writeTimeout)
 			throws IOException {
 		if (shared) {
 			return blockingSelector.write(buf, socketWrapper, writeTimeout);
@@ -226,7 +227,7 @@ public class NioSelectorPool {
 	 * @throws IOException            if an IO Exception occurs in the underlying
 	 *                                socket logic
 	 */
-	public int read(ByteBuffer buf, NioSocketWrapper socketWrapper, Selector selector, long readTimeout)
+	public int read(ByteBufferWrapper buf, NioSocketWrapper socketWrapper, Selector selector, long readTimeout)
 			throws IOException {
 		if (shared) {
 			return blockingSelector.read(buf, socketWrapper, readTimeout);

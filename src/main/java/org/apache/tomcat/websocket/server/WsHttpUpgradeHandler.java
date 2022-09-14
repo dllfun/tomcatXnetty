@@ -134,6 +134,7 @@ public class WsHttpUpgradeHandler implements InternalHttpUpgradeHandler {
 			try {
 				return wsFrame.notifyDataAvailable();
 			} catch (WsIOException ws) {
+				ws.printStackTrace();
 				close(ws.getCloseReason());
 			} catch (IOException ioe) {
 				onError(ioe);

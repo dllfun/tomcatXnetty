@@ -22,10 +22,8 @@ import java.nio.ByteBuffer;
 
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SocketChannel;
-import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.res.StringManager;
 import org.apache.tomcat.websocket.Transformation;
 import org.apache.tomcat.websocket.WsFrameBase;
@@ -66,10 +64,14 @@ public class WsFrameServer extends WsFrameBase {
 
 		while (isOpen() && !isSuspended()) {
 			// Fill up the input buffer with as much data as we can
-			inputBuffer.mark();
-			inputBuffer.position(inputBuffer.limit()).limit(inputBuffer.capacity());
+//			inputBuffer.getByteBuffer().mark();
+//			inputBuffer.setPosition(inputBuffer.getLimit());
+//			inputBuffer.setLimit(inputBuffer.getCapacity());
+			inputBuffer.switchToWriteMode();
 			int read = channel.read(false, inputBuffer);
-			inputBuffer.limit(inputBuffer.position()).reset();
+//			inputBuffer.setLimit(inputBuffer.getPosition());
+//			inputBuffer.getByteBuffer().reset();
+			inputBuffer.switchToReadMode();
 			if (read < 0) {
 				throw new EOFException();
 			} else if (read == 0) {
@@ -106,22 +108,22 @@ public class WsFrameServer extends WsFrameBase {
 	}
 
 	@Override
-	protected void sendMessageText(boolean last) throws WsIOException {
+	protected void onMessageText(boolean last) throws WsIOException {
 		ClassLoader cl = Thread.currentThread().getContextClassLoader();
 		try {
 			Thread.currentThread().setContextClassLoader(applicationClassLoader);
-			super.sendMessageText(last);
+			super.onMessageText(last);
 		} finally {
 			Thread.currentThread().setContextClassLoader(cl);
 		}
 	}
 
 	@Override
-	protected void sendMessageBinary(ByteBuffer msg, boolean last) throws WsIOException {
+	protected void onMessageBinary(ByteBuffer msg, boolean last) throws WsIOException {
 		ClassLoader cl = Thread.currentThread().getContextClassLoader();
 		try {
 			Thread.currentThread().setContextClassLoader(applicationClassLoader);
-			super.sendMessageBinary(msg, last);
+			super.onMessageBinary(msg, last);
 		} finally {
 			Thread.currentThread().setContextClassLoader(cl);
 		}

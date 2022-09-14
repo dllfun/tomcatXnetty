@@ -67,6 +67,7 @@ public class FlowCtrlOutputFilter extends ProcessorComponent implements OutputFi
 		while (left > 0) {
 			if (streamReservation == 0) {
 				streamReservation = ((StreamChannel) processor.getChannel()).reserveWindowSize(left, block);
+				System.out.println("streamReservation:" + streamReservation);
 				if (streamReservation == 0) {
 					// Must be non-blocking.
 					// Note: Can't add to the writeBuffer here as the write
@@ -78,6 +79,7 @@ public class FlowCtrlOutputFilter extends ProcessorComponent implements OutputFi
 			while (streamReservation > 0) {
 				int connectionReservation = ((StreamChannel) processor.getChannel()).getHandler().getZero()
 						.reserveWindowSize(((StreamChannel) processor.getChannel()), streamReservation, block);
+				System.out.println("connectionReservation:" + connectionReservation);
 				if (connectionReservation == 0) {
 					// Must be non-blocking.
 					// Note: Can't add to the writeBuffer here as the write

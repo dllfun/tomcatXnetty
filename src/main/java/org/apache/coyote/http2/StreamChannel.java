@@ -54,7 +54,7 @@ public class StreamChannel extends Stream {
 	private final ReentrantLock writeLock = new ReentrantLock();
 	// private volatile int bufferIndex = -1;
 	// private ByteBuffer[] buffers = new ByteBuffer[2];
-	private final Deque<ByteBuffer> deque = new ArrayDeque<>();
+	private final Deque<ByteBufferWrapper> deque = new ArrayDeque<>();
 	private volatile boolean readInterest;
 	private volatile boolean resetReceived = false;
 
@@ -111,23 +111,45 @@ public class StreamChannel extends Stream {
 
 	@Override
 	protected void receivedStartOfHeadersInternal(boolean headersEndStream) throws ConnectionException {
-		setCurrentProcessor(new StreamProcessor(handler, this, handler.getAdapter()));
-		((StreamProcessor) getCurrentProcessor()).receivedStartOfHeadersInternal(headersEndStream);
+		StreamProcessor processor = ((StreamProcessor) getCurrentProcessor());
+		if (processor != null) {
+			System.err.println("stream" + getIdentifier() + " processor init too early");
+		} else {
+			processor = new StreamProcessor(handler, this, handler.getAdapter());
+			setCurrentProcessor(processor);
+		}
+		processor.receivedStartOfHeadersInternal(headersEndStream);
 	}
 
 	@Override
 	protected boolean receivedEndOfHeadersInternal() throws ConnectionException {
-		return ((StreamProcessor) getCurrentProcessor()).receivedEndOfHeadersInternal();
+		StreamProcessor processor = ((StreamProcessor) getCurrentProcessor());
+		if (processor != null) {
+			return processor.receivedEndOfHeadersInternal();
+		} else {
+			System.err.println("stream" + getIdentifier() + " processor cleared too early");
+			return false;
+		}
 	}
 
 	@Override
 	protected void receivedDataInternal(int payloadSize) throws ConnectionException {
-		((StreamProcessor) getCurrentProcessor()).receivedDataInternal(payloadSize);
+		StreamProcessor processor = ((StreamProcessor) getCurrentProcessor());
+		if (processor != null) {
+			processor.receivedDataInternal(payloadSize);
+		} else {
+			System.err.println("stream" + getIdentifier() + " processor cleared too early");
+		}
 	}
 
 	@Override
 	protected void receivedEndOfStreamInternal() throws ConnectionException {
-		((StreamProcessor) getCurrentProcessor()).receivedEndOfStreamInternal();
+		StreamProcessor processor = ((StreamProcessor) getCurrentProcessor());
+		if (processor != null) {
+			processor.receivedEndOfStreamInternal();
+		} else {
+			System.err.println("stream" + getIdentifier() + " processor cleared too early");
+		}
 	}
 
 	@Override
@@ -184,8 +206,8 @@ public class StreamChannel extends Stream {
 				return 0;
 			}
 			int available = 0;
-			for (ByteBuffer buf : deque) {
-				available += buf.remaining();
+			for (ByteBufferWrapper buf : deque) {
+				available += buf.getRemaining();
 			}
 			return available;
 		} finally {
@@ -232,7 +254,7 @@ public class StreamChannel extends Stream {
 	public final BufWrapper doRead() throws IOException {
 
 //		ensureBuffersExist();
-		ByteBuffer buffer = null;
+		ByteBufferWrapper buffer = null;
 		// Ensure that only one thread accesses inBuffer at a time
 		try {
 			readLock.lock();
@@ -240,19 +262,21 @@ public class StreamChannel extends Stream {
 				return null;
 			}
 			int available = 0;
-			for (ByteBuffer buf : deque) {
-				available += buf.remaining();
+			for (ByteBufferWrapper buf : deque) {
+				available += buf.getRemaining();
 			}
 			if (available > 0) {
-				buffer = ByteBuffer.allocate(available);
-				ByteBuffer buf = null;
+				buffer = ByteBufferWrapper.wrapper(ByteBuffer.allocate(available), false);
+				ByteBufferWrapper buf = null;
 				while ((buf = deque.poll()) != null) {
-					buffer.put(buf);
+//					buffer.put(buf);
+					buf.transferTo(buffer);
 				}
-				buffer.flip();
+//				buffer.flip();
+				buffer.switchToReadMode();
 			}
 			boolean canRead = false;
-			while ((buffer == null || buffer.remaining() == 0)
+			while ((buffer == null || buffer.getRemaining() == 0)
 					&& (canRead = this.isActive() && !this.isInputFinished())) {
 				// Need to block until some data is written
 				try {
@@ -319,14 +343,13 @@ public class StreamChannel extends Stream {
 //		int freeIndex = (bufferIndex + 1) % 2;
 //		buffers[freeIndex].flip();
 //		buffer.flip();
-		int written = buffer.remaining();
+		int written = buffer.getRemaining();
 		if (log.isDebugEnabled()) {
 			log.debug(sm.getString("stream.inputBuffer.copy", Integer.toString(written)));
 		}
 		handler.getWriter().writeWindowUpdate(this, written, true);
-		ByteBufferWrapper toreturn = ByteBufferWrapper.wrapper(buffer, true);
 //		System.out.println("stream" + getIdAsString() + " take:" + toreturn.getRemaining());
-		return toreturn;
+		return buffer;
 	}
 
 	@Override
@@ -336,7 +359,8 @@ public class StreamChannel extends Stream {
 			// bufferIndex = 0;
 			// buffers[bufferIndex] = ByteBuffer.wrap(body.getBytes(), body.getOffset(),
 			// body.getLength());
-			deque.offer(ByteBuffer.wrap(body.getBytes(), body.getOffset(), body.getLength()));
+			deque.offer(ByteBufferWrapper.wrapper(ByteBuffer.wrap(body.getBytes(), body.getOffset(), body.getLength()),
+					true));
 		} finally {
 			readLock.unlock();
 		}
@@ -404,8 +428,8 @@ public class StreamChannel extends Stream {
 		int size = handler.getLocalSettings().getInitialWindowSize();
 		try {
 			readLock.lock();
-			for (ByteBuffer buffer : deque) {
-				size -= buffer.remaining();
+			for (ByteBufferWrapper buffer : deque) {
+				size -= buffer.getRemaining();
 			}
 //			System.out.println("availableWindowSize:" + size);
 			return size;
@@ -414,7 +438,7 @@ public class StreamChannel extends Stream {
 		}
 	}
 
-	public boolean offer(ByteBuffer buffer) throws IOException {
+	public boolean offer(ByteBufferWrapper buffer) throws IOException {
 //		System.out.println("stream" + getIdAsString() + " offer " + buffer.remaining());
 		try {
 			readLock.lock();
@@ -434,8 +458,8 @@ public class StreamChannel extends Stream {
 			readLock.lock();
 			inputClosed = true;
 			if (deque.size() > 0) {
-				for (ByteBuffer buffer : deque) {
-					unreadByteCount += buffer.remaining();
+				for (ByteBufferWrapper buffer : deque) {
+					unreadByteCount += buffer.getRemaining();
 				}
 //				unreadByteCount = buffers[bufferIndex].position();
 				if (log.isDebugEnabled()) {
@@ -525,6 +549,7 @@ public class StreamChannel extends Stream {
 			}
 			// chunk is always fully written
 			int result = chunk.remaining();
+			System.out.println("stream(" + getIdentifier() + ") write: " + chunk.remaining());
 			getHandler().getWriter().writeBody(this, chunk, result, finished);
 			return result;
 		} finally {

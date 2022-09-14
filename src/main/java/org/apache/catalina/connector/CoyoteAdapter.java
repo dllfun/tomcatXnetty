@@ -173,7 +173,7 @@ public class CoyoteAdapter implements Adapter {
 					try {
 						oldCL = request.getContext().bind(false, null);
 						res.onWritePossible();
-						if (request.isFinished() && req.sendAllDataReadEvent() && readListener != null) {
+						if (readListener != null && request.isFinished() && req.sendAllDataReadEvent()) {
 							readListener.onAllDataRead();
 						}
 					} catch (Throwable t) {

@@ -25,51 +25,50 @@ import java.util.concurrent.TimeoutException;
 import javax.websocket.SendHandler;
 import javax.websocket.SendResult;
 
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
+
 public class WsRemoteEndpointImplClient extends WsRemoteEndpointImplBase {
 
-    private final AsyncChannelWrapper channel;
+	private final AsyncChannelWrapper channel;
 
-    public WsRemoteEndpointImplClient(AsyncChannelWrapper channel) {
-        this.channel = channel;
-    }
+	public WsRemoteEndpointImplClient(AsyncChannelWrapper channel) {
+		this.channel = channel;
+	}
 
+	@Override
+	protected boolean isMasked() {
+		return true;
+	}
 
-    @Override
-    protected boolean isMasked() {
-        return true;
-    }
+	@Override
+	protected void doWrite(SendHandler handler, long blockingWriteTimeoutExpiry, ByteBufferWrapper... data) {
+		long timeout;
+		for (ByteBufferWrapper byteBuffer : data) {
+			if (blockingWriteTimeoutExpiry == -1) {
+				timeout = getSendTimeout();
+				if (timeout < 1) {
+					timeout = Long.MAX_VALUE;
+				}
+			} else {
+				timeout = blockingWriteTimeoutExpiry - System.currentTimeMillis();
+				if (timeout < 0) {
+					SendResult sr = new SendResult(new IOException(sm.getString("wsRemoteEndpoint.writeTimeout")));
+					handler.onResult(sr);
+				}
+			}
 
+			try {
+				channel.write(byteBuffer).get(timeout, TimeUnit.MILLISECONDS);
+			} catch (InterruptedException | ExecutionException | TimeoutException e) {
+				handler.onResult(new SendResult(e));
+				return;
+			}
+		}
+		handler.onResult(SENDRESULT_OK);
+	}
 
-    @Override
-    protected void doWrite(SendHandler handler, long blockingWriteTimeoutExpiry,
-            ByteBuffer... data) {
-        long timeout;
-        for (ByteBuffer byteBuffer : data) {
-            if (blockingWriteTimeoutExpiry == -1) {
-                timeout = getSendTimeout();
-                if (timeout < 1) {
-                    timeout = Long.MAX_VALUE;
-                }
-            } else {
-                timeout = blockingWriteTimeoutExpiry - System.currentTimeMillis();
-                if (timeout < 0) {
-                    SendResult sr = new SendResult(new IOException(sm.getString("wsRemoteEndpoint.writeTimeout")));
-                    handler.onResult(sr);
-                }
-            }
-
-            try {
-                channel.write(byteBuffer).get(timeout, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException | ExecutionException | TimeoutException e) {
-                handler.onResult(new SendResult(e));
-                return;
-            }
-        }
-        handler.onResult(SENDRESULT_OK);
-    }
-
-    @Override
-    protected void doClose() {
-        channel.close();
-    }
+	@Override
+	protected void doClose() {
+		channel.close();
+	}
 }

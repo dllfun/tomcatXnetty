@@ -46,6 +46,7 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.collections.SynchronizedStack;
 import org.apache.tomcat.util.net.Acceptor.AcceptorState;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.net.jsse.JSSESupport;
 
 /**
@@ -442,12 +443,12 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 
 		private SendfileData sendfileData = null;
 
-		private final CompletionHandler<Integer, ByteBuffer> readCompletionHandler;
+		private final CompletionHandler<Integer, ByteBufferWrapper> readCompletionHandler;
 		private boolean readInterest = false; // Guarded by readCompletionHandler
 		private boolean readNotify = false;
 
-		private final CompletionHandler<Integer, ByteBuffer> writeCompletionHandler;
-		private final CompletionHandler<Long, ByteBuffer[]> gatheringWriteCompletionHandler;
+		private final CompletionHandler<Integer, ByteBufferWrapper> writeCompletionHandler;
+		private final CompletionHandler<Long, ByteBufferWrapper[]> gatheringWriteCompletionHandler;
 		private boolean writeInterest = false; // Guarded by writeCompletionHandler
 		private boolean writeNotify = false;
 
@@ -460,7 +461,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					return;
 				}
 				attachment.pos += nWrite.intValue();
-				ByteBuffer buffer = getSocket().getWriteBuffer();
+				ByteBufferWrapper buffer = getSocket().getWriteBuffer();
 				if (!buffer.hasRemaining()) {
 					if (attachment.length <= 0) {
 						// All data has now been written
@@ -498,15 +499,15 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 						getSocket().configureWriteBufferForWrite();
 						int nRead = -1;
 						try {
-							nRead = attachment.fchannel.read(buffer);
+							nRead = attachment.fchannel.read(buffer.getByteBuffer());
 						} catch (IOException e) {
 							failed(e, attachment);
 							return;
 						}
 						if (nRead > 0) {
 							getSocket().configureWriteBufferForRead();
-							if (attachment.length < buffer.remaining()) {
-								buffer.limit(buffer.limit() - buffer.remaining() + (int) attachment.length);
+							if (attachment.length < buffer.getRemaining()) {
+								buffer.setLimit(buffer.getLimit() - buffer.getRemaining() + (int) attachment.length);
 							}
 							attachment.length -= nRead;
 						} else {
@@ -540,9 +541,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 			nioChannels = endpoint.getNioChannels();
 			// setSocketBufferHandler(channel.getBufHandler());
 
-			this.readCompletionHandler = new CompletionHandler<Integer, ByteBuffer>() {
+			this.readCompletionHandler = new CompletionHandler<Integer, ByteBufferWrapper>() {
 				@Override
-				public void completed(Integer nBytes, ByteBuffer attachment) {
+				public void completed(Integer nBytes, ByteBufferWrapper attachment) {
 					if (log.isDebugEnabled()) {
 						log.debug("Socket: [" + Nio2SocketWrapper.this + "], Interest: [" + readInterest + "]");
 					}
@@ -567,7 +568,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				}
 
 				@Override
-				public void failed(Throwable exc, ByteBuffer attachment) {
+				public void failed(Throwable exc, ByteBufferWrapper attachment) {
 					IOException ioe;
 					if (exc instanceof IOException) {
 						ioe = (IOException) exc;
@@ -588,9 +589,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				}
 			};
 
-			this.writeCompletionHandler = new CompletionHandler<Integer, ByteBuffer>() {
+			this.writeCompletionHandler = new CompletionHandler<Integer, ByteBufferWrapper>() {
 				@Override
-				public void completed(Integer nBytes, ByteBuffer attachment) {
+				public void completed(Integer nBytes, ByteBufferWrapper attachment) {
 					writeNotify = false;
 					boolean notify = false;
 					synchronized (writeCompletionHandler) {
@@ -598,7 +599,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 							failed(new EOFException(sm.getString("iob.failedwrite")), attachment);
 						} else if (!nonBlockingWriteBuffer.isEmpty()) {
 							// Continue writing data using a gathering write
-							ByteBuffer[] array = nonBlockingWriteBuffer.toArray(attachment);
+							ByteBufferWrapper[] array = nonBlockingWriteBuffer.toArray(attachment);
 							getSocket().write(array, 0, array.length, Endpoint.toTimeout(getWriteTimeout()),
 									TimeUnit.MILLISECONDS, array, gatheringWriteCompletionHandler);
 						} else if (attachment.hasRemaining()) {
@@ -628,7 +629,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				}
 
 				@Override
-				public void failed(Throwable exc, ByteBuffer attachment) {
+				public void failed(Throwable exc, ByteBufferWrapper attachment) {
 					IOException ioe;
 					if (exc instanceof IOException) {
 						ioe = (IOException) exc;
@@ -644,9 +645,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				}
 			};
 
-			gatheringWriteCompletionHandler = new CompletionHandler<Long, ByteBuffer[]>() {
+			gatheringWriteCompletionHandler = new CompletionHandler<Long, ByteBufferWrapper[]>() {
 				@Override
-				public void completed(Long nBytes, ByteBuffer[] attachment) {
+				public void completed(Long nBytes, ByteBufferWrapper[] attachment) {
 					writeNotify = false;
 					boolean notify = false;
 					synchronized (writeCompletionHandler) {
@@ -655,7 +656,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 						} else if (!nonBlockingWriteBuffer.isEmpty()
 								|| buffersArrayHasRemaining(attachment, 0, attachment.length)) {
 							// Continue writing data using a gathering write
-							ByteBuffer[] array = nonBlockingWriteBuffer.toArray(attachment);
+							ByteBufferWrapper[] array = nonBlockingWriteBuffer.toArray(attachment);
 							getSocket().write(array, 0, array.length, Endpoint.toTimeout(getWriteTimeout()),
 									TimeUnit.MILLISECONDS, array, gatheringWriteCompletionHandler);
 						} else {
@@ -681,7 +682,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				}
 
 				@Override
-				public void failed(Throwable exc, ByteBuffer[] attachment) {
+				public void failed(Throwable exc, ByteBufferWrapper[] attachment) {
 					IOException ioe;
 					if (exc instanceof IOException) {
 						ioe = (IOException) exc;
@@ -717,15 +718,30 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 			return this.sendfileData;
 		}
 
+//		@Override
+//		protected SocketBufferHandler getSocketBufferHandler() {
+//			return getSocket();
+//		}
+
 		@Override
-		protected SocketBufferHandler getSocketBufferHandler() {
-			return getSocket();
+		protected ByteBufferWrapper getSocketAppReadBuffer() {
+			return getSocket().getAppReadBuffer();
+		}
+
+		@Override
+		protected ByteBufferWrapper getSocketReadBuffer() {
+			return getSocket().getReadBuffer();
+		}
+
+		@Override
+		protected ByteBufferWrapper getSocketWriteBuffer() {
+			return getSocket().getWriteBuffer();
 		}
 
 		@Override
 		public int getAvailable() {
 			getSocket().configureReadBufferForRead();
-			return getSocket().getReadBuffer().remaining();
+			return getSocket().getReadBuffer().getRemaining();
 		}
 
 		@Override
@@ -829,7 +845,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				if (nRead > 0) {
 					getSocket().configureReadBufferForRead();
 					nRead = Math.min(nRead, len);
-					getSocket().getReadBuffer().get(b, off, nRead);
+					getSocket().getReadBuffer().getBytes(b, off, nRead);
 				} else if (nRead == 0 && !block) {
 					readInterest = true;
 				}
@@ -841,7 +857,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		}
 
 		@Override
-		public int read(boolean block, ByteBuffer to) throws IOException {
+		public int read(boolean block, ByteBufferWrapper to) throws IOException {
 			checkError();
 
 			if (getSocket() == null) {
@@ -879,9 +895,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 
 			synchronized (readCompletionHandler) {
 				// The socket read buffer capacity is socket.appReadBufSize
-				int limit = getSocket().getReadBuffer().capacity();
-				if (block && to.remaining() >= limit) {
-					to.limit(to.position() + limit);
+				int limit = getSocket().getReadBuffer().getCapacity();
+				if (block && to.getRemaining() >= limit) {
+					to.setLimit(to.getPosition() + limit);
 					nRead = fillReadBuffer(block, to);
 					if (log.isDebugEnabled()) {
 						log.debug("Socket: [" + this + "], Read direct from socket: [" + nRead + "]");
@@ -958,8 +974,8 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		}
 
 		@Override
-		protected <A> OperationState<A> newOperationState(boolean read, ByteBuffer[] buffers, int offset, int length,
-				BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+		protected <A> OperationState<A> newOperationState(boolean read, ByteBufferWrapper[] buffers, int offset,
+				int length, BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 				CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 				VectoredIOCompletionHandler<A> completion) {
 			return new Nio2OperationState<>(read, buffers, offset, length, block, timeout, unit, attachment, check,
@@ -967,8 +983,8 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		}
 
 		private class Nio2OperationState<A> extends OperationState<A> {
-			private Nio2OperationState(boolean read, ByteBuffer[] buffers, int offset, int length, BlockingMode block,
-					long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+			private Nio2OperationState(boolean read, ByteBufferWrapper[] buffers, int offset, int length,
+					BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 					CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 					VectoredIOCompletionHandler<A> completion) {
 				super(read, buffers, offset, length, block, timeout, unit, attachment, check, handler, semaphore,
@@ -1003,7 +1019,13 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 						synchronized (readCompletionHandler) {
 							getSocket().configureReadBufferForRead();
 							for (int i = 0; i < length && !getSocket().isReadBufferEmpty(); i++) {
-								nBytes += transfer(getSocket().getReadBuffer(), buffers[offset + i]);
+								if (!buffers[offset + i].isWriteMode()) {
+									throw new RuntimeException();
+								}
+								if (buffers[offset + i].hasRemaining()) {
+//									nBytes += transfer(getSocket().getReadBuffer(), buffers[offset + i]);
+									nBytes += getSocket().getReadBuffer().transferTo(buffers[offset + i]);
+								}
 							}
 						}
 						if (nBytes > 0) {
@@ -1019,12 +1041,12 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					if (!getSocket().isWriteBufferEmpty()) {
 						synchronized (writeCompletionHandler) {
 							getSocket().configureWriteBufferForRead();
-							ByteBuffer[] array = nonBlockingWriteBuffer.toArray(getSocket().getWriteBuffer());
+							ByteBufferWrapper[] array = nonBlockingWriteBuffer.toArray(getSocket().getWriteBuffer());
 							if (buffersArrayHasRemaining(array, 0, array.length)) {
 								getSocket().write(array, 0, array.length, timeout, unit, array,
-										new CompletionHandler<Long, ByteBuffer[]>() {
+										new CompletionHandler<Long, ByteBufferWrapper[]>() {
 											@Override
-											public void completed(Long nBytes, ByteBuffer[] buffers) {
+											public void completed(Long nBytes, ByteBufferWrapper[] buffers) {
 												if (nBytes.longValue() < 0) {
 													failed(new EOFException(), null);
 												} else if (buffersArrayHasRemaining(buffers, 0, buffers.length)) {
@@ -1038,7 +1060,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 											}
 
 											@Override
-											public void failed(Throwable exc, ByteBuffer[] buffers) {
+											public void failed(Throwable exc, ByteBufferWrapper[] buffers) {
 												completion.failed(exc, Nio2OperationState.this);
 											}
 										});
@@ -1063,7 +1085,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 			return fillReadBuffer(block, getSocket().getReadBuffer());
 		}
 
-		private int fillReadBuffer(boolean block, ByteBuffer to) throws IOException {
+		private int fillReadBuffer(boolean block, ByteBufferWrapper to) throws IOException {
 			int nRead = 0;
 			Future<Integer> integer = null;
 			if (block) {
@@ -1097,7 +1119,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 						readCompletionHandler);// TODO remove ,
 				Nio2Endpoint.endInline();
 				if (getReadPending().availablePermits() == 1) {
-					nRead = to.position();
+					nRead = to.getPosition();
 				}
 			}
 			return nRead;
@@ -1149,7 +1171,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		 * leave data in the buffer.
 		 */
 		@Override
-		protected void writeNonBlocking(ByteBuffer from) throws IOException {
+		protected void writeNonBlocking(ByteBufferWrapper from) throws IOException {
 			writeNonBlockingInternal(from);
 		}
 
@@ -1161,7 +1183,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		 * leave data in the buffer.
 		 */
 		@Override
-		protected void writeNonBlockingInternal(ByteBuffer from) throws IOException {
+		protected void writeNonBlockingInternal(ByteBufferWrapper from) throws IOException {
 			// Note: Possible alternate behavior:
 			// If there's non blocking abuse (like a test writing 1MB in a single
 			// "non blocking" write), then block until the previous write is
@@ -1177,8 +1199,9 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					// No pending completion handler, so writing to the main buffer
 					// is possible
 					getSocket().configureWriteBufferForWrite();
-					transfer(from, getSocket().getWriteBuffer());
-					if (from.remaining() > 0) {
+//					transfer(from, getSocket().getWriteBuffer());
+					from.transferTo(getSocket().getWriteBuffer());
+					if (from.getRemaining() > 0) {
 						// Remaining data must be buffered
 						nonBlockingWriteBuffer.add(from);
 					}
@@ -1193,7 +1216,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		 * @param block Ignored since this method is only called in the blocking case
 		 */
 		@Override
-		protected void doWrite(boolean block, ByteBuffer from) throws IOException {
+		protected void doWrite(boolean block, ByteBufferWrapper from) throws IOException {
 			Future<Integer> integer = null;
 			try {
 				do {
@@ -1255,7 +1278,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					writeNotify = false;
 					getSocket().configureWriteBufferForRead();
 					if (!nonBlockingWriteBuffer.isEmpty()) {
-						ByteBuffer[] array = nonBlockingWriteBuffer.toArray(getSocket().getWriteBuffer());
+						ByteBufferWrapper[] array = nonBlockingWriteBuffer.toArray(getSocket().getWriteBuffer());
 						Nio2Endpoint.startInline();
 						getSocket().write(array, 0, array.length, Endpoint.toTimeout(getWriteTimeout()),
 								TimeUnit.MILLISECONDS, array, gatheringWriteCompletionHandler);
@@ -1414,10 +1437,10 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 				}
 			}
 			getSocket().configureWriteBufferForWrite();
-			ByteBuffer buffer = getSocket().getWriteBuffer();
+			ByteBufferWrapper buffer = getSocket().getWriteBuffer();
 			int nRead = -1;
 			try {
-				nRead = data.fchannel.read(buffer);
+				nRead = data.fchannel.read(buffer.getByteBuffer());
 			} catch (IOException e1) {
 				return SendfileState.ERROR;
 			}

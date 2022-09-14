@@ -33,6 +33,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 public abstract class AbstractSocketChannel<E> extends AbstractChannel implements SocketChannel {
@@ -368,8 +369,8 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 * @throws IOException If an IO error occurs during the write
 	 */
 	@Override
-	public final void write(boolean block, ByteBuffer from) throws IOException {
-		if (from == null || from.remaining() == 0) {
+	public final void write(boolean block, ByteBufferWrapper from) throws IOException {
+		if (from == null || from.getRemaining() == 0) {
 			return;
 		}
 
@@ -418,7 +419,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 *
 	 * @throws IOException If an IO error occurs during the write
 	 */
-	protected abstract void writeBlocking(ByteBuffer from) throws IOException;
+	protected abstract void writeBlocking(ByteBufferWrapper from) throws IOException;
 
 	/**
 	 * Transfers the data to the socket write buffer (writing that data to the
@@ -452,7 +453,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 *
 	 * @throws IOException If an IO error occurs during the write
 	 */
-	protected abstract void writeNonBlocking(ByteBuffer from) throws IOException;
+	protected abstract void writeNonBlocking(ByteBufferWrapper from) throws IOException;
 
 	@Override
 	public final void write(boolean block, BufWrapper from) throws IOException {
@@ -522,7 +523,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 */
 	protected abstract class OperationState<A> implements Runnable {
 		protected final boolean read;
-		protected final ByteBuffer[] buffers;
+		protected final ByteBufferWrapper[] buffers;
 		protected final int offset;
 		protected final int length;
 		protected final A attachment;
@@ -535,7 +536,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 		protected final VectoredIOCompletionHandler<A> completion;
 		protected final AtomicBoolean callHandler;
 
-		protected OperationState(boolean read, ByteBuffer[] buffers, int offset, int length, BlockingMode block,
+		protected OperationState(boolean read, ByteBufferWrapper[] buffers, int offset, int length, BlockingMode block,
 				long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 				CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 				VectoredIOCompletionHandler<A> completion) {
@@ -796,7 +797,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 * @return the completion state (done, done inline, or still pending)
 	 */
 	public final <A> CompletionState read(long timeout, TimeUnit unit, A attachment,
-			CompletionHandler<Long, ? super A> handler, ByteBuffer... dsts) {
+			CompletionHandler<Long, ? super A> handler, ByteBufferWrapper... dsts) {
 		if (dsts == null) {
 			throw new IllegalArgumentException();
 		}
@@ -824,7 +825,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 */
 	@Override
 	public final <A> CompletionState read(BlockingMode block, long timeout, TimeUnit unit, A attachment,
-			CompletionCheck check, CompletionHandler<Long, ? super A> handler, ByteBuffer... dsts) {
+			CompletionCheck check, CompletionHandler<Long, ? super A> handler, ByteBufferWrapper... dsts) {
 		if (dsts == null) {
 			throw new IllegalArgumentException();
 		}
@@ -852,8 +853,9 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 * @param <A>        The attachment type
 	 * @return the completion state (done, done inline, or still pending)
 	 */
-	public final <A> CompletionState read(ByteBuffer[] dsts, int offset, int length, BlockingMode block, long timeout,
-			TimeUnit unit, A attachment, CompletionCheck check, CompletionHandler<Long, ? super A> handler) {
+	public final <A> CompletionState read(ByteBufferWrapper[] dsts, int offset, int length, BlockingMode block,
+			long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+			CompletionHandler<Long, ? super A> handler) {
 		return vectoredOperation(true, dsts, offset, length, block, timeout, unit, attachment, check, handler);
 	}
 
@@ -873,7 +875,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 * @return the completion state (done, done inline, or still pending)
 	 */
 	public final <A> CompletionState write(long timeout, TimeUnit unit, A attachment,
-			CompletionHandler<Long, ? super A> handler, ByteBuffer... srcs) {
+			CompletionHandler<Long, ? super A> handler, ByteBufferWrapper... srcs) {
 		if (srcs == null) {
 			throw new IllegalArgumentException();
 		}
@@ -901,7 +903,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 */
 	@Override
 	public final <A> CompletionState write(BlockingMode block, long timeout, TimeUnit unit, A attachment,
-			CompletionCheck check, CompletionHandler<Long, ? super A> handler, ByteBuffer... srcs) {
+			CompletionCheck check, CompletionHandler<Long, ? super A> handler, ByteBufferWrapper... srcs) {
 		if (srcs == null) {
 			throw new IllegalArgumentException();
 		}
@@ -929,8 +931,9 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 * @param <A>        The attachment type
 	 * @return the completion state (done, done inline, or still pending)
 	 */
-	public final <A> CompletionState write(ByteBuffer[] srcs, int offset, int length, BlockingMode block, long timeout,
-			TimeUnit unit, A attachment, CompletionCheck check, CompletionHandler<Long, ? super A> handler) {
+	public final <A> CompletionState write(ByteBufferWrapper[] srcs, int offset, int length, BlockingMode block,
+			long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+			CompletionHandler<Long, ? super A> handler) {
 		return vectoredOperation(false, srcs, offset, length, block, timeout, unit, attachment, check, handler);
 	}
 
@@ -956,8 +959,8 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 * @param <A>        The attachment type
 	 * @return the completion state (done, done inline, or still pending)
 	 */
-	protected final <A> CompletionState vectoredOperation(boolean read, ByteBuffer[] buffers, int offset, int length,
-			BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+	protected final <A> CompletionState vectoredOperation(boolean read, ByteBufferWrapper[] buffers, int offset,
+			int length, BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 			CompletionHandler<Long, ? super A> handler) {
 		IOException ioe = getError();
 		if (ioe != null) {
@@ -1027,32 +1030,38 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 		return state.state;
 	}
 
-	protected abstract <A> OperationState<A> newOperationState(boolean read, ByteBuffer[] buffers, int offset,
+	protected abstract <A> OperationState<A> newOperationState(boolean read, ByteBufferWrapper[] buffers, int offset,
 			int length, BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 			CompletionHandler<Long, ? super A> handler, Semaphore semaphore, VectoredIOCompletionHandler<A> completion);
 
 	// --------------------------------------------------------- Utility methods
 
-	protected static int transfer(byte[] from, int offset, int length, ByteBuffer to) {
-		int max = Math.min(length, to.remaining());
+	protected static int transfer(byte[] from, int offset, int length, ByteBufferWrapper to) {
+		int max = Math.min(length, to.getRemaining());
 		if (max > 0) {
-			to.put(from, offset, max);
+			to.putBytes(from, offset, max);
 		}
 		return max;
 	}
 
-	protected static int transfer(ByteBuffer from, ByteBuffer to) {
-		int max = Math.min(from.remaining(), to.remaining());
-		if (max > 0) {
-			int fromLimit = from.limit();
-			from.limit(from.position() + max);
-			to.put(from);
-			from.limit(fromLimit);
-		}
-		return max;
-	}
+//	protected static int transfer(ByteBufferWrapper from, ByteBufferWrapper to) {
+//		if (!from.isReadMode() || from.hasNoRemaining()) {
+//			throw new RuntimeException();
+//		}
+//		if (!to.isWriteMode() || to.hasNoRemaining()) {
+//			throw new RuntimeException();
+//		}
+//		int max = Math.min(from.getRemaining(), to.getRemaining());
+//		if (max > 0) {
+//			int fromLimit = from.getLimit();
+//			from.setLimit(from.getPosition() + max);
+//			to.getByteBuffer().put(from.getByteBuffer());
+//			from.setLimit(fromLimit);
+//		}
+//		return max;
+//	}
 
-	protected static boolean buffersArrayHasRemaining(ByteBuffer[] buffers, int offset, int length) {
+	protected static boolean buffersArrayHasRemaining(ByteBufferWrapper[] buffers, int offset, int length) {
 		for (int pos = offset; pos < offset + length; pos++) {
 			if (buffers[pos].hasRemaining()) {
 				return true;

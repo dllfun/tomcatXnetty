@@ -19,6 +19,8 @@ package org.apache.coyote.http2;
 import java.nio.MappedByteBuffer;
 import java.nio.file.Path;
 
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
+
 class SendfileData {
 
 	private Path path;
@@ -26,7 +28,7 @@ class SendfileData {
 //	private Http2OutputBuffer outputBuffer;
 	// Note: a mapped buffer is a special construct with an underlying file
 	// that doesn't need to be closed
-	private MappedByteBuffer mappedBuffer;
+	private ByteBufferWrapper mappedBuffer;
 	private long left;
 	private long streamReservation;
 	private long connectionReservation;
@@ -53,12 +55,12 @@ class SendfileData {
 		this.stream = stream;
 	}
 
-	public MappedByteBuffer getMappedBuffer() {
+	public ByteBufferWrapper getMappedBuffer() {
 		return mappedBuffer;
 	}
 
 	public void setMappedBuffer(MappedByteBuffer mappedBuffer) {
-		this.mappedBuffer = mappedBuffer;
+		this.mappedBuffer = ByteBufferWrapper.wrapper(mappedBuffer, true);
 	}
 
 	public long getLeft() {

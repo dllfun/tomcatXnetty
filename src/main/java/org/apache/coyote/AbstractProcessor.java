@@ -19,8 +19,10 @@ package org.apache.coyote;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -70,6 +72,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	protected final ExchangeData exchangeData;
 	protected final RequestAction requestAction;
 	protected final ResponseAction responseAction;
+	private final List<ProcessorComponent> components = new ArrayList<>();
 	// protected final ResponseData responseData;
 	// protected InputHandler inputHandler;
 	private volatile Channel channel = null;
@@ -80,6 +83,8 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	 */
 	private ErrorState errorState = ErrorState.NONE;
 	protected final UserDataHelper userDataHelper;
+
+	private boolean recycled = false;
 
 	public AbstractProcessor(AbstractProtocol<?> protocol, Adapter adapter) {
 		this(protocol, adapter, new ExchangeData());
@@ -134,6 +139,10 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	public final AsyncStateMachineWrapper getAsyncStateMachine() {
 		return asyncStateMachine;
+	}
+
+	public final void addComponent(ProcessorComponent component) {
+		this.components.add(component);
 	}
 
 	// @Override
@@ -210,6 +219,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	public final void setChannel(Channel channel) {
 		this.channel = channel;
 		onChannelReady(channel);
+		recycled = false;
 	}
 
 	protected abstract void onChannelReady(Channel channel);
@@ -799,6 +809,9 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	@Override
 	public final void nextRequest() {
+		if (recycled) {
+			throw new RuntimeException();
+		}
 		errorState = ErrorState.NONE;
 		exchangeData.recycle();
 		asyncStateMachine.recycle();
@@ -810,12 +823,16 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
 	@Override
 	public final void recycle() {
+		if (recycled) {
+			throw new RuntimeException();
+		}
 //		responseData.getRequestData().recycle();
 		recycleInternal();
 		errorState = ErrorState.NONE;
 		exchangeData.recycle();
 		asyncStateMachine.recycle();
 		channel = null;
+		recycled = true;
 	}
 
 	protected abstract void recycleInternal();

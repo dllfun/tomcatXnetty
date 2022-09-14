@@ -242,7 +242,7 @@ public class AjpMessage {
 			return;
 		}
 		appendInt(numBytes);
-		b.getByte(buf, pos, numBytes);
+		b.getBytes(buf, pos, numBytes);
 		pos += numBytes;
 		appendByte(0);
 	}

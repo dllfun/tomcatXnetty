@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.concurrent.LinkedBlockingDeque;
 
 import org.apache.tomcat.util.buf.ByteBufferHolder;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
 /**
  * Provides an expandable set of buffers for writes. Non-blocking writes can be
@@ -49,19 +50,20 @@ public class WriteBuffer {
 
 	void add(byte[] buf, int offset, int length) {
 		ByteBufferHolder holder = getByteBufferHolder(length);
-		holder.getBuf().put(buf, offset, length);
+		holder.getBuf().putBytes(buf, offset, length);
 	}
 
-	public void add(ByteBuffer from) {
-		ByteBufferHolder holder = getByteBufferHolder(from.remaining());
-		holder.getBuf().put(from);
+	public void add(ByteBufferWrapper from) {
+		ByteBufferHolder holder = getByteBufferHolder(from.getRemaining());
+//		holder.getBuf().getByteBuffer().put(from.getByteBuffer());// TODO check
+		from.transferTo(holder.getBuf());
 	}
 
 	private ByteBufferHolder getByteBufferHolder(int capacity) {
 		ByteBufferHolder holder = buffers.peekLast();
-		if (holder == null || holder.isFlipped() || holder.getBuf().remaining() < capacity) {
+		if (holder == null || holder.isFlipped() || holder.getBuf().getRemaining() < capacity) {
 			ByteBuffer buffer = ByteBuffer.allocate(Math.max(bufferSize, capacity));
-			holder = new ByteBufferHolder(buffer, false);
+			holder = new ByteBufferHolder(ByteBufferWrapper.wrapper(buffer, false), false);
 			buffers.add(holder);
 		}
 		return holder;
@@ -80,9 +82,9 @@ public class WriteBuffer {
 	 * @return an array of ByteBuffers from the current WriteBuffer prefixed by the
 	 *         provided ByteBuffers
 	 */
-	ByteBuffer[] toArray(ByteBuffer... prefixes) {
-		List<ByteBuffer> result = new ArrayList<>();
-		for (ByteBuffer prefix : prefixes) {
+	ByteBufferWrapper[] toArray(ByteBufferWrapper... prefixes) {
+		List<ByteBufferWrapper> result = new ArrayList<>();
+		for (ByteBufferWrapper prefix : prefixes) {
 			if (prefix.hasRemaining()) {
 				result.add(prefix);
 			}
@@ -92,7 +94,7 @@ public class WriteBuffer {
 			result.add(buffer.getBuf());
 		}
 		buffers.clear();
-		return result.toArray(new ByteBuffer[0]);
+		return result.toArray(new ByteBufferWrapper[0]);
 	}
 
 	boolean write(SocketWrapperBase<?> socketWrapper, boolean blocking) throws IOException {
@@ -106,7 +108,7 @@ public class WriteBuffer {
 			} else {
 				socketWrapper.writeNonBlockingInternal(buffer.getBuf());
 			}
-			if (buffer.getBuf().remaining() == 0) {
+			if (buffer.getBuf().getRemaining() == 0) {
 				bufIter.remove();
 			} else {
 				dataLeft = true;
@@ -134,6 +136,6 @@ public class WriteBuffer {
 	 * written back out from the buffer.
 	 */
 	public interface Sink {
-		boolean writeFromBuffer(ByteBuffer buffer, boolean block) throws IOException;
+		boolean writeFromBuffer(ByteBufferWrapper buffer, boolean block) throws IOException;
 	}
 }

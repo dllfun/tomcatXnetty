@@ -5,8 +5,8 @@ public abstract class ProcessorComponent {
 	protected final AbstractProcessor processor;
 
 	public ProcessorComponent(AbstractProcessor processor) {
-		super();
 		this.processor = processor;
+		this.processor.addComponent(this);
 	}
 
 }

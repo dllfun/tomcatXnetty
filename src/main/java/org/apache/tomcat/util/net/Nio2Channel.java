@@ -29,19 +29,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.tomcat.util.buf.ByteBufferUtils;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
 /**
  * Base class for a SocketChannel wrapper used by the endpoint. This way, logic
  * for an SSL socket channel remains the same as for a non SSL, making sure we
  * don't need to code for any exception cases.
  */
-public class Nio2Channel extends SocketBufferHandler implements AsynchronousByteChannel {
+public class Nio2Channel extends SocketBufferHandler {// implements AsynchronousByteChannel
 
 	protected static final ByteBuffer emptyBuf = ByteBuffer.allocate(0);
 
 	// protected final SocketBufferHandler socketBufferHandler;
-	protected AsynchronousSocketChannel sc = null;
-	protected SocketWrapperBase<Nio2Channel> socketWrapper = null;
+	private AsynchronousSocketChannel socketChannel = null;
+	private SocketWrapperBase<Nio2Channel> socketWrapper = null;
 
 	public Nio2Channel(int readBufferSize, int writeBufferSize, boolean direct) {
 		super(readBufferSize, writeBufferSize, direct);
@@ -58,9 +59,17 @@ public class Nio2Channel extends SocketBufferHandler implements AsynchronousByte
 	 */
 	public void reset(AsynchronousSocketChannel channel, SocketWrapperBase<Nio2Channel> socketWrapper)
 			throws IOException {
-		this.sc = channel;
+		this.socketChannel = channel;
 		this.socketWrapper = socketWrapper;
 		super.reset();
+	}
+
+	public AsynchronousSocketChannel getSocketChannel() {
+		return socketChannel;
+	}
+
+	public SocketWrapperBase<Nio2Channel> getSocketWrapper() {
+		return socketWrapper;
 	}
 
 	/**
@@ -79,9 +88,9 @@ public class Nio2Channel extends SocketBufferHandler implements AsynchronousByte
 	 *
 	 * @throws IOException If an I/O error occurs
 	 */
-	@Override
+	// @Override
 	public void close() throws IOException {
-		sc.close();
+		socketChannel.close();
 	}
 
 	/**
@@ -102,9 +111,9 @@ public class Nio2Channel extends SocketBufferHandler implements AsynchronousByte
 	 *
 	 * @return <code>true</code> if, and only if, this channel is open
 	 */
-	@Override
+	// @Override
 	public boolean isOpen() {
-		return sc.isOpen();
+		return socketChannel.isOpen();
 	}
 
 	// protected SocketBufferHandler getBufHandler() {
@@ -112,7 +121,7 @@ public class Nio2Channel extends SocketBufferHandler implements AsynchronousByte
 	// }
 
 	public AsynchronousSocketChannel getIOChannel() {
-		return sc;
+		return socketChannel;
 	}
 
 	public boolean isClosing() {
@@ -136,52 +145,75 @@ public class Nio2Channel extends SocketBufferHandler implements AsynchronousByte
 
 	@Override
 	public String toString() {
-		return super.toString() + ":" + sc.toString();
+		return super.toString() + ":" + socketChannel.toString();
 	}
 
-	@Override
-	public Future<Integer> read(ByteBuffer dst) {
-		return sc.read(dst);
+	// @Override
+	public Future<Integer> read(ByteBufferWrapper dst) {
+		return socketChannel.read(dst.getByteBuffer());
 	}
 
-	@Override
-	public <A> void read(ByteBuffer dst, A attachment, CompletionHandler<Integer, ? super A> handler) {
+	// @Override
+	public <A> void read(ByteBufferWrapper dst, A attachment, CompletionHandler<Integer, ? super A> handler) {
 		read(dst, 0L, TimeUnit.MILLISECONDS, attachment, handler);
 	}
 
-	protected <A> void read(ByteBuffer dst, long timeout, TimeUnit unit, A attachment,
+	protected <A> void read(ByteBufferWrapper dst, long timeout, TimeUnit unit, A attachment,
 			CompletionHandler<Integer, ? super A> handler) {
-		sc.read(dst, timeout, unit, attachment, handler);
+		if (!dst.isWriteMode()) {
+			throw new RuntimeException();
+		}
+		socketChannel.read(dst.getByteBuffer(), timeout, unit, attachment, handler);
 	}
 
-	public <A> void read(ByteBuffer[] dsts, int offset, int length, A attachment,
+	public <A> void read(ByteBufferWrapper[] dsts, int offset, int length, A attachment,
 			CompletionHandler<Long, ? super A> handler) {
 		read(dsts, offset, length, 0L, TimeUnit.MILLISECONDS, attachment, handler);
 	}
 
-	protected <A> void read(ByteBuffer[] dsts, int offset, int length, long timeout, TimeUnit unit, A attachment,
+	protected <A> void read(ByteBufferWrapper[] dsts, int offset, int length, long timeout, TimeUnit unit, A attachment,
 			CompletionHandler<Long, ? super A> handler) {
-		sc.read(dsts, offset, length, timeout, unit, attachment, handler);
+		ByteBuffer[] buffers = new ByteBuffer[dsts.length];
+		for (int i = 0; i < dsts.length; i++) {
+			if (!dsts[i].isWriteMode()) {
+				throw new RuntimeException();
+			}
+			buffers[i] = dsts[i].getByteBuffer();
+		}
+		socketChannel.read(buffers, offset, length, timeout, unit, attachment, handler);
 	}
 
-	@Override
-	public Future<Integer> write(ByteBuffer src) {
-		return sc.write(src);
+	// @Override
+	public Future<Integer> write(ByteBufferWrapper src) {
+		if (!src.isReadMode()) {
+			throw new RuntimeException();
+		}
+		return socketChannel.write(src.getByteBuffer());
 	}
 
-	@Override
-	public <A> void write(ByteBuffer src, A attachment, CompletionHandler<Integer, ? super A> handler) {
+	// @Override
+	public <A> void write(ByteBufferWrapper src, A attachment, CompletionHandler<Integer, ? super A> handler) {
 		write(src, 0L, TimeUnit.MILLISECONDS, attachment, handler);
 	}
 
-	public <A> void write(ByteBuffer src, long timeout, TimeUnit unit, A attachment,
+	public <A> void write(ByteBufferWrapper src, long timeout, TimeUnit unit, A attachment,
 			CompletionHandler<Integer, ? super A> handler) {
-		sc.write(src, timeout, unit, attachment, handler);
+		if (!src.isReadMode()) {
+			throw new RuntimeException();
+		}
+		socketChannel.write(src.getByteBuffer(), timeout, unit, attachment, handler);
 	}
 
-	public <A> void write(ByteBuffer[] srcs, int offset, int length, long timeout, TimeUnit unit, A attachment,
+	public <A> void write(ByteBufferWrapper[] srcs, int offset, int length, long timeout, TimeUnit unit, A attachment,
 			CompletionHandler<Long, ? super A> handler) {
-		sc.write(srcs, offset, length, timeout, unit, attachment, handler);
+		ByteBuffer[] buffers = new ByteBuffer[srcs.length];
+		for (int i = 0; i < srcs.length; i++) {
+			if (!srcs[i].isReadMode()) {
+				throw new RuntimeException();
+			}
+			buffers[i] = srcs[i].getByteBuffer();
+		}
+		socketChannel.write(buffers, offset, length, timeout, unit, attachment, handler);
 	}
 
 	private static final Future<Boolean> DONE = new Future<Boolean>() {
@@ -282,36 +314,36 @@ public class Nio2Channel extends SocketBufferHandler implements AsynchronousByte
 		// }
 
 		@Override
-		public Future<Integer> read(ByteBuffer dst) {
+		public Future<Integer> read(ByteBufferWrapper dst) {
 			return DONE_INT;
 		}
 
 		@Override
-		public <A> void read(ByteBuffer dst, long timeout, TimeUnit unit, A attachment,
+		public <A> void read(ByteBufferWrapper dst, long timeout, TimeUnit unit, A attachment,
 				CompletionHandler<Integer, ? super A> handler) {
 			handler.failed(new ClosedChannelException(), attachment);
 		}
 
 		@Override
-		public <A> void read(ByteBuffer[] dsts, int offset, int length, long timeout, TimeUnit unit, A attachment,
-				CompletionHandler<Long, ? super A> handler) {
+		public <A> void read(ByteBufferWrapper[] dsts, int offset, int length, long timeout, TimeUnit unit,
+				A attachment, CompletionHandler<Long, ? super A> handler) {
 			handler.failed(new ClosedChannelException(), attachment);
 		}
 
 		@Override
-		public Future<Integer> write(ByteBuffer src) {
+		public Future<Integer> write(ByteBufferWrapper src) {
 			return DONE_INT;
 		}
 
 		@Override
-		public <A> void write(ByteBuffer src, long timeout, TimeUnit unit, A attachment,
+		public <A> void write(ByteBufferWrapper src, long timeout, TimeUnit unit, A attachment,
 				CompletionHandler<Integer, ? super A> handler) {
 			handler.failed(new ClosedChannelException(), attachment);
 		}
 
 		@Override
-		public <A> void write(ByteBuffer[] srcs, int offset, int length, long timeout, TimeUnit unit, A attachment,
-				CompletionHandler<Long, ? super A> handler) {
+		public <A> void write(ByteBufferWrapper[] srcs, int offset, int length, long timeout, TimeUnit unit,
+				A attachment, CompletionHandler<Long, ? super A> handler) {
 			handler.failed(new ClosedChannelException(), attachment);
 		}
 

@@ -339,7 +339,7 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel {
 			return -1;
 		}
 		int n = Math.min(len, bufWrapper.getRemaining());
-		bufWrapper.getByte(b, off, n);
+		bufWrapper.getBytes(b, off, n);
 		return n;
 	}
 

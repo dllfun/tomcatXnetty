@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeSet;
@@ -25,20 +24,16 @@ public class StreamZero extends AbstractStream {
 	protected static final StringManager sm = StringManager.getManager(Http2UpgradeHandler.class);
 	private static final Integer STREAM_ID_ZERO = Integer.valueOf(0);
 
-	private static final AtomicInteger connectionIdGenerator = new AtomicInteger(0);
 	private final Http2UpgradeHandler handler;
-	private AtomicReference<ConnectionState> connectionState = new AtomicReference<>(ConnectionState.NEW);
+	private final AtomicReference<ConnectionState> connectionState = new AtomicReference<>(ConnectionState.NEW);
 	private final ConcurrentNavigableMap<Integer, StreamChannel> streams = new ConcurrentSkipListMap<>();
 	private final AtomicInteger nextLocalStreamId = new AtomicInteger(2);
 	private volatile int newStreamsSinceLastPrune = 0;
 
-	protected final String connectionId;
-
 	public StreamZero(Http2UpgradeHandler handler) {
 		super(STREAM_ID_ZERO);
 		this.handler = handler;
-		this.connectionId = Integer.toString(connectionIdGenerator.getAndIncrement());
-		System.out.println("conn(" + connectionId + ")" + " created");
+		System.out.println("conn(" + handler.connectionId + ")" + " created");
 	}
 
 	public StreamChannel getStream(int streamId, boolean unknownIsError) throws ConnectionException {
@@ -215,39 +210,8 @@ public class StreamZero extends AbstractStream {
 	}
 
 	@Override
-	public boolean isClosed() {
-		return connectionState.getAndSet(ConnectionState.CLOSED) == ConnectionState.CLOSED;
-	}
-
-	@Override
-	public void close(Throwable e) {
-		this.close();
-	}
-
-	@Override
-	public void close() {
-		ConnectionState previous = connectionState.getAndSet(ConnectionState.CLOSED);
-		if (previous == ConnectionState.CLOSED) {
-			// Already closed
-			return;
-		}
-
-		for (Stream stream : streams.values()) {
-			// The connection is closing. Close the associated streams as no
-			// longer required (also notifies any threads waiting for allocations).
-			stream.receiveReset(Http2Error.CANCEL.getCode());
-		}
-//		try {
-//			handler.getChannel().close();//will closed by processor
-//		} catch (Exception e) {
-//			log.debug(sm.getString("upgradeHandler.socketCloseFailed"), e);
-//		}
-		System.out.println("conn(" + connectionId + ")" + " closed");
-	}
-
-	@Override
 	protected final String getConnectionId() {
-		return connectionId;
+		return handler.connectionId;
 	}
 
 	@Override
@@ -261,21 +225,6 @@ public class StreamZero extends AbstractStream {
 
 	public ConcurrentNavigableMap<Integer, StreamChannel> getStreams() {
 		return streams;
-	}
-
-	public enum ConnectionState {
-
-		NEW(true), CONNECTED(true), PAUSING(true), PAUSED(false), CLOSED(false);
-
-		private final boolean newStreamsAllowed;
-
-		private ConnectionState(boolean newStreamsAllowed) {
-			this.newStreamsAllowed = newStreamsAllowed;
-		}
-
-		public boolean isNewStreamAllowed() {
-			return newStreamsAllowed;
-		}
 	}
 
 	@SuppressWarnings("sync-override") // notify() needs to be outside sync
@@ -317,7 +266,7 @@ public class StreamZero extends AbstractStream {
 		// this thread until after this thread enters wait()
 		int allocation = 0;
 		synchronized (stream) {
-			synchronized (this) {
+			synchronized (StreamZero.this) {
 				if (!stream.canWrite()) {
 					stream.doStreamCancel(sm.getString("upgradeHandler.stream.notWritable", stream.getConnectionId(),
 							stream.getIdAsString()), Http2Error.STREAM_CLOSED);
@@ -360,7 +309,7 @@ public class StreamZero extends AbstractStream {
 							Http2Error error;
 							if (stream.isActive()) {
 								if (log.isDebugEnabled()) {
-									log.debug(sm.getString("upgradeHandler.noAllocation", connectionId,
+									log.debug(sm.getString("upgradeHandler.noAllocation", handler.connectionId,
 											stream.getIdAsString()));
 								}
 								// No allocation
@@ -384,7 +333,7 @@ public class StreamZero extends AbstractStream {
 						}
 					} catch (InterruptedException e) {
 						throw new IOException(sm.getString("upgradeHandler.windowSizeReservationInterrupted",
-								connectionId, stream.getIdAsString(), Integer.toString(reservation)), e);
+								handler.connectionId, stream.getIdAsString(), Integer.toString(reservation)), e);
 					}
 				} else {
 					stream.waitForConnectionAllocationNonBlocking();
@@ -512,78 +461,50 @@ public class StreamZero extends AbstractStream {
 		return 0;
 	}
 
-	private static class BacklogTracker {
+	@Override
+	public boolean isClosed() {
+		return connectionState.getAndSet(ConnectionState.CLOSED) == ConnectionState.CLOSED;
+	}
 
-		private int remainingReservation;
-		private int unusedAllocation;
-		private boolean notifyInProgress;
+	@Override
+	public void close(Throwable e) {
+		this.close();
+	}
 
-		public BacklogTracker() {
+	@Override
+	public void close() {
+		ConnectionState previous = connectionState.getAndSet(ConnectionState.CLOSED);
+		if (previous == ConnectionState.CLOSED) {
+			// Already closed
+			return;
 		}
 
-		public BacklogTracker(int reservation) {
-			remainingReservation = reservation;
+		for (Stream stream : streams.values()) {
+			// The connection is closing. Close the associated streams as no
+			// longer required (also notifies any threads waiting for allocations).
+			stream.receiveReset(Http2Error.CANCEL.getCode());
+		}
+//		try {
+//			handler.getChannel().close();//will closed by processor
+//		} catch (Exception e) {
+//			log.debug(sm.getString("upgradeHandler.socketCloseFailed"), e);
+//		}
+		System.out.println("conn(" + handler.connectionId + ")" + " closed");
+	}
+
+	public enum ConnectionState {
+
+		NEW(true), CONNECTED(true), PAUSING(true), PAUSED(false), CLOSED(false);
+
+		private final boolean newStreamsAllowed;
+
+		private ConnectionState(boolean newStreamsAllowed) {
+			this.newStreamsAllowed = newStreamsAllowed;
 		}
 
-		/**
-		 * @return The number of bytes requiring an allocation from the Connection flow
-		 *         control window
-		 */
-		public int getRemainingReservation() {
-			return remainingReservation;
-		}
-
-		/**
-		 *
-		 * @return The number of bytes allocated from the Connection flow control window
-		 *         but not yet written
-		 */
-		public int getUnusedAllocation() {
-			return unusedAllocation;
-		}
-
-		/**
-		 * The purpose of this is to avoid the incorrect triggering of a timeout for the
-		 * following sequence of events:
-		 * <ol>
-		 * <li>window update 1</li>
-		 * <li>allocation 1</li>
-		 * <li>notify 1</li>
-		 * <li>window update 2</li>
-		 * <li>allocation 2</li>
-		 * <li>act on notify 1 (using allocation 1 and 2)</li>
-		 * <li>notify 2</li>
-		 * <li>act on notify 2 (timeout due to no allocation)</li>
-		 * </ol>
-		 *
-		 * @return {@code true} if a notify has been issued but the associated
-		 *         allocation has not been used, otherwise {@code false}
-		 */
-		public boolean isNotifyInProgress() {
-			return notifyInProgress;
-		}
-
-		public void useAllocation() {
-			unusedAllocation = 0;
-			notifyInProgress = false;
-		}
-
-		public void startNotify() {
-			notifyInProgress = true;
-		}
-
-		private int allocate(int allocation) {
-			if (remainingReservation >= allocation) {
-				remainingReservation -= allocation;
-				unusedAllocation += allocation;
-				return 0;
-			}
-
-			int left = allocation - remainingReservation;
-			unusedAllocation += remainingReservation;
-			remainingReservation = 0;
-
-			return left;
+		public boolean isNewStreamAllowed() {
+			return newStreamsAllowed;
 		}
 	}
+
 }

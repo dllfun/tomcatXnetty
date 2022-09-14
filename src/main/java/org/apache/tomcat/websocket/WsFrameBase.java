@@ -34,6 +34,7 @@ import javax.websocket.PongMessage;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.Utf8Decoder;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -47,13 +48,13 @@ public abstract class WsFrameBase {
 
 	// Connection level attributes
 	protected final WsSession wsSession;
-	protected final ByteBuffer inputBuffer;
+	protected final ByteBufferWrapper inputBuffer;
 	private final Transformation transformation;
 
 	// Attributes for control messages
 	// Control messages can appear in the middle of other messages so need
 	// separate attributes
-	private final ByteBuffer controlBufferBinary = ByteBuffer.allocate(125);
+	private final ByteBufferWrapper controlBufferBinary = ByteBufferWrapper.wrapper(ByteBuffer.allocate(125), false);
 	private final CharBuffer controlBufferText = CharBuffer.allocate(125);
 
 	// Attributes of the current message
@@ -63,7 +64,7 @@ public abstract class WsFrameBase {
 			.onUnmappableCharacter(CodingErrorAction.REPORT);
 	private boolean continuationExpected = false;
 	private boolean textMessage = false;
-	private ByteBuffer messageBufferBinary;
+	private ByteBufferWrapper messageBufferBinary;
 	private CharBuffer messageBufferText;
 	// Cache the message handler in force when the message starts so it is used
 	// consistently for the entire message
@@ -88,11 +89,14 @@ public abstract class WsFrameBase {
 	private volatile ReadState readState = ReadState.WAITING;
 
 	public WsFrameBase(WsSession wsSession, Transformation transformation) {
-		inputBuffer = ByteBuffer.allocate(Constants.DEFAULT_BUFFER_SIZE);
-		inputBuffer.position(0).limit(0);
-		messageBufferBinary = ByteBuffer.allocate(wsSession.getMaxBinaryMessageBufferSize());
+		inputBuffer = ByteBufferWrapper.wrapper(ByteBuffer.allocate(Constants.DEFAULT_BUFFER_SIZE), false);
+		inputBuffer.switchToReadMode();
+//		inputBuffer.setPosition(0);
+//		inputBuffer.setLimit(0);
+		messageBufferBinary = ByteBufferWrapper.wrapper(ByteBuffer.allocate(wsSession.getMaxBinaryMessageBufferSize()),
+				false);
 		messageBufferText = CharBuffer.allocate(wsSession.getMaxTextMessageBufferSize());
-		wsSession.setWsFrame(this);
+//		wsSession.setWsFrame(this);
 		this.wsSession = wsSession;
 		Transformation finalTransformation;
 		if (isMasked()) {
@@ -140,10 +144,10 @@ public abstract class WsFrameBase {
 	 */
 	private boolean processInitialHeader() throws IOException {
 		// Need at least two bytes of data to do this
-		if (inputBuffer.remaining() < 2) {
+		if (inputBuffer.getRemaining() < 2) {
 			return false;
 		}
-		int b = inputBuffer.get();
+		int b = inputBuffer.getByte();
 		fin = (b & 0x80) != 0;
 		rsv = (b & 0x70) >>> 4;
 		opCode = (byte) (b & 0x0F);
@@ -174,8 +178,8 @@ public abstract class WsFrameBase {
 						// New binary message
 						textMessage = false;
 						int size = wsSession.getMaxBinaryMessageBufferSize();
-						if (size != messageBufferBinary.capacity()) {
-							messageBufferBinary = ByteBuffer.allocate(size);
+						if (size != messageBufferBinary.getCapacity()) {
+							messageBufferBinary = ByteBufferWrapper.wrapper(ByteBuffer.allocate(size), false);
 						}
 						binaryMsgHandler = wsSession.getBinaryMessageHandler();
 						textMsgHandler = null;
@@ -200,7 +204,7 @@ public abstract class WsFrameBase {
 			}
 			continuationExpected = !fin;
 		}
-		b = inputBuffer.get();
+		b = inputBuffer.getByte();
 		// Client data must be masked
 		if ((b & 0x80) == 0 && isMasked()) {
 			throw new WsIOException(new CloseReason(CloseCodes.PROTOCOL_ERROR, sm.getString("wsFrame.notMasked")));
@@ -236,16 +240,18 @@ public abstract class WsFrameBase {
 		} else if (payloadLength == 127) {
 			headerLength += 8;
 		}
-		if (inputBuffer.remaining() < headerLength) {
+		if (inputBuffer.getRemaining() < headerLength) {
 			return false;
 		}
 		// Calculate new payload length if necessary
 		if (payloadLength == 126) {
-			payloadLength = byteArrayToLong(inputBuffer.array(), inputBuffer.arrayOffset() + inputBuffer.position(), 2);
-			inputBuffer.position(inputBuffer.position() + 2);
+			payloadLength = byteArrayToLong(inputBuffer.getArray(),
+					inputBuffer.getArrayOffset() + inputBuffer.getPosition(), 2);
+			inputBuffer.setPosition(inputBuffer.getPosition() + 2);
 		} else if (payloadLength == 127) {
-			payloadLength = byteArrayToLong(inputBuffer.array(), inputBuffer.arrayOffset() + inputBuffer.position(), 8);
-			inputBuffer.position(inputBuffer.position() + 8);
+			payloadLength = byteArrayToLong(inputBuffer.getArray(),
+					inputBuffer.getArrayOffset() + inputBuffer.getPosition(), 8);
+			inputBuffer.setPosition(inputBuffer.getPosition() + 8);
 		}
 		if (Util.isControl(opCode)) {
 			if (payloadLength > 125) {
@@ -258,7 +264,7 @@ public abstract class WsFrameBase {
 			}
 		}
 		if (isMasked()) {
-			inputBuffer.get(mask, 0, 4);
+			inputBuffer.getBytes(mask, 0, 4);
 		}
 		state = State.DATA;
 		return true;
@@ -293,23 +299,27 @@ public abstract class WsFrameBase {
 		// Control messages have fixed message size so
 		// TransformationResult.OVERFLOW is not possible here
 
-		controlBufferBinary.flip();
+//		controlBufferBinary.flip();
+		controlBufferBinary.switchToReadMode();
 		if (opCode == Constants.OPCODE_CLOSE) {
 			open = false;
 			String reason = null;
 			int code = CloseCodes.NORMAL_CLOSURE.getCode();
-			if (controlBufferBinary.remaining() == 1) {
-				controlBufferBinary.clear();
+			if (controlBufferBinary.getRemaining() == 1) {
+				controlBufferBinary.switchToWriteMode();
+				controlBufferBinary.clearWrite();
 				// Payload must be zero or 2+ bytes long
 				throw new WsIOException(
 						new CloseReason(CloseCodes.PROTOCOL_ERROR, sm.getString("wsFrame.oneByteCloseCode")));
 			}
-			if (controlBufferBinary.remaining() > 1) {
-				code = controlBufferBinary.getShort();
-				if (controlBufferBinary.remaining() > 0) {
-					CoderResult cr = utf8DecoderControl.decode(controlBufferBinary, controlBufferText, true);
+			if (controlBufferBinary.getRemaining() > 1) {
+				code = controlBufferBinary.getByteBuffer().getShort();
+				if (controlBufferBinary.getRemaining() > 0) {
+					CoderResult cr = utf8DecoderControl.decode(controlBufferBinary.getByteBuffer(), controlBufferText,
+							true);
 					if (cr.isError()) {
-						controlBufferBinary.clear();
+						controlBufferBinary.switchToWriteMode();
+						controlBufferBinary.clearWrite();
 						controlBufferText.clear();
 						throw new WsIOException(
 								new CloseReason(CloseCodes.PROTOCOL_ERROR, sm.getString("wsFrame.invalidUtf8Close")));
@@ -324,7 +334,7 @@ public abstract class WsFrameBase {
 			wsSession.onClose(new CloseReason(Util.getCloseCode(code), reason));
 		} else if (opCode == Constants.OPCODE_PING) {
 			if (wsSession.isOpen()) {
-				wsSession.getBasicRemote().sendPong(controlBufferBinary);
+				wsSession.getBasicRemote().sendPong(controlBufferBinary.getByteBuffer());
 			}
 		} else if (opCode == Constants.OPCODE_PONG) {
 			MessageHandler.Whole<PongMessage> mhPong = wsSession.getPongMessageHandler();
@@ -334,22 +344,25 @@ public abstract class WsFrameBase {
 				} catch (Throwable t) {
 					handleThrowableOnSend(t);
 				} finally {
-					controlBufferBinary.clear();
+					controlBufferBinary.switchToWriteMode();
+					controlBufferBinary.clearWrite();
 				}
 			}
 		} else {
 			// Should have caught this earlier but just in case...
-			controlBufferBinary.clear();
+			controlBufferBinary.switchToWriteMode();
+			controlBufferBinary.clearWrite();
 			throw new WsIOException(new CloseReason(CloseCodes.PROTOCOL_ERROR,
 					sm.getString("wsFrame.invalidOpCode", Integer.valueOf(opCode))));
 		}
-		controlBufferBinary.clear();
+		controlBufferBinary.switchToWriteMode();
+		controlBufferBinary.clearWrite();
 		newFrame();
 		return true;
 	}
 
 	@SuppressWarnings("unchecked")
-	protected void sendMessageText(boolean last) throws WsIOException {
+	protected void onMessageText(boolean last) throws WsIOException {
 		if (textMsgHandler instanceof WrappedMessageHandler) {
 			long maxMessageSize = ((WrappedMessageHandler) textMsgHandler).getMaxMessageSize();
 			if (maxMessageSize > -1 && messageBufferText.remaining() > maxMessageSize) {
@@ -378,9 +391,11 @@ public abstract class WsFrameBase {
 		while (!TransformationResult.END_OF_FRAME.equals(tr)) {
 			// Frame not complete - we ran out of something
 			// Convert bytes to UTF-8
-			messageBufferBinary.flip();
+//			messageBufferBinary.flip();
+			messageBufferBinary.switchToReadMode();
 			while (true) {
-				CoderResult cr = utf8DecoderMessage.decode(messageBufferBinary, messageBufferText, false);
+				CoderResult cr = utf8DecoderMessage.decode(messageBufferBinary.getByteBuffer(), messageBufferText,
+						false);
 				if (cr.isError()) {
 					throw new WsIOException(
 							new CloseReason(CloseCodes.NOT_CONSISTENT, sm.getString("wsFrame.invalidUtf8")));
@@ -388,7 +403,7 @@ public abstract class WsFrameBase {
 					// Ran out of space in text buffer - flush it
 					if (usePartial()) {
 						messageBufferText.flip();
-						sendMessageText(false);
+						onMessageText(false);
 						messageBufferText.clear();
 					} else {
 						throw new WsIOException(
@@ -396,7 +411,8 @@ public abstract class WsFrameBase {
 					}
 				} else if (cr.isUnderflow()) {
 					// Compact what we have to create as much space as possible
-					messageBufferBinary.compact();
+//					messageBufferBinary.compact();
+					messageBufferBinary.switchToWriteMode();
 
 					// Need more input
 					// What did we run out of?
@@ -415,12 +431,13 @@ public abstract class WsFrameBase {
 			tr = transformation.getMoreData(opCode, fin, rsv, messageBufferBinary);
 		}
 
-		messageBufferBinary.flip();
+//		messageBufferBinary.flip();
+		messageBufferBinary.switchToReadMode();
 		boolean last = false;
 		// Frame is fully received
 		// Convert bytes to UTF-8
 		while (true) {
-			CoderResult cr = utf8DecoderMessage.decode(messageBufferBinary, messageBufferText, last);
+			CoderResult cr = utf8DecoderMessage.decode(messageBufferBinary.getByteBuffer(), messageBufferText, last);
 			if (cr.isError()) {
 				throw new WsIOException(
 						new CloseReason(CloseCodes.NOT_CONSISTENT, sm.getString("wsFrame.invalidUtf8")));
@@ -428,7 +445,7 @@ public abstract class WsFrameBase {
 				// Ran out of space in text buffer - flush it
 				if (usePartial()) {
 					messageBufferText.flip();
-					sendMessageText(false);
+					onMessageText(false);
 					messageBufferText.clear();
 				} else {
 					throw new WsIOException(
@@ -442,10 +459,11 @@ public abstract class WsFrameBase {
 					// managed to decode
 					if (usePartial()) {
 						messageBufferText.flip();
-						sendMessageText(false);
+						onMessageText(false);
 						messageBufferText.clear();
 					}
-					messageBufferBinary.compact();
+//					messageBufferBinary.compact();
+					messageBufferBinary.switchToWriteMode();
 					newFrame();
 					// Process next frame
 					return true;
@@ -456,7 +474,7 @@ public abstract class WsFrameBase {
 			} else {
 				// End of message
 				messageBufferText.flip();
-				sendMessageText(true);
+				onMessageText(true);
 
 				newMessage();
 				return true;
@@ -477,15 +495,17 @@ public abstract class WsFrameBase {
 			// Ran out of message buffer - flush it
 			if (!usePartial()) {
 				CloseReason cr = new CloseReason(CloseCodes.TOO_BIG, sm.getString("wsFrame.bufferTooSmall",
-						Integer.valueOf(messageBufferBinary.capacity()), Long.valueOf(payloadLength)));
+						Integer.valueOf(messageBufferBinary.getCapacity()), Long.valueOf(payloadLength)));
 				throw new WsIOException(cr);
 			}
-			messageBufferBinary.flip();
-			ByteBuffer copy = ByteBuffer.allocate(messageBufferBinary.limit());
-			copy.put(messageBufferBinary);
+//			messageBufferBinary.flip();
+			messageBufferBinary.switchToReadMode();
+			ByteBuffer copy = ByteBuffer.allocate(messageBufferBinary.getLimit());
+			copy.put(messageBufferBinary.getByteBuffer());
 			copy.flip();
-			sendMessageBinary(copy, false);
-			messageBufferBinary.clear();
+			onMessageBinary(copy, false);
+			messageBufferBinary.switchToWriteMode();
+			messageBufferBinary.clearWrite();
 			// Read more data
 			tr = transformation.getMoreData(opCode, fin, rsv, messageBufferBinary);
 		}
@@ -495,12 +515,14 @@ public abstract class WsFrameBase {
 		// - partial messages are supported
 		// - the message is complete
 		if (usePartial() || !continuationExpected) {
-			messageBufferBinary.flip();
-			ByteBuffer copy = ByteBuffer.allocate(messageBufferBinary.limit());
-			copy.put(messageBufferBinary);
+//			messageBufferBinary.flip();
+			messageBufferBinary.switchToReadMode();
+			ByteBuffer copy = ByteBuffer.allocate(messageBufferBinary.getLimit());
+			copy.put(messageBufferBinary.getByteBuffer());
 			copy.flip();
-			sendMessageBinary(copy, !continuationExpected);
-			messageBufferBinary.clear();
+			onMessageBinary(copy, !continuationExpected);
+			messageBufferBinary.switchToWriteMode();
+			messageBufferBinary.clearWrite();
 		}
 
 		if (continuationExpected) {
@@ -522,7 +544,7 @@ public abstract class WsFrameBase {
 	}
 
 	@SuppressWarnings("unchecked")
-	protected void sendMessageBinary(ByteBuffer msg, boolean last) throws WsIOException {
+	protected void onMessageBinary(ByteBuffer msg, boolean last) throws WsIOException {
 		if (binaryMsgHandler instanceof WrappedMessageHandler) {
 			long maxMessageSize = ((WrappedMessageHandler) binaryMsgHandler).getMaxMessageSize();
 			if (maxMessageSize > -1 && msg.remaining() > maxMessageSize) {
@@ -543,7 +565,8 @@ public abstract class WsFrameBase {
 	}
 
 	private void newMessage() {
-		messageBufferBinary.clear();
+		messageBufferBinary.switchToWriteMode();
+		messageBufferBinary.clearWrite();
 		messageBufferText.clear();
 		utf8DecoderMessage.reset();
 		continuationExpected = false;
@@ -551,8 +574,9 @@ public abstract class WsFrameBase {
 	}
 
 	private void newFrame() {
-		if (inputBuffer.remaining() == 0) {
-			inputBuffer.position(0).limit(0);
+		if (inputBuffer.getRemaining() == 0) {
+//			inputBuffer.setPosition(0);
+//			inputBuffer.setLimit(0);
 		}
 
 		maskIndex = 0;
@@ -568,21 +592,23 @@ public abstract class WsFrameBase {
 	private void checkRoomHeaders() {
 		// Is the start of the current frame too near the end of the input
 		// buffer?
-		if (inputBuffer.capacity() - inputBuffer.position() < 131) {
+		if (inputBuffer.getCapacity() - inputBuffer.getPosition() < 131) {
 			// Limit based on a control frame with a full payload
 			makeRoom();
 		}
 	}
 
 	private void checkRoomPayload() {
-		if (inputBuffer.capacity() - inputBuffer.position() - payloadLength + payloadWritten < 0) {
+		if (inputBuffer.getCapacity() - inputBuffer.getPosition() - payloadLength + payloadWritten < 0) {
 			makeRoom();
 		}
 	}
 
 	private void makeRoom() {
-		inputBuffer.compact();
-		inputBuffer.flip();
+//		inputBuffer.getByteBuffer().compact();
+//		inputBuffer.getByteBuffer().flip();
+		inputBuffer.switchToWriteMode();
+		inputBuffer.switchToReadMode();
 	}
 
 	private boolean usePartial() {
@@ -597,8 +623,8 @@ public abstract class WsFrameBase {
 	}
 
 	private boolean swallowInput() {
-		long toSkip = Math.min(payloadLength - payloadWritten, inputBuffer.remaining());
-		inputBuffer.position(inputBuffer.position() + (int) toSkip);
+		long toSkip = Math.min(payloadLength - payloadWritten, inputBuffer.getRemaining());
+		inputBuffer.setPosition(inputBuffer.getPosition() + (int) toSkip);
 		payloadWritten += toSkip;
 		if (payloadWritten == payloadLength) {
 			if (continuationExpected) {
@@ -854,22 +880,22 @@ public abstract class WsFrameBase {
 	private final class NoopTransformation extends TerminalTransformation {
 
 		@Override
-		public TransformationResult getMoreData(byte opCode, boolean fin, int rsv, ByteBuffer dest) {
+		public TransformationResult getMoreData(byte opCode, boolean fin, int rsv, ByteBufferWrapper dest) {
 			// opCode is ignored as the transformation is the same for all
 			// opCodes
 			// rsv is ignored as it known to be zero at this point
-			long toWrite = Math.min(payloadLength - payloadWritten, inputBuffer.remaining());
-			toWrite = Math.min(toWrite, dest.remaining());
+			long toWrite = Math.min(payloadLength - payloadWritten, inputBuffer.getRemaining());
+			toWrite = Math.min(toWrite, dest.getRemaining());
 
-			int orgLimit = inputBuffer.limit();
-			inputBuffer.limit(inputBuffer.position() + (int) toWrite);
-			dest.put(inputBuffer);
-			inputBuffer.limit(orgLimit);
+			int orgLimit = inputBuffer.getLimit();
+			inputBuffer.setLimit(inputBuffer.getPosition() + (int) toWrite);
+			dest.getByteBuffer().put(inputBuffer.getByteBuffer());
+			inputBuffer.setLimit(orgLimit);
 			payloadWritten += toWrite;
 
 			if (payloadWritten == payloadLength) {
 				return TransformationResult.END_OF_FRAME;
-			} else if (inputBuffer.remaining() == 0) {
+			} else if (inputBuffer.getRemaining() == 0) {
 				return TransformationResult.UNDERFLOW;
 			} else {
 				// !dest.hasRemaining()
@@ -892,22 +918,22 @@ public abstract class WsFrameBase {
 	private final class UnmaskTransformation extends TerminalTransformation {
 
 		@Override
-		public TransformationResult getMoreData(byte opCode, boolean fin, int rsv, ByteBuffer dest) {
+		public TransformationResult getMoreData(byte opCode, boolean fin, int rsv, ByteBufferWrapper dest) {
 			// opCode is ignored as the transformation is the same for all
 			// opCodes
 			// rsv is ignored as it known to be zero at this point
-			while (payloadWritten < payloadLength && inputBuffer.remaining() > 0 && dest.hasRemaining()) {
-				byte b = (byte) ((inputBuffer.get() ^ mask[maskIndex]) & 0xFF);
+			while (payloadWritten < payloadLength && inputBuffer.getRemaining() > 0 && dest.hasRemaining()) {
+				byte b = (byte) ((inputBuffer.getByte() ^ mask[maskIndex]) & 0xFF);
 				maskIndex++;
 				if (maskIndex == 4) {
 					maskIndex = 0;
 				}
 				payloadWritten++;
-				dest.put(b);
+				dest.putByte(b);
 			}
 			if (payloadWritten == payloadLength) {
 				return TransformationResult.END_OF_FRAME;
-			} else if (inputBuffer.remaining() == 0) {
+			} else if (inputBuffer.getRemaining() == 0) {
 				return TransformationResult.UNDERFLOW;
 			} else {
 				// !dest.hasRemaining()

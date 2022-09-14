@@ -36,6 +36,7 @@ import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.collections.SynchronizedQueue;
 import org.apache.tomcat.util.collections.SynchronizedStack;
 import org.apache.tomcat.util.net.NioEndpoint.NioSocketWrapper;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 public class NioBlockingSelector {
@@ -82,7 +83,7 @@ public class NioBlockingSelector {
 	 * @throws IOException            if an IO Exception occurs in the underlying
 	 *                                socket logic
 	 */
-	public int write(ByteBuffer buf, NioSocketWrapper socketWrapper, long writeTimeout) throws IOException {
+	public int write(ByteBufferWrapper buf, NioSocketWrapper socketWrapper, long writeTimeout) throws IOException {
 		SelectionKey key = socketWrapper.getSocket().getIOChannel().keyFor(socketWrapper.getPoller().getSelector());
 		if (key == null) {
 			throw new IOException(sm.getString("nioBlockingSelector.keyNotRegistered"));
@@ -161,7 +162,7 @@ public class NioBlockingSelector {
 	 * @throws IOException            if an IO Exception occurs in the underlying
 	 *                                socket logic
 	 */
-	public int read(ByteBuffer buf, NioSocketWrapper socketWrapper, long readTimeout) throws IOException {
+	public int read(ByteBufferWrapper buf, NioSocketWrapper socketWrapper, long readTimeout) throws IOException {
 		SelectionKey key = socketWrapper.getSocket().getIOChannel().keyFor(socketWrapper.getPoller().getSelector());
 		if (key == null) {
 			throw new IOException(sm.getString("nioBlockingSelector.keyNotRegistered"));

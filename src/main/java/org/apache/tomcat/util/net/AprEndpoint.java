@@ -57,6 +57,7 @@ import org.apache.tomcat.jni.Status;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.ByteBufferUtils;
 import org.apache.tomcat.util.net.Acceptor.AcceptorState;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.net.openssl.OpenSSLContext;
 import org.apache.tomcat.util.net.openssl.OpenSSLUtil;
 
@@ -1902,7 +1903,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 
 		private static final int SSL_OUTPUT_BUFFER_SIZE = 8192;
 
-		private final ByteBuffer sslOutputBuffer;
+		private final ByteBufferWrapper sslOutputBuffer;
 
 		// This field should only be used by Poller#run()
 		private int pollerFlags = 0;
@@ -1926,8 +1927,9 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			// TODO Make the socketWriteBuffer size configurable and align the
 			// SSL and app buffer size settings with NIO & NIO2.
 			if (endpoint.isSSLEnabled()) {
-				sslOutputBuffer = ByteBuffer.allocateDirect(SSL_OUTPUT_BUFFER_SIZE);
-				sslOutputBuffer.position(SSL_OUTPUT_BUFFER_SIZE);
+				sslOutputBuffer = ByteBufferWrapper.wrapper(ByteBuffer.allocateDirect(SSL_OUTPUT_BUFFER_SIZE), false);// TODO
+																														// check
+				sslOutputBuffer.setPosition(SSL_OUTPUT_BUFFER_SIZE);
 			} else {
 				sslOutputBuffer = null;
 			}
@@ -1951,28 +1953,43 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			return blockingStatusWriteLock;
 		}
 
+//		@Override
+//		protected SocketBufferHandler getSocketBufferHandler() {
+//			return this.socketBufferHandler;
+//		}
+
 		@Override
-		protected SocketBufferHandler getSocketBufferHandler() {
-			return this.socketBufferHandler;
+		protected ByteBufferWrapper getSocketAppReadBuffer() {
+			return this.socketBufferHandler.getAppReadBuffer();
+		}
+
+		@Override
+		protected ByteBufferWrapper getSocketReadBuffer() {
+			return this.socketBufferHandler.getReadBuffer();
+		}
+
+		@Override
+		protected ByteBufferWrapper getSocketWriteBuffer() {
+			return this.socketBufferHandler.getWriteBuffer();
 		}
 
 		@Override
 		public int getAvailable() {
-			getSocketBufferHandler().configureReadBufferForRead();
-			return getSocketBufferHandler().getReadBuffer().remaining();
+			this.socketBufferHandler.configureReadBufferForRead();
+			return this.socketBufferHandler.getReadBuffer().getRemaining();
 		}
 
 		@Override
 		public boolean isReadyForRead() throws IOException {
-			getSocketBufferHandler().configureReadBufferForRead();
+			this.socketBufferHandler.configureReadBufferForRead();
 
-			if (getSocketBufferHandler().getReadBuffer().remaining() > 0) {
+			if (this.socketBufferHandler.getReadBuffer().getRemaining() > 0) {
 				return true;
 			}
 
 			int read = fillReadBuffer(false);
 
-			boolean isReady = getSocketBufferHandler().getReadBuffer().position() > 0 || read == -1;
+			boolean isReady = this.socketBufferHandler.getReadBuffer().getPosition() > 0 || read == -1;
 			return isReady;
 		}
 
@@ -1995,15 +2012,15 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			// Fill as much of the remaining byte array as possible with the
 			// data that was just read
 			if (nRead > 0) {
-				getSocketBufferHandler().configureReadBufferForRead();
+				this.socketBufferHandler.configureReadBufferForRead();
 				nRead = Math.min(nRead, len);
-				getSocketBufferHandler().getReadBuffer().get(b, off, nRead);
+				this.socketBufferHandler.getReadBuffer().getBytes(b, off, nRead);
 			}
 			return nRead;
 		}
 
 		@Override
-		public int read(boolean block, ByteBuffer to) throws IOException {
+		public int read(boolean block, ByteBufferWrapper to) throws IOException {
 			int nRead = populateReadBuffer(to);
 			if (nRead > 0) {
 				return nRead;
@@ -2016,9 +2033,9 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			}
 
 			// The socket read buffer capacity is socket.appReadBufSize
-			int limit = getSocketBufferHandler().getReadBuffer().capacity();
-			if (to.isDirect() && to.remaining() >= limit) {
-				to.limit(to.position() + limit);
+			int limit = this.socketBufferHandler.getReadBuffer().getCapacity();
+			if (to.isDirect() && to.getRemaining() >= limit) {
+				to.setLimit(to.getPosition() + limit);
 				nRead = fillReadBuffer(block, to);
 				if (log.isDebugEnabled()) {
 					log.debug("Socket: [" + this + "], Read direct from socket: [" + nRead + "]");
@@ -2040,11 +2057,11 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 		}
 
 		private int fillReadBuffer(boolean block) throws IOException {
-			getSocketBufferHandler().configureReadBufferForWrite();
-			return fillReadBuffer(block, getSocketBufferHandler().getReadBuffer());
+			this.socketBufferHandler.configureReadBufferForWrite();
+			return fillReadBuffer(block, this.socketBufferHandler.getReadBuffer());
 		}
 
-		private int fillReadBuffer(boolean block, ByteBuffer to) throws IOException {
+		private int fillReadBuffer(boolean block, ByteBufferWrapper to) throws IOException {
 			Lock readLock = getBlockingStatusReadLock();
 			WriteLock writeLock = getBlockingStatusWriteLock();
 
@@ -2057,7 +2074,11 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 					if (block) {
 						Socket.timeoutSet(getSocket().longValue(), getReadTimeout() * 1000);
 					}
-					result = Socket.recvb(getSocket().longValue(), to, to.position(), to.remaining());
+					if (!to.isWriteMode()) {
+						throw new RuntimeException();
+					}
+					result = Socket.recvb(getSocket().longValue(), to.getByteBuffer(), to.getPosition(),
+							to.getRemaining());
 					readDone = true;
 				}
 			} finally {
@@ -2079,7 +2100,11 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 					readLock.lock();
 					try {
 						writeLock.unlock();
-						result = Socket.recvb(getSocket().longValue(), to, to.position(), to.remaining());
+						if (!to.isWriteMode()) {
+							throw new RuntimeException();
+						}
+						result = Socket.recvb(getSocket().longValue(), to.getByteBuffer(), to.getPosition(),
+								to.getRemaining());
 					} finally {
 						readLock.unlock();
 					}
@@ -2093,7 +2118,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			}
 
 			if (result > 0) {
-				to.position(to.position() + result);
+				to.setPosition(to.getPosition() + result);
 				return result;
 			} else if (result == 0 || -result == Status.EAGAIN) {
 				return 0;
@@ -2135,13 +2160,13 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			this.socketBufferHandler = SocketBufferHandler.EMPTY;
 			nonBlockingWriteBuffer.clear();
 			if (sslOutputBuffer != null) {
-				ByteBufferUtils.cleanDirectBuffer(sslOutputBuffer);
+				ByteBufferUtils.cleanDirectBuffer(sslOutputBuffer.getByteBuffer());
 			}
 			((AprEndpoint) getEndpoint()).getPoller().close(getSocket().longValue());
 		}
 
 		@Override
-		protected void doWrite(boolean block, ByteBuffer from) throws IOException {
+		protected void doWrite(boolean block, ByteBufferWrapper from) throws IOException {
 			Lock readLock = getBlockingStatusReadLock();
 			WriteLock writeLock = getBlockingStatusWriteLock();
 
@@ -2187,31 +2212,41 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			}
 		}
 
-		private void doWriteInternal(ByteBuffer from) throws IOException {
+		private void doWriteInternal(ByteBufferWrapper from) throws IOException {
 			int thisTime;
 
 			do {
 				thisTime = 0;
 				if (getEndpoint().isSSLEnabled()) {
-					if (sslOutputBuffer.remaining() == 0) {
+					if (sslOutputBuffer.getRemaining() == 0) {
 						// Buffer was fully written last time around
-						sslOutputBuffer.clear();
-						transfer(from, sslOutputBuffer);
-						sslOutputBuffer.flip();
+						sslOutputBuffer.switchToWriteMode();
+						sslOutputBuffer.clearWrite();
+//						transfer(from, sslOutputBuffer);
+						from.transferTo(sslOutputBuffer);
+//						sslOutputBuffer.flip();
+						sslOutputBuffer.switchToReadMode();
 					} else {
 						// Buffer still has data from previous attempt to write
 						// APR + SSL requires that exactly the same parameters are
 						// passed when re-attempting the write
 					}
-					thisTime = Socket.sendb(getSocket().longValue(), sslOutputBuffer, sslOutputBuffer.position(),
-							sslOutputBuffer.limit());
+					if (!sslOutputBuffer.isReadMode()) {
+						throw new RuntimeException();
+					}
+					thisTime = Socket.sendb(getSocket().longValue(), sslOutputBuffer.getByteBuffer(),
+							sslOutputBuffer.getPosition(), sslOutputBuffer.getLimit());
 					if (thisTime > 0) {
-						sslOutputBuffer.position(sslOutputBuffer.position() + thisTime);
+						sslOutputBuffer.setPosition(sslOutputBuffer.getPosition() + thisTime);
 					}
 				} else {
-					thisTime = Socket.sendb(getSocket().longValue(), from, from.position(), from.remaining());
+					if (!from.isReadMode()) {
+						throw new RuntimeException();
+					}
+					thisTime = Socket.sendb(getSocket().longValue(), from.getByteBuffer(), from.getPosition(),
+							from.getRemaining());
 					if (thisTime > 0) {
-						from.position(from.position() + thisTime);
+						from.setPosition(from.getPosition() + thisTime);
 					}
 				}
 				if (Status.APR_STATUS_IS_EAGAIN(-thisTime)) {
@@ -2472,8 +2507,8 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 		}
 
 		@Override
-		protected <A> OperationState<A> newOperationState(boolean read, ByteBuffer[] buffers, int offset, int length,
-				BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+		protected <A> OperationState<A> newOperationState(boolean read, ByteBufferWrapper[] buffers, int offset,
+				int length, BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 				CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 				VectoredIOCompletionHandler<A> completion) {
 			return new AprOperationState<>(read, buffers, offset, length, block, timeout, unit, attachment, check,
@@ -2484,8 +2519,8 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			private volatile boolean inline = true;
 			private volatile long flushBytes = 0;
 
-			private AprOperationState(boolean read, ByteBuffer[] buffers, int offset, int length, BlockingMode block,
-					long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+			private AprOperationState(boolean read, ByteBufferWrapper[] buffers, int offset, int length,
+					BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 					CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 					VectoredIOCompletionHandler<A> completion) {
 				super(read, buffers, offset, length, block, timeout, unit, attachment, check, handler, semaphore,
@@ -2515,7 +2550,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 							}
 							// Find the buffer on which the operation will be performed (no vectoring with
 							// APR)
-							ByteBuffer buffer = null;
+							ByteBufferWrapper buffer = null;
 							for (int i = 0; i < length; i++) {
 								if (buffers[i + offset].hasRemaining()) {
 									buffer = buffers[i + offset];
@@ -2537,9 +2572,9 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 										flushBytes = 0;
 									} else {
 										@SuppressWarnings("null") // Not possible
-										int remaining = buffer.remaining();
+										int remaining = buffer.getRemaining();
 										write(block == BlockingMode.BLOCK, buffer);
-										nBytes = remaining - buffer.remaining();
+										nBytes = remaining - buffer.getRemaining();
 										if (nBytes > 0 && flush(block == BlockingMode.BLOCK)) {
 											// We have to flush and it's incomplete, save the bytes written until done
 											inline = false;

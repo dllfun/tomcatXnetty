@@ -877,6 +877,7 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 		// super.recycle();
 		requestAction.recycle();
 		responseAction.recycle();
+		repeat = true;
 	}
 
 	@Override

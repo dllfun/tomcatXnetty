@@ -187,8 +187,7 @@ public class B2CConverter {
 	 *
 	 * @throws IOException If the conversion can not be completed
 	 */
-	public void convert(
-			BufWrapper bc, CharBuffer cc, ByteChunk.ByteInputChannel ic, boolean endOfInput)
+	public void convert(BufWrapper bc, CharBuffer cc, ByteChunk.ByteInputChannel ic, boolean endOfInput)
 			throws IOException {
 
 		ByteBuffer bb = null;
@@ -264,7 +263,7 @@ public class B2CConverter {
 			if (bc.getRemaining() > 0) {
 				leftovers.limit(leftovers.array().length);
 				leftovers.position(bc.getRemaining());
-				bc.getByte(leftovers.array(), 0, bc.getRemaining());
+				bc.getBytes(leftovers.array(), 0, bc.getRemaining());
 			}
 		}
 	}

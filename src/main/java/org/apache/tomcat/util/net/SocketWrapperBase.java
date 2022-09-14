@@ -18,10 +18,13 @@ package org.apache.tomcat.util.net;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
+import org.apache.tomcat.util.buf.ByteBufferUtils;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
@@ -37,11 +40,10 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 */
 	// private volatile SocketBufferHandler socketBufferHandler = null;
 
-	private boolean firstFill = true;
 	/**
 	 * The read buffer.
 	 */
-	private ByteBufferWrapper appReadBuffer = new ByteBufferWrapper(this, () -> ByteBuffer.allocate(0), true);
+	private ByteBufferWrapper appReadBuffer = new ByteBufferWrapper(this, ByteBuffer.allocate(0), false);
 
 	/**
 	 * The max size of the individual buffered write buffers
@@ -71,39 +73,16 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	@Override
 	public void initAppReadBuffer(int headerBufferSize) {
 
-		if (getSocketBufferHandler() != null && getSocketBufferHandler().getReadBuffer() != null) {
-			getSocketBufferHandler().initAppReadBuffer(headerBufferSize);
-			appReadBuffer.setProvider(() -> getSocketBufferHandler().getAppReadBuffer());
+		if (getSocketAppReadBuffer() != null && getSocketReadBuffer() != null) {
+			appReadBuffer = getSocketAppReadBuffer();
+			appReadBuffer.expand(headerBufferSize + getSocketReadBuffer().getCapacity());
+			appReadBuffer.switchToWriteMode();
+			appReadBuffer.clearWrite();
+			appReadBuffer.switchToReadMode();
 			// setAppReadBufHandler(appReadBuffer);
 			// socket.addAppReadBufferExpandListener();
-			firstFill = true;
 		}
 
-	}
-
-	/**
-	 * Attempts to read some data into the input buffer.
-	 *
-	 * @return <code>true</code> if more data was added to the input buffer
-	 *         otherwise <code>false</code>
-	 * @throws IOException
-	 */
-	@Override
-	public boolean fillAppReadBuffer(boolean block) throws IOException {
-		int nRead = this.read(block, appReadBuffer);
-		boolean success = false;
-		if (nRead > 0) {
-			success = true;
-		} else if (nRead == -1) {
-			throw new EOFException(sm.getString("iib.eof.error"));
-		} else {
-			success = false;
-		}
-		if (!success && firstFill) {
-			System.out.println(getRemotePort() + " 未读取到数据");
-		}
-		firstFill = false;
-		return success;
 	}
 
 	@Override
@@ -121,13 +100,25 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	}
 
 	public void expandSocketBuffer(int size) {
-		if (getSocketBufferHandler() != null) {
-			getSocketBufferHandler().expand(size);
+//		if (getSocketBufferHandler() != null) {
+//			getSocketBufferHandler().expand(size);
+//		}
+		if (getSocketReadBuffer() != null) {
+			getSocketReadBuffer().expand(size);
+		}
+		if (getSocketWriteBuffer() != null) {
+			getSocketWriteBuffer().expand(size);
 		}
 	}
 
 	// @Override
-	abstract protected SocketBufferHandler getSocketBufferHandler();
+//	abstract protected SocketBufferHandler getSocketBufferHandler();
+
+	abstract protected ByteBufferWrapper getSocketAppReadBuffer();
+
+	abstract protected ByteBufferWrapper getSocketReadBuffer();
+
+	abstract protected ByteBufferWrapper getSocketWriteBuffer();
 
 	// protected void setSocketBufferHandler(SocketBufferHandler
 	// socketBufferHandler) {
@@ -142,7 +133,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 	@Override
 	public boolean hasDataToWrite() {
-		return !getSocketBufferHandler().isWriteBufferEmpty() || !nonBlockingWriteBuffer.isEmpty();
+		return !getSocketWriteBuffer().isEmpty() || !nonBlockingWriteBuffer.isEmpty();
 	}
 
 	/**
@@ -169,10 +160,10 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 	@Override
 	public boolean canWrite() {
-		if (getSocketBufferHandler() == null) {
+		if (getSocketWriteBuffer() == null) {
 			throw new IllegalStateException(sm.getString("socket.closed"));
 		}
-		return getSocketBufferHandler().isWriteBufferWritable() && nonBlockingWriteBuffer.isEmpty();
+		return getSocketWriteBuffer().isWritable() && nonBlockingWriteBuffer.isEmpty();
 	}
 
 	// public abstract int read(boolean block, byte[] b, int off, int len) throws
@@ -185,15 +176,16 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	// public abstract void setAppReadBufHandler(ApplicationBufferHandler handler);
 
 	protected int populateReadBuffer(byte[] b, int off, int len) {
-		getSocketBufferHandler().configureReadBufferForRead();
-		ByteBuffer readBuffer = getSocketBufferHandler().getReadBuffer();
-		int remaining = readBuffer.remaining();
+//		getSocketBufferHandler().configureReadBufferForRead();
+		ByteBufferWrapper readBuffer = getSocketReadBuffer();
+		readBuffer.switchToReadMode();
+		int remaining = readBuffer.getRemaining();
 
 		// Is there enough data in the read buffer to satisfy this request?
 		// Copy what data there is in the read buffer to the byte array
 		if (remaining > 0) {
 			remaining = Math.min(remaining, len);
-			readBuffer.get(b, off, remaining);
+			readBuffer.getBytes(b, off, remaining);
 
 			if (log.isDebugEnabled()) {
 				log.debug("Socket: [" + this + "], Read from buffer: [" + remaining + "]");
@@ -202,16 +194,23 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		return remaining;
 	}
 
-	protected int populateReadBuffer(ByteBuffer to) {
+	protected int populateReadBuffer(ByteBufferWrapper to) {
 		// Is there enough data in the read buffer to satisfy this request?
 		// Copy what data there is in the read buffer to the byte array
-		getSocketBufferHandler().configureReadBufferForRead();
-		int nRead = transfer(getSocketBufferHandler().getReadBuffer(), to);
+//		getSocketBufferHandler().configureReadBufferForRead();
+		ByteBufferWrapper readBuffer = getSocketReadBuffer();
+		readBuffer.switchToReadMode();
+		if (readBuffer.hasRemaining()) {
+//			int nRead = transfer(getSocketBufferHandler().getReadBuffer(), to);
+			int nRead = readBuffer.transferTo(to);
 
-		if (log.isDebugEnabled()) {
-			log.debug("Socket: [" + this + "], Read from buffer: [" + nRead + "]");
+			if (log.isDebugEnabled()) {
+				log.debug("Socket: [" + this + "], Read from buffer: [" + nRead + "]");
+			}
+			return nRead;
+		} else {
+			return 0;
 		}
-		return nRead;
 	}
 
 	@Override
@@ -221,26 +220,12 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 			// ByteBuffer delegate = byteBufferWrapper.getByteBuffer();
 
-			if (byteBufferWrapper.parsingHeader) {
-				if (byteBufferWrapper.getLimit() >= byteBufferWrapper.headerBufferSize) {
-					// if (parsingRequestLine) {
-					// Avoid unknown protocol triggering an additional error
-					// request.protocol().setString(Constants.HTTP_11);
-					// }
-					throw new IllegalArgumentException(sm.getString("iib.requestheadertoolarge.error"));
-				}
-				byteBufferWrapper.switchToWriteMode();
-			} else {
-				// delegate.limit(byteBufferWrapper.headerPos).position(byteBufferWrapper.headerPos);
-				byteBufferWrapper.switchToWriteMode(true, byteBufferWrapper.headerPos);
-			}
-
 //			delegate.mark();
 //			if (delegate.position() < delegate.limit()) {
 //				delegate.position(delegate.limit());
 //			}
 //			delegate.limit(delegate.capacity());
-			int nRead = read(block, byteBufferWrapper.getByteBuffer());
+			int nRead = read(block, byteBufferWrapper);
 			byteBufferWrapper.switchToReadMode();
 			// after read buffer may has changed if buffer is appReadBuffer
 //			delegate = byteBufferWrapper.getByteBuffer();
@@ -269,9 +254,9 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 * @param returnedInput The input to return to the input buffer.
 	 */
 	@Override
-	public void unRead(ByteBuffer returnedInput) {
-		if (returnedInput != null) {
-			getSocketBufferHandler().unReadReadBuffer(returnedInput);
+	public void unRead(ByteBufferWrapper returnedInput) {
+		if (returnedInput != null && returnedInput.getByteBuffer() != null) {
+			getSocketReadBuffer().unread(returnedInput);
 		}
 	}
 
@@ -292,14 +277,14 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 */
 	protected void writeBlocking(byte[] buf, int off, int len) throws IOException {
 		if (len > 0) {
-			getSocketBufferHandler().configureWriteBufferForWrite();
-			int thisTime = transfer(buf, off, len, getSocketBufferHandler().getWriteBuffer());
+			getSocketWriteBuffer().switchToWriteMode();
+			int thisTime = transfer(buf, off, len, getSocketWriteBuffer());
 			len -= thisTime;
 			while (len > 0) {
 				off += thisTime;
 				doWrite(true);
-				getSocketBufferHandler().configureWriteBufferForWrite();
-				thisTime = transfer(buf, off, len, getSocketBufferHandler().getWriteBuffer());
+				getSocketWriteBuffer().switchToWriteMode();
+				thisTime = transfer(buf, off, len, getSocketWriteBuffer());
 				len -= thisTime;
 			}
 		}
@@ -318,14 +303,16 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 *
 	 * @throws IOException If an IO error occurs during the write
 	 */
-	protected void writeBlocking(ByteBuffer from) throws IOException {
+	@Override
+	protected void writeBlocking(ByteBufferWrapper from) throws IOException {
 		if (from.hasRemaining()) {
-			getSocketBufferHandler().configureWriteBufferForWrite();
-			transfer(from, getSocketBufferHandler().getWriteBuffer());
+			getSocketWriteBuffer().switchToWriteMode();
+//			transfer(from, getSocketBufferHandler().getWriteBuffer());
+			from.transferTo(getSocketWriteBuffer());
 			while (from.hasRemaining()) {
 				doWrite(true);
-				getSocketBufferHandler().configureWriteBufferForWrite();
-				transfer(from, getSocketBufferHandler().getWriteBuffer());
+				getSocketWriteBuffer().switchToWriteMode();
+				from.transferTo(getSocketWriteBuffer());
 			}
 		}
 	}
@@ -347,16 +334,16 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 * @throws IOException If an IO error occurs during the write
 	 */
 	protected void writeNonBlocking(byte[] buf, int off, int len) throws IOException {
-		if (len > 0 && nonBlockingWriteBuffer.isEmpty() && getSocketBufferHandler().isWriteBufferWritable()) {
-			getSocketBufferHandler().configureWriteBufferForWrite();
-			int thisTime = transfer(buf, off, len, getSocketBufferHandler().getWriteBuffer());
+		if (len > 0 && nonBlockingWriteBuffer.isEmpty() && getSocketWriteBuffer().isWritable()) {
+			getSocketWriteBuffer().switchToWriteMode();
+			int thisTime = transfer(buf, off, len, getSocketWriteBuffer());
 			len -= thisTime;
 			while (len > 0) {
 				off = off + thisTime;
 				doWrite(false);
-				if (len > 0 && getSocketBufferHandler().isWriteBufferWritable()) {
-					getSocketBufferHandler().configureWriteBufferForWrite();
-					thisTime = transfer(buf, off, len, getSocketBufferHandler().getWriteBuffer());
+				if (len > 0 && getSocketWriteBuffer().isWritable()) {
+					getSocketWriteBuffer().switchToWriteMode();
+					thisTime = transfer(buf, off, len, getSocketWriteBuffer());
 				} else {
 					// Didn't write any data in the last non-blocking write.
 					// Therefore the write buffer will still be full. Nothing
@@ -387,10 +374,9 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 *
 	 * @throws IOException If an IO error occurs during the write
 	 */
-	protected void writeNonBlocking(ByteBuffer from) throws IOException {
+	protected void writeNonBlocking(ByteBufferWrapper from) throws IOException {
 
-		if (from.hasRemaining() && nonBlockingWriteBuffer.isEmpty()
-				&& getSocketBufferHandler().isWriteBufferWritable()) {
+		if (from.hasRemaining() && nonBlockingWriteBuffer.isEmpty() && getSocketWriteBuffer().isWritable()) {
 			writeNonBlockingInternal(from);
 		}
 
@@ -408,14 +394,15 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 *
 	 * @throws IOException If an IO error occurs during the write
 	 */
-	protected void writeNonBlockingInternal(ByteBuffer from) throws IOException {
-		getSocketBufferHandler().configureWriteBufferForWrite();
-		transfer(from, getSocketBufferHandler().getWriteBuffer());
+	protected void writeNonBlockingInternal(ByteBufferWrapper from) throws IOException {
+		getSocketWriteBuffer().switchToWriteMode();
+//		transfer(from, getSocketBufferHandler().getWriteBuffer());
+		from.transferTo(getSocketWriteBuffer());
 		while (from.hasRemaining()) {
 			doWrite(false);
-			if (getSocketBufferHandler().isWriteBufferWritable()) {
-				getSocketBufferHandler().configureWriteBufferForWrite();
-				transfer(from, getSocketBufferHandler().getWriteBuffer());
+			if (getSocketWriteBuffer().isWritable()) {
+				getSocketWriteBuffer().switchToWriteMode();
+				from.transferTo(getSocketWriteBuffer());
 			} else {
 				break;
 			}
@@ -426,7 +413,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	protected void writeBlocking(BufWrapper from) throws IOException {
 		if (from instanceof ByteBufferWrapper) {
 			ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) from;
-			writeBlocking(byteBufferWrapper.provider.getByteBuffer());
+			writeBlocking(byteBufferWrapper);
 		}
 	}
 
@@ -434,7 +421,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	protected void writeNonBlocking(BufWrapper from) throws IOException {
 		if (from instanceof ByteBufferWrapper) {
 			ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) from;
-			writeNonBlocking(byteBufferWrapper.provider.getByteBuffer());
+			writeNonBlocking(byteBufferWrapper);
 		}
 	}
 
@@ -444,7 +431,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		if (!nonBlockingWriteBuffer.isEmpty()) {
 			nonBlockingWriteBuffer.write(this, true);
 
-			if (!getSocketBufferHandler().isWriteBufferEmpty()) {
+			if (!getSocketWriteBuffer().isEmpty()) {
 				doWrite(true);
 			}
 		}
@@ -452,20 +439,20 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	}
 
 	protected boolean flushNonBlocking() throws IOException {
-		boolean dataLeft = !getSocketBufferHandler().isWriteBufferEmpty();
+		boolean dataLeft = !getSocketWriteBuffer().isEmpty();
 
 		// Write to the socket, if there is anything to write
 		if (dataLeft) {
 			doWrite(false);
-			dataLeft = !getSocketBufferHandler().isWriteBufferEmpty();
+			dataLeft = !getSocketWriteBuffer().isEmpty();
 		}
 
 		if (!dataLeft && !nonBlockingWriteBuffer.isEmpty()) {
 			dataLeft = nonBlockingWriteBuffer.write(this, false);
 
-			if (!dataLeft && !getSocketBufferHandler().isWriteBufferEmpty()) {
+			if (!dataLeft && !getSocketWriteBuffer().isEmpty()) {
 				doWrite(false);
-				dataLeft = !getSocketBufferHandler().isWriteBufferEmpty();
+				dataLeft = !getSocketWriteBuffer().isEmpty();
 			}
 		}
 
@@ -482,8 +469,8 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 * @throws IOException If an I/O error such as a timeout occurs during the write
 	 */
 	protected void doWrite(boolean block) throws IOException {
-		getSocketBufferHandler().configureWriteBufferForRead();
-		doWrite(block, getSocketBufferHandler().getWriteBuffer());
+		getSocketWriteBuffer().switchToReadMode();
+		doWrite(block, getSocketWriteBuffer());
 	}
 
 	/**
@@ -496,7 +483,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 *
 	 * @throws IOException If an I/O error such as a timeout occurs during the write
 	 */
-	protected abstract void doWrite(boolean block, ByteBuffer from) throws IOException;
+	protected abstract void doWrite(boolean block, ByteBufferWrapper from) throws IOException;
 
 	// @Override
 	// public void processSocket(SocketEvent socketStatus, boolean dispatch) {
@@ -543,24 +530,9 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 	public static class ByteBufferWrapper implements BufWrapper {
 
-		@FunctionalInterface
-		public interface ByteBufferProvider {
-
-			public ByteBuffer getByteBuffer();
-
-		}
-
 		private SocketWrapperBase<?> channel;
 
-		private ByteBufferProvider provider;
-
-		private boolean parsingHeader;
-
-		private int headerBufferSize;
-
-		private boolean parsingRequestLine;
-
-		private int headerPos;
+		private ByteBuffer delegate;
 
 		private boolean trace;
 
@@ -568,60 +540,101 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 		private int readPosition = 0;
 
-		public ByteBufferWrapper(SocketWrapperBase<?> channel, ByteBufferProvider provider, boolean readMode) {
+		private int retain = 0;
+
+		public ByteBufferWrapper(SocketWrapperBase<?> channel, ByteBuffer delegate, boolean readMode) {
 			super();
 			this.channel = channel;
-			this.provider = provider;
+			this.delegate = delegate;
 			this.readMode = readMode;
 		}
 
 		// @Override
 		public ByteBuffer getByteBuffer() {
-			return provider.getByteBuffer();
+			return delegate;
 		}
 
 		// @Override
-		public void setProvider(ByteBufferProvider provider) {
-			this.provider = provider;
+		public void setByteBuffer(ByteBuffer delegate) {
+			this.delegate = delegate;
 		}
 
 		@Override
-		public void switchToWriteMode(boolean compact, int retain) {
+		public void switchToWriteMode(boolean compact) {
+			if (released()) {
+				throw new RuntimeException();
+			}
 			if (readMode) {
 				if (compact) {
-					System.arraycopy(provider.getByteBuffer().array(),
-							provider.getByteBuffer().position() + provider.getByteBuffer().arrayOffset() + retain,
-							provider.getByteBuffer().array(), provider.getByteBuffer().arrayOffset() + retain,
-							provider.getByteBuffer().remaining());
-					provider.getByteBuffer().position(provider.getByteBuffer().remaining() + retain);
-					provider.getByteBuffer().limit(provider.getByteBuffer().capacity());
+					if (retain > getPosition()) {
+						throw new RuntimeException();
+					}
+					if (delegate.position() > 0) {
+						System.arraycopy(delegate.array(), delegate.position() + delegate.arrayOffset() + retain,
+								delegate.array(), delegate.arrayOffset() + retain, delegate.remaining());
+					}
+					delegate.position(delegate.remaining() + retain);
+					delegate.limit(delegate.capacity());
 					readPosition = retain;
 				} else {
-					readPosition = provider.getByteBuffer().position();
-					provider.getByteBuffer().position(provider.getByteBuffer().limit());
-					provider.getByteBuffer().limit(provider.getByteBuffer().capacity());
+					readPosition = delegate.position();
+					delegate.position(delegate.limit());
+					delegate.limit(delegate.capacity());
 				}
 				readMode = false;
 			}
 		}
 
 		@Override
-		public void switchToWriteMode(boolean compact) {
-			switchToWriteMode(compact, 0);
+		public void switchToWriteMode() {
+			switchToWriteMode(true);
 		}
 
 		@Override
-		public void switchToWriteMode() {
-			switchToWriteMode(false);
+		public void setRetain(int retain) {
+			if (readMode) {
+				if (retain < getPosition()) {
+					throw new RuntimeException();
+				}
+				if (retain != getPosition()) {
+					System.err.println("setRetain");
+				}
+				this.retain = retain;
+			} else {
+				throw new RuntimeException();
+			}
+		}
+
+		@Override
+		public void clearRetain() {
+			this.retain = 0;
+		}
+
+		@Override
+		public int getRetain() {
+			return this.retain;
+		}
+
+		@Override
+		public boolean isWriteMode() {
+			return !readMode;
 		}
 
 		@Override
 		public void switchToReadMode() {
+			if (released()) {
+				throw new RuntimeException();
+			}
 			if (!readMode) {
-				provider.getByteBuffer().limit(provider.getByteBuffer().position());
-				provider.getByteBuffer().position(readPosition);
+				delegate.limit(delegate.position());
+				delegate.position(readPosition);
 				readMode = true;
 			}
+		}
+
+		@Override
+		public boolean isReadMode() {
+			return readMode;
 		}
 
 		@Override
@@ -631,52 +644,86 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 		@Override
 		public int getLimit() {
-			return provider.getByteBuffer().limit();
+			return delegate.limit();
 		}
 
 		@Override
 		public void setLimit(int limit) {
-			provider.getByteBuffer().limit(limit);
+			delegate.limit(limit);
 		}
 
 		@Override
 		public byte getByte() {
-			return provider.getByteBuffer().get();
+			if (!readMode) {
+				throw new RuntimeException();
+			}
+			return delegate.get();
 		}
 
 		@Override
-		public void getByte(byte[] b, int off, int len) {
-			provider.getByteBuffer().get(b, off, len);
+		public void getBytes(byte[] b, int off, int len) {
+			if (!readMode) {
+				throw new RuntimeException();
+			}
+			delegate.get(b, off, len);
 		}
 
 		@Override
 		public byte getByte(int index) {
-			return provider.getByteBuffer().get(index);
+			if (!readMode) {
+				throw new RuntimeException();
+			}
+			return delegate.get(index);
 		}
 
 		@Override
 		public int getPosition() {
-			return provider.getByteBuffer().position();
+			return delegate.position();
 		}
 
 		@Override
 		public void setPosition(int position) {
-			provider.getByteBuffer().position(position);
+			if (readMode) {
+
+			} else {
+				if (position < retain) {
+					throw new RuntimeException();
+				}
+			}
+			delegate.position(position);
 		}
 
 		@Override
 		public boolean hasArray() {
-			return provider.getByteBuffer().hasArray();
+			return delegate.hasArray();
 		}
 
 		@Override
 		public byte[] getArray() {
-			return provider.getByteBuffer().array();
+			return delegate.array();
+		}
+
+		public int getArrayOffset() {
+			return delegate.arrayOffset();
+		}
+
+		@Override
+		public boolean isDirect() {
+			return delegate.isDirect();
+		}
+
+		@Override
+		public boolean isEmpty() {
+			if (readMode) {
+				return delegate.remaining() == 0;
+			} else {
+				return delegate.position() == 0;
+			}
 		}
 
 		@Override
 		public int getRemaining() {
-			return provider.getByteBuffer().remaining();
+			return delegate.remaining();
 		}
 
 		// @Override
@@ -686,37 +733,158 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 		@Override
 		public boolean hasRemaining() {
-			return provider.getByteBuffer().remaining() > 0;
+			return delegate.remaining() > 0;
 		}
 
 		@Override
 		public boolean hasNoRemaining() {
-			return provider.getByteBuffer().remaining() <= 0;
+			return delegate.remaining() <= 0;
 		}
 
 		@Override
 		public int getCapacity() {
-			return provider.getByteBuffer().capacity();
+			return delegate.capacity();
 		}
 
 		@Override
 		public void setByte(int index, byte b) {
-			provider.getByteBuffer().put(index, b);
+			if (readMode) {
+				throw new RuntimeException();
+			}
+			if (index < retain) {
+				throw new RuntimeException();
+			}
+			delegate.put(index, b);
 		}
 
 		@Override
 		public void putByte(byte b) {
-			provider.getByteBuffer().put(b);
+			if (readMode) {
+				throw new RuntimeException();
+			}
+			if (getPosition() < retain) {
+				throw new RuntimeException();
+			}
+			delegate.put(b);
 		}
 
 		@Override
 		public void putBytes(byte[] b) {
-			provider.getByteBuffer().put(b);
+			if (readMode) {
+				throw new RuntimeException();
+			}
+			if (getPosition() < retain) {
+				throw new RuntimeException();
+			}
+			delegate.put(b);
 		}
 
 		@Override
 		public void putBytes(byte[] b, int off, int len) {
-			provider.getByteBuffer().put(b, off, len);
+			if (readMode) {
+				throw new RuntimeException();
+			}
+			if (getPosition() < retain) {
+				throw new RuntimeException();
+			}
+			delegate.put(b, off, len);
+		}
+
+		@Override
+		public void clearWrite() {
+			if (readMode) {
+				throw new RuntimeException();
+			}
+			if (readPosition != 0) {
+				throw new RuntimeException();
+			}
+			if (retain != 0) {
+				throw new RuntimeException();
+			}
+			delegate.clear();
+		}
+
+		@Override
+		public boolean isWritable() {
+			if (isWriteMode()) {
+				return hasRemaining();
+			} else {
+				if ("1".equals("1"))
+					throw new RuntimeException("has bug here");
+				return getPosition() > 0 || getLimit() < getCapacity();
+			}
+		}
+
+//		@Override
+		public void unread(ByteBufferWrapper returned) {
+			if (retain != 0) {
+				throw new RuntimeException();
+			}
+			if (isEmpty()) {
+				switchToWriteMode();
+				returned.transferTo(this);
+			} else {
+				if ("1".equals("1"))
+					throw new RuntimeException("has bug here");
+				int bytesReturned = returned.getRemaining();
+				if (isWriteMode()) {
+					// Writes always start at position zero
+					if ((getPosition() + bytesReturned) > getCapacity()) {
+						throw new BufferOverflowException();
+					} else {
+						// Move the bytes up to make space for the returned data
+						// has bug
+						for (int i = 0; i < getPosition(); i++) {
+							setByte(i + bytesReturned, getByte(i));
+						}
+						// Insert the bytes returned
+						for (int i = 0; i < bytesReturned; i++) {
+							setByte(i, returned.getByte());
+						}
+						// Update the position
+						setPosition(getPosition() + bytesReturned);
+					}
+				} else {
+					// Reads will start at zero but may have progressed
+					int shiftRequired = bytesReturned - getPosition();
+					if (shiftRequired > 0) {
+						if ((getCapacity() - getLimit()) < shiftRequired) {
+							throw new BufferOverflowException();
+						}
+						// Move the bytes up to make space for the returned data
+						int oldLimit = getLimit();
+						setLimit(oldLimit + shiftRequired);
+						for (int i = getPosition(); i < oldLimit; i++) {
+							setByte(i + shiftRequired, getByte(i));
+						}
+					} else {
+						shiftRequired = 0;
+					}
+					// Insert the returned bytes
+					int insertOffset = getPosition() + shiftRequired - bytesReturned;
+					for (int i = insertOffset; i < bytesReturned + insertOffset; i++) {
+						setByte(i, returned.getByte());
+					}
+					setPosition(insertOffset);
+				}
+			}
+		}
+
+		public int transferTo(ByteBufferWrapper to) {
+			if (!this.isReadMode() || this.hasNoRemaining()) {
+				throw new RuntimeException();
+			}
+			if (!to.isWriteMode() || to.hasNoRemaining()) {
+				throw new RuntimeException();
+			}
+			int max = Math.min(this.getRemaining(), to.getRemaining());
+			if (max > 0) {
+				int fromLimit = this.getLimit();
+				this.setLimit(this.getPosition() + max);
+				to.delegate.put(this.delegate);
+				this.setLimit(fromLimit);
+			}
+			return max;
 		}
 
 		/**
@@ -758,42 +926,6 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 //			return length;
 //		}
 
-		@Override
-		public void startParsingHeader(int headerBufferSize) {
-			parsingHeader = true;
-			this.headerBufferSize = headerBufferSize;
-		}
-
-		public int getHeaderBufferSize() {
-			return headerBufferSize;
-		}
-
-		@Override
-		public void startParsingRequestLine() {
-			parsingRequestLine = true;
-		}
-
-		@Override
-		public void finishParsingRequestLine() {
-			parsingRequestLine = false;
-		}
-
-		@Override
-		public void finishParsingHeader(boolean keepHeadPos) {
-			parsingHeader = false;
-			if (keepHeadPos) {
-				headerPos = provider.getByteBuffer().position();
-			}
-		}
-
-		public boolean isParsingHeader() {
-			return parsingHeader;
-		}
-
-		public int getHeaderPos() {
-			return headerPos;
-		}
-
 //		@Override
 //		public void expand(int size) {
 //			if (delegate.capacity() >= size) {
@@ -807,42 +939,36 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 //		}
 
 		@Override
-		public void nextRequest() {
-			if (provider.getByteBuffer().position() > 0) {
-				if (provider.getByteBuffer().remaining() > 0) {
-					// Copy leftover bytes to the beginning of the buffer
-					provider.getByteBuffer().compact();
-					provider.getByteBuffer().flip();
-				} else {
-					// Reset position and limit to 0
-					provider.getByteBuffer().position(0).limit(0);
-				}
-			}
-		}
-
-		@Override
 		public void reset() {
-			provider.getByteBuffer().limit(0).position(0);
+//			delegate.limit(0).position(0);
+			retain = 0;
+			switchToWriteMode();
+			delegate.clear();
 		}
 
 		@Override
 		public ByteBuffer nioBuffer() {
-			return provider.getByteBuffer().duplicate();
+			return delegate.duplicate();
 		}
 
 		@Override
 		public BufWrapper duplicate() {
-			ByteBuffer buffer = provider.getByteBuffer().duplicate();
-			return new ByteBufferWrapper(channel, () -> (buffer), true);
+			ByteBuffer buffer = delegate.duplicate();
+			return new ByteBufferWrapper(channel, buffer, true);
 		}
 
 		public static ByteBufferWrapper wrapper(ByteBuffer buffer, boolean readMode) {
-			return new ByteBufferWrapper(null, () -> buffer, readMode);
+			return new ByteBufferWrapper(null, buffer, readMode);
 		}
 
 		@Override
 		public void startTrace() {
 			trace = true;
+		}
+
+		@Override
+		public void retain() {
+			// NO-OP
 		}
 
 		@Override
@@ -852,7 +978,27 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 		@Override
 		public void release() {
+			// NO-OP
+		}
 
+		@Override
+		public int refCount() {
+			// TODO Auto-generated method stub
+			return 0;
+		}
+
+		@Override
+		public String printInfo() {
+			// TODO Auto-generated method stub
+			return "";
+		}
+
+		@Override
+		public void expand(int newSize) {
+			// TODO
+			delegate = ByteBufferUtils.expand(delegate, newSize);
+			// throw new RuntimeException();
+			// provider.expand(newSize);
 		}
 
 	}

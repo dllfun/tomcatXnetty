@@ -52,6 +52,7 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.InstanceManager;
 import org.apache.tomcat.InstanceManagerBindings;
 import org.apache.tomcat.util.ExceptionUtils;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 public class WsSession implements Session {
@@ -550,21 +551,22 @@ public class WsSession implements Session {
 
 	private void sendCloseMessage(CloseReason closeReason) {
 		// 125 is maximum size for the payload of a control message
-		ByteBuffer msg = ByteBuffer.allocate(125);
+		ByteBufferWrapper msg = ByteBufferWrapper.wrapper(ByteBuffer.allocate(125), false);
 		CloseCode closeCode = closeReason.getCloseCode();
 		// CLOSED_ABNORMALLY should not be put on the wire
 		if (closeCode == CloseCodes.CLOSED_ABNORMALLY) {
 			// PROTOCOL_ERROR is probably better than GOING_AWAY here
-			msg.putShort((short) CloseCodes.PROTOCOL_ERROR.getCode());
+			msg.getByteBuffer().putShort((short) CloseCodes.PROTOCOL_ERROR.getCode());
 		} else {
-			msg.putShort((short) closeCode.getCode());
+			msg.getByteBuffer().putShort((short) closeCode.getCode());
 		}
 
 		String reason = closeReason.getReasonPhrase();
 		if (reason != null && reason.length() > 0) {
 			appendCloseReasonWithTruncation(msg, reason);
 		}
-		msg.flip();
+//		msg.flip();
+		msg.switchToReadMode();
 		try {
 			wsRemoteEndpoint.sendMessageBlock(Constants.OPCODE_CLOSE, msg, true);
 		} catch (IOException | WritePendingException e) {
@@ -602,7 +604,7 @@ public class WsSession implements Session {
 	 * @param msg    The message
 	 * @param reason The reason
 	 */
-	protected static void appendCloseReasonWithTruncation(ByteBuffer msg, String reason) {
+	protected static void appendCloseReasonWithTruncation(ByteBufferWrapper msg, String reason) {
 		// Once the close code has been added there are a maximum of 123 bytes
 		// left for the reason phrase. If it is truncated then care needs to be
 		// taken to ensure the bytes are not truncated in the middle of a
@@ -611,19 +613,19 @@ public class WsSession implements Session {
 
 		if (reasonBytes.length <= 123) {
 			// No need to truncate
-			msg.put(reasonBytes);
+			msg.putBytes(reasonBytes);
 		} else {
 			// Need to truncate
 			int remaining = 123 - ELLIPSIS_BYTES_LEN;
 			int pos = 0;
 			byte[] bytesNext = reason.substring(pos, pos + 1).getBytes(StandardCharsets.UTF_8);
 			while (remaining >= bytesNext.length) {
-				msg.put(bytesNext);
+				msg.putBytes(bytesNext);
 				remaining -= bytesNext.length;
 				pos++;
 				bytesNext = reason.substring(pos, pos + 1).getBytes(StandardCharsets.UTF_8);
 			}
-			msg.put(ELLIPSIS_BYTES);
+			msg.putBytes(ELLIPSIS_BYTES);
 		}
 	}
 
@@ -782,11 +784,11 @@ public class WsSession implements Session {
 		OPEN, OUTPUT_CLOSED, CLOSED
 	}
 
-	private WsFrameBase wsFrame;
+//	private WsFrameBase wsFrame;
 
-	void setWsFrame(WsFrameBase wsFrame) {
-		this.wsFrame = wsFrame;
-	}
+//	void setWsFrame(WsFrameBase wsFrame) {
+//		this.wsFrame = wsFrame;
+//	}
 
 	/**
 	 * Suspends the reading of the incoming messages.

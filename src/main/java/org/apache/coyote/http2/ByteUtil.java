@@ -16,7 +16,7 @@
  */
 package org.apache.coyote.http2;
 
-import java.nio.ByteBuffer;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
 /**
  * Utility class for extracting values from byte arrays.
@@ -36,9 +36,9 @@ class ByteUtil {
 				+ ((input[firstByte + 2] & 0xFF) << 8) + (input[firstByte + 3] & 0xFF);
 	}
 
-	static int get31Bits(ByteBuffer input, int firstByte) {
-		return ((input.get(firstByte) & 0x7F) << 24) + ((input.get(firstByte + 1) & 0xFF) << 16)
-				+ ((input.get(firstByte + 2) & 0xFF) << 8) + (input.get(firstByte + 3) & 0xFF);
+	static int get31Bits(ByteBufferWrapper input, int firstByte) {
+		return ((input.getByte(firstByte) & 0x7F) << 24) + ((input.getByte(firstByte + 1) & 0xFF) << 16)
+				+ ((input.getByte(firstByte + 2) & 0xFF) << 8) + (input.getByte(firstByte + 3) & 0xFF);
 	}
 
 	static void set31Bits(byte[] output, int firstByte, int value) {
@@ -52,25 +52,25 @@ class ByteUtil {
 		return (input[pos] & 0xFF);
 	}
 
-	static int getOneByte(ByteBuffer input, int pos) {
-		return (input.get(pos) & 0xFF);
+	static int getOneByte(ByteBufferWrapper input, int pos) {
+		return (input.getByte(pos) & 0xFF);
 	}
 
 	static int getTwoBytes(byte[] input, int firstByte) {
 		return ((input[firstByte] & 0xFF) << 8) + (input[firstByte + 1] & 0xFF);
 	}
 
-	static int getTwoBytes(ByteBuffer input, int firstByte) {
-		return ((input.get(firstByte) & 0xFF) << 8) + (input.get(firstByte + 1) & 0xFF);
+	static int getTwoBytes(ByteBufferWrapper input, int firstByte) {
+		return ((input.getByte(firstByte) & 0xFF) << 8) + (input.getByte(firstByte + 1) & 0xFF);
 	}
 
 	static int getThreeBytes(byte[] input, int firstByte) {
 		return ((input[firstByte] & 0xFF) << 16) + ((input[firstByte + 1] & 0xFF) << 8) + (input[firstByte + 2] & 0xFF);
 	}
 
-	static int getThreeBytes(ByteBuffer input, int firstByte) {
-		return ((input.get(firstByte) & 0xFF) << 16) + ((input.get(firstByte + 1) & 0xFF) << 8)
-				+ (input.get(firstByte + 2) & 0xFF);
+	static int getThreeBytes(ByteBufferWrapper input, int firstByte) {
+		return ((input.getByte(firstByte) & 0xFF) << 16) + ((input.getByte(firstByte + 1) & 0xFF) << 8)
+				+ (input.getByte(firstByte + 2) & 0xFF);
 	}
 
 	static void setTwoBytes(byte[] output, int firstByte, int value) {
@@ -89,9 +89,9 @@ class ByteUtil {
 				+ ((input[firstByte + 2] & 0xFF) << 8) + (input[firstByte + 3] & 0xFF);
 	}
 
-	static long getFourBytes(ByteBuffer input, int firstByte) {
-		return ((long) (input.get(firstByte) & 0xFF) << 24) + ((input.get(firstByte + 1) & 0xFF) << 16)
-				+ ((input.get(firstByte + 2) & 0xFF) << 8) + (input.get(firstByte + 3) & 0xFF);
+	static long getFourBytes(ByteBufferWrapper input, int firstByte) {
+		return ((long) (input.getByte(firstByte) & 0xFF) << 24) + ((input.getByte(firstByte + 1) & 0xFF) << 16)
+				+ ((input.getByte(firstByte + 2) & 0xFF) << 8) + (input.getByte(firstByte + 3) & 0xFF);
 	}
 
 	static void setFourBytes(byte[] output, int firstByte, long value) {
