@@ -803,7 +803,7 @@ public class SecureNioChannel extends NioChannel {
 	}
 
 	@Override
-	public long read(ByteBufferWrapper[] dsts, int offset, int length) throws IOException {
+	public long read(BufWrapper[] dsts, int offset, int length) throws IOException {
 		if (!handshakeComplete) {
 			System.out.println(getIOChannel().socket().getPort() + " read dsts");
 		}
@@ -848,7 +848,7 @@ public class SecureNioChannel extends NioChannel {
 				if (!dsts[i].isWriteMode()) {
 					throw new RuntimeException();
 				}
-				buffers[i] = dsts[i].getByteBuffer();
+				buffers[i] = ((ByteBufferWrapper) dsts[i]).getByteBuffer();
 			}
 			// unwrap the data
 			unwrap = sslEngine.unwrap(netInBuffer, buffers, offset, length);
@@ -989,7 +989,7 @@ public class SecureNioChannel extends NioChannel {
 	}
 
 	@Override
-	public long write(ByteBufferWrapper[] srcs, int offset, int length) throws IOException {
+	public long write(BufWrapper[] srcs, int offset, int length) throws IOException {
 		if (!handshakeComplete) {
 			System.out.println(getIOChannel().socket().getPort() + " write srcs");
 		}
@@ -1013,7 +1013,7 @@ public class SecureNioChannel extends NioChannel {
 			if (!srcs[i].isReadMode()) {
 				throw new RuntimeException();
 			}
-			buffers[i] = srcs[i].getByteBuffer();
+			buffers[i] = ((ByteBufferWrapper) srcs[i]).getByteBuffer();
 		}
 		SSLEngineResult result = sslEngine.wrap(buffers, offset, length, netOutBuffer.getByteBuffer());
 		// The number of bytes written

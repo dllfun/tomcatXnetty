@@ -115,7 +115,7 @@ public class Http11Processor extends AbstractProcessor {
 
 		headParser = new Http11HeadParser(this, protocol.getMaxHttpHeaderSize(), protocol.getRejectIllegalHeader(),
 				httpParser);
-		System.out.println(this + "created");
+//		System.out.println(this + "created");
 	}
 
 	@Override
@@ -136,14 +136,14 @@ public class Http11Processor extends AbstractProcessor {
 	@Override
 	protected final void onChannelReady(Channel channel) {
 		SocketChannel socketChannel = (SocketChannel) channel;
-		System.out.println(this + " onChannelReady " + socketChannel.getRemotePort());
+//		System.out.println(this + " onChannelReady " + socketChannel.getRemotePort());
 		if (appReadBuffer != null) {
-			System.err.println("appReadBuffer not released in processor");
+			throw new RuntimeException();
 		}
 		socketChannel.initAppReadBuffer(getProtocol().getMaxHttpHeaderSize());
 		appReadBuffer = socketChannel.getAppReadBuffer();
 		if (appReadBuffer.released()) {
-			System.err.println("err occure");
+			throw new RuntimeException();
 		}
 		appReadBuffer.retain();
 		firstFill = true;
@@ -178,7 +178,7 @@ public class Http11Processor extends AbstractProcessor {
 			success = false;
 		}
 		if (!success && firstFill) {
-			System.out.println(((SocketChannel) getChannel()).getRemotePort() + " 未读取到数据");
+//			System.out.println(((SocketChannel) getChannel()).getRemotePort() + " 未读取到数据");
 		}
 		firstFill = false;
 		appReadBuffer.switchToReadMode();
@@ -193,9 +193,6 @@ public class Http11Processor extends AbstractProcessor {
 		}
 
 		if (checkHttp2Preface) {
-			if (Constants.debug) {
-				System.out.println(((SocketChannel) getChannel()).getRemotePort() + " checkHttp2Preface in io thread");
-			}
 			appReadBuffer.switchToReadMode();
 			if (appReadBuffer.hasNoRemaining()) {
 				if (!fillAppReadBuffer(false)) {
@@ -220,10 +217,6 @@ public class Http11Processor extends AbstractProcessor {
 			for (int i = 0; i < appReadBuffer.getRemaining() && i < CLIENT_PREFACE_START.length; i++) {
 				if (CLIENT_PREFACE_START[i] != appReadBuffer.getByte(i)) {
 					checkHttp2Preface = false;
-					if (Constants.debug) {
-						System.out.println(((SocketChannel) getChannel()).getRemotePort()
-								+ " checkHttp2Preface false in io thread");
-					}
 					isHttp2Preface = false;
 					break;
 				} else {
@@ -245,7 +238,7 @@ public class Http11Processor extends AbstractProcessor {
 		// setChannel(channel);
 
 		try {
-			System.out.println(((SocketChannel) getChannel()).getRemotePort() + " parse in io thread start");
+//			System.out.println(((SocketChannel) getChannel()).getRemotePort() + " parse in io thread start");
 			if (!headParser.parseRequestLine(false, protocol.getConnectionTimeout(), protocol.getKeepAliveTimeout())) {
 				if (headParser.getParsingRequestLinePhase() == -1) {
 					return true;
@@ -320,7 +313,7 @@ public class Http11Processor extends AbstractProcessor {
 			setErrorState(ErrorState.CLOSE_CLEAN, t);
 			return true;
 		} finally {
-			System.out.println(((SocketChannel) getChannel()).getRemotePort() + " parse in io thread end");
+//			System.out.println(((SocketChannel) getChannel()).getRemotePort() + " parse in io thread end");
 		}
 
 	}
@@ -999,7 +992,6 @@ public class Http11Processor extends AbstractProcessor {
 
 	@Override
 	protected void recycleInternal() {
-//		System.out.println(this + " recycleInternal");
 		Request request = createRequest();
 		Response response = createResponse();
 		request.setResponse(response);
@@ -1020,16 +1012,10 @@ public class Http11Processor extends AbstractProcessor {
 			}
 			if (!appReadBuffer.released()) {
 				appReadBuffer.release();
-				if (Constants.debug) {
-					System.out.println(((SocketChannel) getChannel()).getRemotePort() + " " + appReadBuffer
-							+ " released by processor!" + " info:" + appReadBuffer.printInfo());
-				}
 			}
 			appReadBuffer = null;
 		}
 		// sslSupport = null;
-//		System.out.println(
-//				((SocketChannel) getChannel()).getRemotePort() + toString() + " recycled~~~~~~~~~~~~~~~~~~~~~~~");
 	}
 
 	@Override

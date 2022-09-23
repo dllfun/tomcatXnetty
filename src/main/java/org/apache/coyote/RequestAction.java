@@ -228,7 +228,7 @@ public abstract class RequestAction implements InputReader {
 		if ((hasActiveFilters())) {
 			for (int i = 0; (available == 0) && (i < getActiveFiltersCount()); i++) {
 				if (getActiveFilter(i) == null) {
-					System.out.println();
+//					System.out.println();
 				}
 				available = getActiveFilter(i).available();
 			}

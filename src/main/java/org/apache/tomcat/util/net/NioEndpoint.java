@@ -1609,8 +1609,8 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		// }
 
 		@Override
-		protected <A> OperationState<A> newOperationState(boolean read, ByteBufferWrapper[] buffers, int offset,
-				int length, BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+		protected <A> OperationState<A> newOperationState(boolean read, BufWrapper[] buffers, int offset, int length,
+				BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 				CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 				VectoredIOCompletionHandler<A> completion) {
 			return new NioOperationState<>(read, buffers, offset, length, block, timeout, unit, attachment, check,
@@ -1620,8 +1620,8 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		private class NioOperationState<A> extends OperationState<A> {
 			private volatile boolean inline = true;
 
-			private NioOperationState(boolean read, ByteBufferWrapper[] buffers, int offset, int length,
-					BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+			private NioOperationState(boolean read, BufWrapper[] buffers, int offset, int length, BlockingMode block,
+					long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 					CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 					VectoredIOCompletionHandler<A> completion) {
 				super(read, buffers, offset, length, block, timeout, unit, attachment, check, handler, semaphore,

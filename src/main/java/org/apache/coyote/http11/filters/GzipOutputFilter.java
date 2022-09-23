@@ -29,6 +29,8 @@ import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
+import org.apache.tomcat.util.net.BufWrapper;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
 /**
  * Gzip output filter.
@@ -73,16 +75,16 @@ public class GzipOutputFilter extends ProcessorComponent implements OutputFilter
 	}
 
 	@Override
-	public int doWrite(ByteBuffer chunk) throws IOException {
+	public int doWrite(BufWrapper chunk) throws IOException {
 		if (compressionStream == null) {
 			compressionStream = new GZIPOutputStream(fakeOutputStream, true);
 		}
-		int len = chunk.remaining();
+		int len = chunk.getRemaining();
 		if (chunk.hasArray()) {
-			compressionStream.write(chunk.array(), chunk.arrayOffset() + chunk.position(), len);
+			compressionStream.write(chunk.getArray(), chunk.getArrayOffset() + chunk.getPosition(), len);
 		} else {
 			byte[] bytes = new byte[len];
-			chunk.put(bytes);
+			chunk.putBytes(bytes);
 			compressionStream.write(bytes, 0, len);
 		}
 		return len;
@@ -157,19 +159,21 @@ public class GzipOutputFilter extends ProcessorComponent implements OutputFilter
 	// ------------------------------------------- FakeOutputStream Inner Class
 
 	protected class FakeOutputStream extends OutputStream {
-		protected final ByteBuffer outputChunk = ByteBuffer.allocate(1);
+		protected final BufWrapper outputChunk = ByteBufferWrapper.wrapper(ByteBuffer.allocate(1), false);
 
 		@Override
 		public void write(int b) throws IOException {
 			// Shouldn't get used for good performance, but is needed for
 			// compatibility with Sun JDK 1.4.0
-			outputChunk.put(0, (byte) (b & 0xff));
+			outputChunk.switchToWriteMode();
+			outputChunk.setByte(0, (byte) (b & 0xff));
+			outputChunk.switchToReadMode();
 			next.doWrite(outputChunk);
 		}
 
 		@Override
 		public void write(byte[] b, int off, int len) throws IOException {
-			next.doWrite(ByteBuffer.wrap(b, off, len));
+			next.doWrite(ByteBufferWrapper.wrapper(ByteBuffer.wrap(b, off, len), true));
 		}
 
 		@Override

@@ -62,7 +62,7 @@ public class NioChannel extends SocketBufferHandler {// implements ByteChannel, 
 		this.socketChannel = channel;
 		this.socketWrapper = socketWrapper;
 		super.reset();
-		System.out.println(socketChannel.socket().getPort() + " created");
+//		System.out.println(socketChannel.socket().getPort() + " created");
 	}
 
 	public final SocketChannel getIOChannel() {
@@ -129,13 +129,13 @@ public class NioChannel extends SocketBufferHandler {// implements ByteChannel, 
 	}
 
 	// @Override
-	public long read(ByteBufferWrapper[] dsts, int offset, int length) throws IOException {
+	public long read(BufWrapper[] dsts, int offset, int length) throws IOException {
 		ByteBuffer[] buffers = new ByteBuffer[dsts.length];
 		for (int i = 0; i < dsts.length; i++) {
 			if (!dsts[i].isWriteMode()) {
 				throw new RuntimeException();
 			}
-			buffers[i] = dsts[i].getByteBuffer();
+			buffers[i] = ((ByteBufferWrapper) dsts[i]).getByteBuffer();
 		}
 		return socketChannel.read(buffers, offset, length);
 	}
@@ -162,14 +162,14 @@ public class NioChannel extends SocketBufferHandler {// implements ByteChannel, 
 	}
 
 	// @Override
-	public long write(ByteBufferWrapper[] srcs, int offset, int length) throws IOException {
+	public long write(BufWrapper[] srcs, int offset, int length) throws IOException {
 		checkInterruptStatus();
 		ByteBuffer[] buffers = new ByteBuffer[srcs.length];
 		for (int i = 0; i < srcs.length; i++) {
 			if (!srcs[i].isReadMode()) {
 				throw new RuntimeException();
 			}
-			buffers[i] = srcs[i].getByteBuffer();
+			buffers[i] = ((ByteBufferWrapper) srcs[i]).getByteBuffer();
 		}
 		return socketChannel.write(buffers, offset, length);
 	}
@@ -233,7 +233,7 @@ public class NioChannel extends SocketBufferHandler {// implements ByteChannel, 
 	 */
 	// @Override
 	public void close() throws IOException {
-		System.out.println(socketChannel.socket().getPort() + " closed");
+//		System.out.println(socketChannel.socket().getPort() + " closed");
 		socketChannel.close();
 	}
 
@@ -305,7 +305,7 @@ public class NioChannel extends SocketBufferHandler {// implements ByteChannel, 
 		}
 
 		@Override
-		public long read(ByteBufferWrapper[] dsts, int offset, int length) throws IOException {
+		public long read(BufWrapper[] dsts, int offset, int length) throws IOException {
 			return -1L;
 		}
 
@@ -316,7 +316,7 @@ public class NioChannel extends SocketBufferHandler {// implements ByteChannel, 
 		}
 
 		@Override
-		public long write(ByteBufferWrapper[] srcs, int offset, int length) throws IOException {
+		public long write(BufWrapper[] srcs, int offset, int length) throws IOException {
 			return -1L;
 		}
 

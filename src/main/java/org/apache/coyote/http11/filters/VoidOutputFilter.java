@@ -25,6 +25,7 @@ import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
+import org.apache.tomcat.util.net.BufWrapper;
 
 /**
  * Void output filter, which silently swallows bytes written. Used with a 204
@@ -43,8 +44,8 @@ public class VoidOutputFilter extends ProcessorComponent implements OutputFilter
 	// --------------------------------------------------- OutputBuffer Methods
 
 	@Override
-	public int doWrite(ByteBuffer chunk) throws IOException {
-		return chunk.remaining();
+	public int doWrite(BufWrapper chunk) throws IOException {
+		return chunk.getRemaining();
 	}
 
 	@Override

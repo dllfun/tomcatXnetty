@@ -177,6 +177,7 @@ public class CoyoteAdapter implements Adapter {
 							readListener.onAllDataRead();
 						}
 					} catch (Throwable t) {
+						t.printStackTrace();
 						ExceptionUtils.handleThrowable(t);
 						writeListener.onError(t);
 						success = false;

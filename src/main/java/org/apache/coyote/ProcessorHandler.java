@@ -60,7 +60,7 @@ public class ProcessorHandler implements Handler {
 		}
 
 		if (channel instanceof SocketChannel) {
-			System.out.println(((SocketChannel) channel).getRemotePort() + " process " + event);
+//			System.out.println(((SocketChannel) channel).getRemotePort() + " process " + event);
 		}
 
 		// S socket = channel.getSocket();
@@ -113,7 +113,7 @@ public class ProcessorHandler implements Handler {
 					// OpenSSL typically returns null whereas JSSE typically
 					// returns "" when no protocol is negotiated
 					if (negotiatedProtocol != null && negotiatedProtocol.length() > 0) {
-						System.out.println(socketChannel.getRemotePort() + " negotiatedProtocol " + negotiatedProtocol);
+//						System.out.println(socketChannel.getRemotePort() + " negotiatedProtocol " + negotiatedProtocol);
 						UpgradeProtocol upgradeProtocol = protocol.getNegotiatedProtocol(negotiatedProtocol);
 						if (upgradeProtocol != null) {
 							processor = upgradeProtocol.getProcessor(socketChannel, protocol.getAdapter());
@@ -199,7 +199,7 @@ public class ProcessorHandler implements Handler {
 							return SocketState.CLOSED;
 						}
 					} else {
-						System.out.println(socketChannel.getRemotePort() + " upgrade");
+//						System.out.println(socketChannel.getRemotePort() + " upgrade");
 						HttpUpgradeHandler httpUpgradeHandler = upgradeToken.getHttpUpgradeHandler();
 						socketChannel.clearCurrentProcessor();
 						// Release the Http11 processor to be re-used

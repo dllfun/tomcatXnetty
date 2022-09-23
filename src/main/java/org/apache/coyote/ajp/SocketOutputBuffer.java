@@ -9,6 +9,7 @@ import org.apache.coyote.ExchangeData;
 import org.apache.coyote.ResponseAction;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.MimeHeaders;
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.SocketChannel;
 
 /**
@@ -124,7 +125,7 @@ public class SocketOutputBuffer extends ResponseAction {
 	}
 
 	@Override
-	public int doWriteToChannel(ByteBuffer chunk) throws IOException {
+	public int doWriteToChannel(BufWrapper chunk) throws IOException {
 
 //		if (!exchangeData.isCommitted()) {
 		// Validate and write response headers
@@ -138,9 +139,9 @@ public class SocketOutputBuffer extends ResponseAction {
 		int len = 0;
 		if (!swallowResponse) {
 			try {
-				len = chunk.remaining();
+				len = chunk.getRemaining();
 				writeData(chunk);
-				len -= chunk.remaining();
+				len -= chunk.getRemaining();
 			} catch (IOException ioe) {
 				processor.setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
 				// Re-throw
@@ -150,11 +151,11 @@ public class SocketOutputBuffer extends ResponseAction {
 		return len;
 	}
 
-	private void writeData(ByteBuffer chunk) throws IOException {
+	private void writeData(BufWrapper chunk) throws IOException {
 		boolean blocking = processor.isBlockingWrite();// (exchangeData.getAsyncStateMachine().getWriteListener() ==
 														// null);
 
-		int len = chunk.remaining();
+		int len = chunk.getRemaining();
 		int off = 0;
 
 		// Write this chunk
@@ -163,12 +164,10 @@ public class SocketOutputBuffer extends ResponseAction {
 
 			responseMessage.reset();
 			responseMessage.appendByte(Constants.JK_AJP13_SEND_BODY_CHUNK);
-			chunk.limit(chunk.position() + thisTime);
+			chunk.setLimit(chunk.getPosition() + thisTime);
 			responseMessage.appendBytes(chunk);
 			responseMessage.end();
-			if (((SocketChannel) processor.getChannel()) == null) {
-				System.out.println();
-			}
+
 			((SocketChannel) processor.getChannel()).write(blocking, responseMessage.getBuffer(), 0,
 					responseMessage.getLen());
 			((SocketChannel) processor.getChannel()).flush(blocking);

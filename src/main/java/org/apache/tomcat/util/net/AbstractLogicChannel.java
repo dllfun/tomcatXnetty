@@ -28,6 +28,6 @@ public interface AbstractLogicChannel extends Channel {
 
 //	public void setOutputClosed(boolean outputClosed);
 
-	public int doWriteBody(ByteBuffer chunk, boolean finished) throws IOException;
+	public int doWriteBody(BufWrapper chunk, boolean finished) throws IOException;
 
 }

@@ -34,6 +34,8 @@ import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
 import org.apache.tomcat.util.buf.HexUtils;
 import org.apache.tomcat.util.http.fileupload.ByteArrayOutputStream;
+import org.apache.tomcat.util.net.BufWrapper;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
 /**
  * Chunked output filter.
@@ -105,9 +107,9 @@ public class ChunkedOutputFilter extends ProcessorComponent implements OutputFil
 	}
 
 	@Override
-	public int doWrite(ByteBuffer chunk) throws IOException {
+	public int doWrite(BufWrapper chunk) throws IOException {
 
-		int result = chunk.remaining();
+		int result = chunk.getRemaining();
 
 		if (result <= 0) {
 			return 0;
@@ -116,12 +118,12 @@ public class ChunkedOutputFilter extends ProcessorComponent implements OutputFil
 		int pos = calculateChunkHeader(result);
 
 		chunkHeader.position(pos).limit(10);
-		next.doWrite(chunkHeader);
+		next.doWrite(ByteBufferWrapper.wrapper(chunkHeader, true));
 
 		next.doWrite(chunk);
 
 		chunkHeader.position(8).limit(10);
-		next.doWrite(chunkHeader);
+		next.doWrite(ByteBufferWrapper.wrapper(chunkHeader, true));
 
 		return result;
 	}
@@ -177,10 +179,10 @@ public class ChunkedOutputFilter extends ProcessorComponent implements OutputFil
 
 		if (trailerFields == null) {
 			// Write end chunk
-			next.doWrite(endChunk);
+			next.doWrite(ByteBufferWrapper.wrapper(endChunk, true));
 			endChunk.position(0).limit(endChunk.capacity());
 		} else {
-			next.doWrite(lastChunk);
+			next.doWrite(ByteBufferWrapper.wrapper(lastChunk, true));
 			lastChunk.position(0).limit(lastChunk.capacity());
 
 			ByteArrayOutputStream baos = new ByteArrayOutputStream(1024);
@@ -197,9 +199,9 @@ public class ChunkedOutputFilter extends ProcessorComponent implements OutputFil
 				osw.write("\r\n");
 			}
 			osw.close();
-			next.doWrite(ByteBuffer.wrap(baos.toByteArray()));
+			next.doWrite(ByteBufferWrapper.wrapper(ByteBuffer.wrap(baos.toByteArray()), true));
 
-			next.doWrite(crlfChunk);
+			next.doWrite(ByteBufferWrapper.wrapper(crlfChunk, true));
 			crlfChunk.position(0).limit(crlfChunk.capacity());
 		}
 		next.end();

@@ -219,6 +219,11 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	public final void setChannel(Channel channel) {
 		this.channel = channel;
 		onChannelReady(channel);
+		if (components != null && components.size() > 0) {
+			for (ProcessorComponent component : components) {
+				component.onChannelReady(channel);
+			}
+		}
 		recycled = false;
 	}
 
@@ -339,6 +344,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 				asyncStateMachine.asyncOperation();
 				try {
 					if (responseAction.flushBufferedWrite()) {
+						asyncStateMachine.asyncPostProcess();
 						return SocketState.SUSPENDED;
 					}
 				} catch (IOException ioe) {

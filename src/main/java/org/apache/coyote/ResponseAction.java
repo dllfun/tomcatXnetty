@@ -8,6 +8,7 @@ import java.util.NoSuchElementException;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
+import org.apache.tomcat.util.net.BufWrapper;
 
 public abstract class ResponseAction implements HttpOutputBuffer {
 
@@ -41,7 +42,7 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 		}
 
 		@Override
-		public int doWrite(ByteBuffer chunk) throws IOException {
+		public int doWrite(BufWrapper chunk) throws IOException {
 			return doWriteToChannel(chunk);
 		}
 
@@ -148,7 +149,7 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 	}
 
 	@Override
-	public final int doWrite(ByteBuffer chunk) throws IOException {
+	public final int doWrite(BufWrapper chunk) throws IOException {
 
 		// if (!responseData.isCommitted()) {
 		// Send the connector a request for commit. The connector should
@@ -164,7 +165,7 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 		}
 	}
 
-	protected abstract int doWriteToChannel(ByteBuffer chunk) throws IOException;
+	protected abstract int doWriteToChannel(BufWrapper chunk) throws IOException;
 
 	@Override
 	public final long getBytesWritten() {

@@ -131,9 +131,6 @@ public class Http11InputBuffer extends RequestAction {
 				return null;
 			appReadBuffer.switchToReadMode();
 		}
-		if (Constants.debug) {
-			System.out.println(((SocketChannel) processor.getChannel()).getRemotePort() + " 读取了请求体");
-		}
 
 		int length = appReadBuffer.getRemaining();
 		BufWrapper bufWrapper = appReadBuffer.duplicate();//
@@ -457,7 +454,6 @@ public class Http11InputBuffer extends RequestAction {
 			throw new RuntimeException();
 		}
 		// exchangeData.recycle();
-//		System.out.println(this + " nextRequest");
 		appReadBuffer.switchToWriteMode();
 		appReadBuffer.switchToReadMode();
 		resetFilters();
@@ -471,14 +467,9 @@ public class Http11InputBuffer extends RequestAction {
 		if (recycled) {
 			throw new RuntimeException();
 		}
-//		System.out.println(this + " recycle");
 		if (appReadBuffer != null) {
 			if (!appReadBuffer.released()) {
 				appReadBuffer.release();
-				if (Constants.debug) {
-					System.out.println(((SocketChannel) processor.getChannel()).getRemotePort() + " " + appReadBuffer
-							+ " released by inputBuffer!" + " info:" + appReadBuffer.printInfo());
-				}
 			}
 			appReadBuffer = null;
 		}

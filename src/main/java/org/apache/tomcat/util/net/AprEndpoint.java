@@ -2507,8 +2507,8 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 		}
 
 		@Override
-		protected <A> OperationState<A> newOperationState(boolean read, ByteBufferWrapper[] buffers, int offset,
-				int length, BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+		protected <A> OperationState<A> newOperationState(boolean read, BufWrapper[] buffers, int offset, int length,
+				BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 				CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 				VectoredIOCompletionHandler<A> completion) {
 			return new AprOperationState<>(read, buffers, offset, length, block, timeout, unit, attachment, check,
@@ -2519,8 +2519,8 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 			private volatile boolean inline = true;
 			private volatile long flushBytes = 0;
 
-			private AprOperationState(boolean read, ByteBufferWrapper[] buffers, int offset, int length,
-					BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+			private AprOperationState(boolean read, BufWrapper[] buffers, int offset, int length, BlockingMode block,
+					long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 					CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 					VectoredIOCompletionHandler<A> completion) {
 				super(read, buffers, offset, length, block, timeout, unit, attachment, check, handler, semaphore,
@@ -2550,7 +2550,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 							}
 							// Find the buffer on which the operation will be performed (no vectoring with
 							// APR)
-							ByteBufferWrapper buffer = null;
+							BufWrapper buffer = null;
 							for (int i = 0; i < length; i++) {
 								if (buffers[i + offset].hasRemaining()) {
 									buffer = buffers[i + offset];

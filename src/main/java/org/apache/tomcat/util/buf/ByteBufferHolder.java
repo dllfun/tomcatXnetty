@@ -19,6 +19,7 @@ package org.apache.tomcat.util.buf;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
 /**
@@ -27,7 +28,7 @@ import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
  */
 public class ByteBufferHolder {
 
-	private final ByteBufferWrapper buf;
+	private final BufWrapper buf;
 	private final AtomicBoolean flipped;
 
 	public ByteBufferHolder(ByteBufferWrapper buf, boolean flipped) {
@@ -35,7 +36,7 @@ public class ByteBufferHolder {
 		this.flipped = new AtomicBoolean(flipped);
 	}
 
-	public ByteBufferWrapper getBuf() {
+	public BufWrapper getBuf() {
 		return buf;
 	}
 

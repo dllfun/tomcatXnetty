@@ -16,7 +16,7 @@
  */
 package org.apache.coyote.http2;
 
-import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
+import org.apache.tomcat.util.net.BufWrapper;
 
 /**
  * Utility class for extracting values from byte arrays.
@@ -36,7 +36,7 @@ class ByteUtil {
 				+ ((input[firstByte + 2] & 0xFF) << 8) + (input[firstByte + 3] & 0xFF);
 	}
 
-	static int get31Bits(ByteBufferWrapper input, int firstByte) {
+	static int get31Bits(BufWrapper input, int firstByte) {
 		return ((input.getByte(firstByte) & 0x7F) << 24) + ((input.getByte(firstByte + 1) & 0xFF) << 16)
 				+ ((input.getByte(firstByte + 2) & 0xFF) << 8) + (input.getByte(firstByte + 3) & 0xFF);
 	}
@@ -52,7 +52,7 @@ class ByteUtil {
 		return (input[pos] & 0xFF);
 	}
 
-	static int getOneByte(ByteBufferWrapper input, int pos) {
+	static int getOneByte(BufWrapper input, int pos) {
 		return (input.getByte(pos) & 0xFF);
 	}
 
@@ -60,7 +60,7 @@ class ByteUtil {
 		return ((input[firstByte] & 0xFF) << 8) + (input[firstByte + 1] & 0xFF);
 	}
 
-	static int getTwoBytes(ByteBufferWrapper input, int firstByte) {
+	static int getTwoBytes(BufWrapper input, int firstByte) {
 		return ((input.getByte(firstByte) & 0xFF) << 8) + (input.getByte(firstByte + 1) & 0xFF);
 	}
 
@@ -68,7 +68,7 @@ class ByteUtil {
 		return ((input[firstByte] & 0xFF) << 16) + ((input[firstByte + 1] & 0xFF) << 8) + (input[firstByte + 2] & 0xFF);
 	}
 
-	static int getThreeBytes(ByteBufferWrapper input, int firstByte) {
+	static int getThreeBytes(BufWrapper input, int firstByte) {
 		return ((input.getByte(firstByte) & 0xFF) << 16) + ((input.getByte(firstByte + 1) & 0xFF) << 8)
 				+ (input.getByte(firstByte + 2) & 0xFF);
 	}
@@ -89,7 +89,7 @@ class ByteUtil {
 				+ ((input[firstByte + 2] & 0xFF) << 8) + (input[firstByte + 3] & 0xFF);
 	}
 
-	static long getFourBytes(ByteBufferWrapper input, int firstByte) {
+	static long getFourBytes(BufWrapper input, int firstByte) {
 		return ((long) (input.getByte(firstByte) & 0xFF) << 24) + ((input.getByte(firstByte + 1) & 0xFF) << 16)
 				+ ((input.getByte(firstByte + 2) & 0xFF) << 8) + (input.getByte(firstByte + 3) & 0xFF);
 	}

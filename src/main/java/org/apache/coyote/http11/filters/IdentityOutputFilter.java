@@ -25,6 +25,7 @@ import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
 import org.apache.coyote.http11.OutputFilter;
+import org.apache.tomcat.util.net.BufWrapper;
 
 /**
  * Identity output filter.
@@ -67,18 +68,18 @@ public class IdentityOutputFilter extends ProcessorComponent implements OutputFi
 	}
 
 	@Override
-	public int doWrite(ByteBuffer chunk) throws IOException {
+	public int doWrite(BufWrapper chunk) throws IOException {
 
 		int result = -1;
 
 		if (contentLength >= 0) {
 			if (remaining > 0) {
-				result = chunk.remaining();
+				result = chunk.getRemaining();
 				if (result > remaining) {
 					// The chunk is longer than the number of bytes remaining
 					// in the body; changing the chunk length to the number
 					// of bytes remaining
-					chunk.limit(chunk.position() + (int) remaining);
+					chunk.setLimit(chunk.getPosition() + (int) remaining);
 					result = (int) remaining;
 					remaining = 0;
 				} else {
@@ -88,15 +89,15 @@ public class IdentityOutputFilter extends ProcessorComponent implements OutputFi
 			} else {
 				// No more bytes left to be written : return -1 and clear the
 				// buffer
-				chunk.position(0);
-				chunk.limit(0);
+				chunk.setPosition(0);
+				chunk.setLimit(0);
 				result = -1;
 			}
 		} else {
 			// If no content length was set, just write the bytes
-			result = chunk.remaining();
+			result = chunk.getRemaining();
 			next.doWrite(chunk);
-			result -= chunk.remaining();
+			result -= chunk.getRemaining();
 		}
 
 		return result;

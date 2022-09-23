@@ -35,6 +35,7 @@ import org.apache.catalina.Globals;
 import org.apache.coyote.CloseNowException;
 import org.apache.coyote.Response;
 import org.apache.tomcat.util.buf.C2BConverter;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -318,7 +319,7 @@ public class OutputBuffer extends Writer {
 		if (buf.remaining() > 0) {
 			// real write to the adapter
 			try {
-				coyoteResponse.doWrite(buf);
+				coyoteResponse.doWrite(ByteBufferWrapper.wrapper(buf, true));
 			} catch (CloseNowException e) {
 				// Catch this sub-class as it requires specific handling.
 				// Examples where this exception is thrown:

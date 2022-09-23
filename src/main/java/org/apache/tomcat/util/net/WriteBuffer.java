@@ -53,7 +53,7 @@ public class WriteBuffer {
 		holder.getBuf().putBytes(buf, offset, length);
 	}
 
-	public void add(ByteBufferWrapper from) {
+	public void add(BufWrapper from) {
 		ByteBufferHolder holder = getByteBufferHolder(from.getRemaining());
 //		holder.getBuf().getByteBuffer().put(from.getByteBuffer());// TODO check
 		from.transferTo(holder.getBuf());
@@ -82,9 +82,9 @@ public class WriteBuffer {
 	 * @return an array of ByteBuffers from the current WriteBuffer prefixed by the
 	 *         provided ByteBuffers
 	 */
-	ByteBufferWrapper[] toArray(ByteBufferWrapper... prefixes) {
-		List<ByteBufferWrapper> result = new ArrayList<>();
-		for (ByteBufferWrapper prefix : prefixes) {
+	BufWrapper[] toArray(BufWrapper... prefixes) {
+		List<BufWrapper> result = new ArrayList<>();
+		for (BufWrapper prefix : prefixes) {
 			if (prefix.hasRemaining()) {
 				result.add(prefix);
 			}
@@ -94,19 +94,19 @@ public class WriteBuffer {
 			result.add(buffer.getBuf());
 		}
 		buffers.clear();
-		return result.toArray(new ByteBufferWrapper[0]);
+		return result.toArray(new BufWrapper[0]);
 	}
 
-	boolean write(SocketWrapperBase<?> socketWrapper, boolean blocking) throws IOException {
+	boolean write(AbstractSocketChannel<?> socketChannel, boolean blocking) throws IOException {
 		Iterator<ByteBufferHolder> bufIter = buffers.iterator();
 		boolean dataLeft = false;
 		while (!dataLeft && bufIter.hasNext()) {
 			ByteBufferHolder buffer = bufIter.next();
 			buffer.flip();
 			if (blocking) {
-				socketWrapper.writeBlocking(buffer.getBuf());
+				socketChannel.writeBlocking(buffer.getBuf());
 			} else {
-				socketWrapper.writeNonBlockingInternal(buffer.getBuf());
+				socketChannel.writeNonBlockingInternal(buffer.getBuf());
 			}
 			if (buffer.getBuf().getRemaining() == 0) {
 				bufIter.remove();
@@ -136,6 +136,6 @@ public class WriteBuffer {
 	 * written back out from the buffer.
 	 */
 	public interface Sink {
-		boolean writeFromBuffer(ByteBufferWrapper buffer, boolean block) throws IOException;
+		boolean writeFromBuffer(BufWrapper buffer, boolean block) throws IOException;
 	}
 }

@@ -241,8 +241,8 @@ public class StreamChannel extends Stream {
 			readLock.lock();
 			boolean finished = deque.size() == 0 && isInputFinished();
 			if (finished) {
-				System.out.println(
-						"conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " bodyFullyReaded");
+//				System.out.println(
+//						"conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " bodyFullyReaded");
 			}
 			return finished;
 		} finally {
@@ -370,8 +370,8 @@ public class StreamChannel extends Stream {
 	protected final void receiveResetInternal(long errorCode) {
 		String uri = (getCurrentProcessor() == null ? ""
 				: " uri:" + ((StreamProcessor) getCurrentProcessor()).getExchangeData().getRequestURI().toString());
-		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")"
-				+ " receiveReset errorCode: " + errorCode + uri);
+//		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")"
+//				+ " receiveReset errorCode: " + errorCode + uri);
 //		if (bufferIndex != -1) {
 		try {// synchronized (buffers[bufferIndex.intValue()])
 			readLock.lock();
@@ -482,7 +482,7 @@ public class StreamChannel extends Stream {
 		// - if inside the sync it can trigger a deadlock
 		// https://markmail.org/message/vbglzkvj6wxlhh3p
 		if (unreadByteCount > 0) {
-			System.out.println("stream" + getIdentifier() + " swallowUnread: " + unreadByteCount);
+//			System.out.println("stream" + getIdentifier() + " swallowUnread: " + unreadByteCount);
 			handler.getWriter().writeWindowUpdate(this, unreadByteCount, false);
 		}
 	}
@@ -541,15 +541,15 @@ public class StreamChannel extends Stream {
 	 */
 
 	@Override
-	public final int doWriteBody(ByteBuffer chunk, boolean finished) throws IOException {
+	public final int doWriteBody(BufWrapper chunk, boolean finished) throws IOException {
 		try {
 			getWriteLock().lock();
 			if (isClosed() || isOutputClosed()) {
 				throw new IllegalStateException(sm.getString("stream.closed", getConnectionId(), getIdentifier()));
 			}
 			// chunk is always fully written
-			int result = chunk.remaining();
-			System.out.println("stream(" + getIdentifier() + ") write: " + chunk.remaining());
+			int result = chunk.getRemaining();
+//			System.out.println("stream(" + getIdentifier() + ") write: " + chunk.getRemaining());
 			getHandler().getWriter().writeBody(this, chunk, result, finished);
 			return result;
 		} finally {

@@ -60,7 +60,7 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 		setWindowSize(handler.getRemoteSettings().getInitialWindowSize());
 		state = new StreamStateMachine(this);
 
-		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " created");
+//		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")" + " created");
 	}
 
 	@Override
@@ -148,7 +148,7 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 		// this stream will be waiting. Notify that thread it can continue. Use
 		// notify all even though only one thread is waiting to be on the safe
 		// side.
-		System.out.println("stream(" + getIdentifier() + ") incrementWindowSize:" + windowSizeIncrement);
+//		System.out.println("stream(" + getIdentifier() + ") incrementWindowSize:" + windowSizeIncrement);
 		boolean notify = getWindowSize() < 1;
 		super.incrementWindowSize(windowSizeIncrement);
 		if (notify && getWindowSize() > 0) {
@@ -351,7 +351,7 @@ public abstract class Stream extends AbstractStream implements AbstractLogicChan
 	}
 
 	final void close(Http2Exception http2Exception) {
-		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ") closed");
+//		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ") closed");
 		if (http2Exception instanceof StreamException) {
 			try {
 				StreamException se = (StreamException) http2Exception;

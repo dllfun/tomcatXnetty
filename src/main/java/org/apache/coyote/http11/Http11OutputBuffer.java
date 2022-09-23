@@ -337,13 +337,13 @@ public class Http11OutputBuffer extends ResponseAction {
 		// Build the response header
 		try {
 			this.writeHeaderStatus();
-			System.out.println("==========================print header start==========================");
+//			System.out.println("==========================print header start==========================");
 			int size = headers.size();
 			for (int i = 0; i < size; i++) {
-				System.out.println(" " + headers.getName(i).toString() + " : " + headers.getValue(i).toString());
+//				System.out.println(" " + headers.getName(i).toString() + " : " + headers.getValue(i).toString());
 				this.writeHeaderBody(headers.getName(i), headers.getValue(i));
 			}
-			System.out.println("==========================print header end============================");
+//			System.out.println("==========================print header end============================");
 			this.writeHeaderTail();
 		} catch (Throwable t) {
 			ExceptionUtils.handleThrowable(t);
@@ -670,19 +670,16 @@ public class Http11OutputBuffer extends ResponseAction {
 	 * Write chunk.
 	 */
 	@Override
-	public int doWriteToChannel(ByteBuffer chunk) throws IOException {
+	public int doWriteToChannel(BufWrapper chunk) throws IOException {
 		try {
-			int len = chunk.remaining();
+			int len = chunk.getRemaining();
 			SocketChannel channel = ((SocketChannel) processor.getChannel());
 			if (channel != null) {
-				if (Constants.debug) {
-					System.out.println(((SocketChannel) processor.getChannel()).getRemotePort() + " 写出了响应体");
-				}
-				channel.write(processor.isBlockingWrite(), ByteBufferWrapper.wrapper(chunk, true));
+				channel.write(processor.isBlockingWrite(), chunk);
 			} else {
 				throw new CloseNowException(sm.getString("iob.failedwrite"));
 			}
-			len -= chunk.remaining();
+			len -= chunk.getRemaining();
 			byteCount += len;
 			return len;
 		} catch (IOException ioe) {
@@ -709,9 +706,6 @@ public class Http11OutputBuffer extends ResponseAction {
 
 	@Override
 	public void endToChannel() throws IOException {
-		if (Constants.debug) {
-			System.out.println(((SocketChannel) processor.getChannel()).getRemotePort() + " 写出响应完成");
-		}
 		((SocketChannel) processor.getChannel()).flush(true);
 	}
 
@@ -744,9 +738,6 @@ public class Http11OutputBuffer extends ResponseAction {
 		if (!headerBuffer.reuseable()) {
 			if (!headerBuffer.released()) {
 				headerBuffer.release();
-				if (Constants.debug) {
-					System.err.println(headerBuffer + " 已回收 on recycle info: " + headerBuffer.printInfo());
-				}
 			}
 			headerBuffer = null;
 		}

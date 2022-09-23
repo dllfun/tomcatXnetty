@@ -32,6 +32,8 @@ public interface BufWrapper {
 
 	public byte getByte(int index);
 
+	public BufWrapper slice(int limit);
+
 	public int getPosition();
 
 	public void setPosition(int position);
@@ -39,6 +41,8 @@ public interface BufWrapper {
 	public boolean hasArray();
 
 	public byte[] getArray();
+
+	public int getArrayOffset();
 
 	public boolean isDirect();
 
@@ -61,6 +65,8 @@ public interface BufWrapper {
 	public void putBytes(byte[] b);
 
 	public void putBytes(byte[] b, int off, int len);
+
+	public int transferTo(BufWrapper to);
 
 	public void clearWrite();
 

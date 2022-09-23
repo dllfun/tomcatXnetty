@@ -171,14 +171,14 @@ public class Nio2Channel extends SocketBufferHandler {// implements Asynchronous
 		read(dsts, offset, length, 0L, TimeUnit.MILLISECONDS, attachment, handler);
 	}
 
-	protected <A> void read(ByteBufferWrapper[] dsts, int offset, int length, long timeout, TimeUnit unit, A attachment,
+	protected <A> void read(BufWrapper[] dsts, int offset, int length, long timeout, TimeUnit unit, A attachment,
 			CompletionHandler<Long, ? super A> handler) {
 		ByteBuffer[] buffers = new ByteBuffer[dsts.length];
 		for (int i = 0; i < dsts.length; i++) {
 			if (!dsts[i].isWriteMode()) {
 				throw new RuntimeException();
 			}
-			buffers[i] = dsts[i].getByteBuffer();
+			buffers[i] = ((ByteBufferWrapper) dsts[i]).getByteBuffer();
 		}
 		socketChannel.read(buffers, offset, length, timeout, unit, attachment, handler);
 	}
@@ -196,22 +196,22 @@ public class Nio2Channel extends SocketBufferHandler {// implements Asynchronous
 		write(src, 0L, TimeUnit.MILLISECONDS, attachment, handler);
 	}
 
-	public <A> void write(ByteBufferWrapper src, long timeout, TimeUnit unit, A attachment,
+	public <A> void write(BufWrapper src, long timeout, TimeUnit unit, A attachment,
 			CompletionHandler<Integer, ? super A> handler) {
 		if (!src.isReadMode()) {
 			throw new RuntimeException();
 		}
-		socketChannel.write(src.getByteBuffer(), timeout, unit, attachment, handler);
+		socketChannel.write(((ByteBufferWrapper) src).getByteBuffer(), timeout, unit, attachment, handler);
 	}
 
-	public <A> void write(ByteBufferWrapper[] srcs, int offset, int length, long timeout, TimeUnit unit, A attachment,
+	public <A> void write(BufWrapper[] srcs, int offset, int length, long timeout, TimeUnit unit, A attachment,
 			CompletionHandler<Long, ? super A> handler) {
 		ByteBuffer[] buffers = new ByteBuffer[srcs.length];
 		for (int i = 0; i < srcs.length; i++) {
 			if (!srcs[i].isReadMode()) {
 				throw new RuntimeException();
 			}
-			buffers[i] = srcs[i].getByteBuffer();
+			buffers[i] = ((ByteBufferWrapper) srcs[i]).getByteBuffer();
 		}
 		socketChannel.write(buffers, offset, length, timeout, unit, attachment, handler);
 	}
@@ -325,8 +325,8 @@ public class Nio2Channel extends SocketBufferHandler {// implements Asynchronous
 		}
 
 		@Override
-		public <A> void read(ByteBufferWrapper[] dsts, int offset, int length, long timeout, TimeUnit unit,
-				A attachment, CompletionHandler<Long, ? super A> handler) {
+		public <A> void read(BufWrapper[] dsts, int offset, int length, long timeout, TimeUnit unit, A attachment,
+				CompletionHandler<Long, ? super A> handler) {
 			handler.failed(new ClosedChannelException(), attachment);
 		}
 
@@ -336,14 +336,14 @@ public class Nio2Channel extends SocketBufferHandler {// implements Asynchronous
 		}
 
 		@Override
-		public <A> void write(ByteBufferWrapper src, long timeout, TimeUnit unit, A attachment,
+		public <A> void write(BufWrapper src, long timeout, TimeUnit unit, A attachment,
 				CompletionHandler<Integer, ? super A> handler) {
 			handler.failed(new ClosedChannelException(), attachment);
 		}
 
 		@Override
-		public <A> void write(ByteBufferWrapper[] srcs, int offset, int length, long timeout, TimeUnit unit,
-				A attachment, CompletionHandler<Long, ? super A> handler) {
+		public <A> void write(BufWrapper[] srcs, int offset, int length, long timeout, TimeUnit unit, A attachment,
+				CompletionHandler<Long, ? super A> handler) {
 			handler.failed(new ClosedChannelException(), attachment);
 		}
 

@@ -30,6 +30,7 @@ import javax.servlet.WriteListener;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.http.MimeHeaders;
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -390,17 +391,17 @@ public final class Response {
 	 *
 	 * @throws IOException If an I/O error occurs during the write
 	 */
-	public void doWrite(ByteBuffer chunk) throws IOException {
+	public void doWrite(BufWrapper chunk) throws IOException {
 		if (!exchangeData.isCommitted()) {
 			// Send the connector a request for commit. The connector should
 			// then validate the headers, send them (using sendHeaders) and
 			// set the filters accordingly.
 			this.responseAction.commit(false);
 		}
-		int len = chunk.remaining();
+		int len = chunk.getRemaining();
 		this.responseAction.doWrite(chunk);
 		long bytesWrite = this.exchangeData.getBytesWrite();
-		bytesWrite += len - chunk.remaining();
+		bytesWrite += len - chunk.getRemaining();
 		this.exchangeData.setBytesWrite(bytesWrite);
 	}
 

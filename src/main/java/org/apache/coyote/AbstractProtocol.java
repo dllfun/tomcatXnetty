@@ -48,6 +48,7 @@ import org.apache.tomcat.util.net.Endpoint;
 import org.apache.tomcat.util.net.Endpoint.Handler;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketEvent;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 import org.apache.tomcat.util.threads.ResizableExecutor;
 import org.apache.tomcat.util.threads.TaskQueue;
@@ -143,7 +144,7 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler, MBeanRegis
 		@Override
 		public void service(Request req, Response res) throws Exception {
 			byte[] b = "adapter not set!".getBytes("utf-8");
-			res.doWrite(ByteBuffer.wrap(b));
+			res.doWrite(ByteBufferWrapper.wrapper(ByteBuffer.wrap(b), true));
 			res.close();
 		}
 

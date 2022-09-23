@@ -74,7 +74,7 @@ public interface SocketChannel extends Channel {
 
 	public void write(boolean block, byte[] buf, int off, int len) throws IOException;
 
-	public void write(boolean block, ByteBufferWrapper from) throws IOException;
+//	public void write(boolean block, ByteBufferWrapper from) throws IOException;
 
 	public void write(boolean block, BufWrapper from) throws IOException;
 
@@ -164,8 +164,7 @@ public interface SocketChannel extends Channel {
 		 *
 		 * @return The call, if any, to make to the completion handler
 		 */
-		public CompletionHandlerCall callHandler(CompletionState state, ByteBufferWrapper[] buffers, int offset,
-				int length);
+		public CompletionHandlerCall callHandler(CompletionState state, BufWrapper[] buffers, int offset, int length);
 	}
 
 	/**
@@ -175,8 +174,7 @@ public interface SocketChannel extends Channel {
 	 */
 	public static final CompletionCheck COMPLETE_WRITE = new CompletionCheck() {
 		@Override
-		public CompletionHandlerCall callHandler(CompletionState state, ByteBufferWrapper[] buffers, int offset,
-				int length) {
+		public CompletionHandlerCall callHandler(CompletionState state, BufWrapper[] buffers, int offset, int length) {
 			for (int i = 0; i < length; i++) {
 				if (buffers[offset + i].hasRemaining()) {
 					return CompletionHandlerCall.CONTINUE;
@@ -192,8 +190,7 @@ public interface SocketChannel extends Channel {
 	 */
 	public static final CompletionCheck COMPLETE_WRITE_WITH_COMPLETION = new CompletionCheck() {
 		@Override
-		public CompletionHandlerCall callHandler(CompletionState state, ByteBufferWrapper[] buffers, int offset,
-				int length) {
+		public CompletionHandlerCall callHandler(CompletionState state, BufWrapper[] buffers, int offset, int length) {
 			for (int i = 0; i < length; i++) {
 				if (buffers[offset + i].hasRemaining()) {
 					return CompletionHandlerCall.CONTINUE;
@@ -210,8 +207,7 @@ public interface SocketChannel extends Channel {
 	 */
 	public static final CompletionCheck READ_DATA = new CompletionCheck() {
 		@Override
-		public CompletionHandlerCall callHandler(CompletionState state, ByteBufferWrapper[] buffers, int offset,
-				int length) {
+		public CompletionHandlerCall callHandler(CompletionState state, BufWrapper[] buffers, int offset, int length) {
 			return (state == CompletionState.DONE) ? CompletionHandlerCall.DONE : CompletionHandlerCall.NONE;
 		}
 	};
@@ -230,9 +226,9 @@ public interface SocketChannel extends Channel {
 	public static final CompletionCheck COMPLETE_READ = COMPLETE_WRITE;
 
 	public <A> CompletionState read(BlockingMode block, long timeout, TimeUnit unit, A attachment,
-			CompletionCheck check, CompletionHandler<Long, ? super A> handler, ByteBufferWrapper... dsts);
+			CompletionCheck check, CompletionHandler<Long, ? super A> handler, BufWrapper... dsts);
 
 	public <A> CompletionState write(BlockingMode block, long timeout, TimeUnit unit, A attachment,
-			CompletionCheck check, CompletionHandler<Long, ? super A> handler, ByteBufferWrapper... srcs);
+			CompletionCheck check, CompletionHandler<Long, ? super A> handler, BufWrapper... srcs);
 
 }

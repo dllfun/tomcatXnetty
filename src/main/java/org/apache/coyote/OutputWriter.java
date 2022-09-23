@@ -19,6 +19,8 @@ package org.apache.coyote;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import org.apache.tomcat.util.net.BufWrapper;
+
 /**
  * Output buffer.
  *
@@ -29,24 +31,23 @@ import java.nio.ByteBuffer;
  */
 public interface OutputWriter {
 
-    /**
-     * Write the given data to the response. The caller owns the chunks.
-     *
-     * @param chunk data to write
-     *
-     * @return The number of bytes written which may be less than available in
-     *         the input chunk
-     *
-     * @throws IOException an underlying I/O error occurred
-     */
-    public int doWrite(ByteBuffer chunk) throws IOException;
+	/**
+	 * Write the given data to the response. The caller owns the chunks.
+	 *
+	 * @param chunk data to write
+	 *
+	 * @return The number of bytes written which may be less than available in the
+	 *         input chunk
+	 *
+	 * @throws IOException an underlying I/O error occurred
+	 */
+	public int doWrite(BufWrapper chunk) throws IOException;
 
-
-    /**
-     * Bytes written to the underlying socket. This includes the effects of
-     * chunking, compression, etc.
-     *
-     * @return  Bytes written for the current request
-     */
-    public long getBytesWritten();
+	/**
+	 * Bytes written to the underlying socket. This includes the effects of
+	 * chunking, compression, etc.
+	 *
+	 * @return Bytes written for the current request
+	 */
+	public long getBytesWritten();
 }

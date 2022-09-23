@@ -167,10 +167,6 @@ public class Http11HeadParser {
 			throw new RuntimeException();
 		}
 		int nRead = ((SocketChannel) processor.getChannel()).read(block, appReadBuffer);
-		if (appReadBuffer.released()) {
-			System.err.println(appReadBuffer + " released after header fill");
-			System.out.println();
-		}
 		boolean success = false;
 		if (nRead > 0) {
 			success = true;
@@ -542,23 +538,6 @@ public class Http11HeadParser {
 				appReadBuffer.setRetain(headerEndPosition);
 			}
 			// end = appReadBuffer.getPosition();
-			if (true) {
-				byte[] bytes = new byte[headerEndPosition];
-				for (int i = 0; i < bytes.length; i++) {
-					bytes[i] = appReadBuffer.getByte(i);
-				}
-				System.out.println(
-						((SocketChannel) processor.getChannel()).getRemotePort() + " 读取了请求数据\r\n" + new String(bytes));
-				// MimeHeaders headers = exchangeData.getRequestHeaders();
-				// Enumeration<String> names = headers.names();
-				// System.out.println();
-				// while (names.hasMoreElements()) {
-				// String name = names.nextElement();
-				// String value = headers.getHeader(name);
-				// System.out.println("\"" + name + "\" : \"" + value + "\"");
-				// }
-				// System.out.println();
-			}
 			return true;
 		} else {
 			return false;
@@ -691,9 +670,6 @@ public class Http11HeadParser {
 				} else {
 					int start = headerData.start;
 					int length = pos - headerData.start;
-					if (length < 0) {
-						System.out.println();
-					}
 					byte[] array = new byte[length];
 					for (int index = 0; index < length; index++) {
 						array[index] = appReadBuffer.getByte(start + index);
@@ -904,15 +880,10 @@ public class Http11HeadParser {
 		if (recycled) {
 			throw new RuntimeException();
 		}
-//		System.out.println(this + " nextRequest");
 		// exchangeData.recycle();
 		if (appReadBuffer != null) {
 			if (appReadBuffer.hasArray()) {
 				appReadBuffer.clearRetain();
-			}
-			if (appReadBuffer.released()) {
-				System.err.println(this + "impossible happen");
-				System.out.println("appReadBuffer.released：" + appReadBuffer.released());
 			}
 			appReadBuffer.switchToWriteMode();
 			appReadBuffer.switchToReadMode();
@@ -938,10 +909,6 @@ public class Http11HeadParser {
 		if (appReadBuffer != null) {
 			if (!appReadBuffer.released()) {
 				appReadBuffer.release();
-				if (Constants.debug) {
-					System.out.println(((SocketChannel) processor.getChannel()).getRemotePort() + " " + appReadBuffer
-							+ " released by headParser!" + " info:" + appReadBuffer.printInfo());
-				}
 			}
 			appReadBuffer = null;
 		}

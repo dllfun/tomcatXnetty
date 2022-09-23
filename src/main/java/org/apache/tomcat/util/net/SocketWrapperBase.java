@@ -24,7 +24,6 @@ import java.nio.ByteBuffer;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteBufferUtils;
-import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
@@ -44,22 +43,6 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 * The read buffer.
 	 */
 	private ByteBufferWrapper appReadBuffer = new ByteBufferWrapper(this, ByteBuffer.allocate(0), false);
-
-	/**
-	 * The max size of the individual buffered write buffers
-	 */
-	protected int bufferedWriteSize = 64 * 1024; // 64k default write buffer
-
-	/**
-	 * Additional buffer used for non-blocking writes. Non-blocking writes need to
-	 * return immediately even if the data cannot be written immediately but the
-	 * socket buffer may not be big enough to hold all of the unwritten data. This
-	 * structure provides an additional buffer to hold the data until it can be
-	 * written. Not that while the Servlet API only allows one non-blocking write at
-	 * a time, due to buffering and the possible need to write HTTP headers, this
-	 * layer may see multiple writes.
-	 */
-	protected final WriteBuffer nonBlockingWriteBuffer = new WriteBuffer(bufferedWriteSize);
 
 	public SocketWrapperBase(E socket, SocketWrapperBaseEndpoint<E, ?> endpoint) {
 		super(socket, endpoint);
@@ -163,6 +146,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		if (getSocketWriteBuffer() == null) {
 			throw new IllegalStateException(sm.getString("socket.closed"));
 		}
+		getSocketWriteBuffer().switchToWriteMode();
 		return getSocketWriteBuffer().isWritable() && nonBlockingWriteBuffer.isEmpty();
 	}
 
@@ -275,6 +259,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 *
 	 * @throws IOException If an IO error occurs during the write
 	 */
+	@Override
 	protected void writeBlocking(byte[] buf, int off, int len) throws IOException {
 		if (len > 0) {
 			getSocketWriteBuffer().switchToWriteMode();
@@ -304,7 +289,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 * @throws IOException If an IO error occurs during the write
 	 */
 	@Override
-	protected void writeBlocking(ByteBufferWrapper from) throws IOException {
+	protected void writeBlocking(BufWrapper from) throws IOException {
 		if (from.hasRemaining()) {
 			getSocketWriteBuffer().switchToWriteMode();
 //			transfer(from, getSocketBufferHandler().getWriteBuffer());
@@ -333,7 +318,9 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 *
 	 * @throws IOException If an IO error occurs during the write
 	 */
+	@Override
 	protected void writeNonBlocking(byte[] buf, int off, int len) throws IOException {
+		getSocketWriteBuffer().switchToWriteMode();
 		if (len > 0 && nonBlockingWriteBuffer.isEmpty() && getSocketWriteBuffer().isWritable()) {
 			getSocketWriteBuffer().switchToWriteMode();
 			int thisTime = transfer(buf, off, len, getSocketWriteBuffer());
@@ -341,6 +328,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 			while (len > 0) {
 				off = off + thisTime;
 				doWrite(false);
+				getSocketWriteBuffer().switchToWriteMode();
 				if (len > 0 && getSocketWriteBuffer().isWritable()) {
 					getSocketWriteBuffer().switchToWriteMode();
 					thisTime = transfer(buf, off, len, getSocketWriteBuffer());
@@ -374,8 +362,10 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 	 *
 	 * @throws IOException If an IO error occurs during the write
 	 */
-	protected void writeNonBlocking(ByteBufferWrapper from) throws IOException {
+	@Override
+	protected void writeNonBlocking(BufWrapper from) throws IOException {
 
+		getSocketWriteBuffer().switchToWriteMode();
 		if (from.hasRemaining() && nonBlockingWriteBuffer.isEmpty() && getSocketWriteBuffer().isWritable()) {
 			writeNonBlockingInternal(from);
 		}
@@ -386,20 +376,14 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		}
 	}
 
-	/**
-	 * Separate method so it can be re-used by the socket write buffer to write data
-	 * to the network
-	 *
-	 * @param from The ByteBuffer containing the data to be written
-	 *
-	 * @throws IOException If an IO error occurs during the write
-	 */
-	protected void writeNonBlockingInternal(ByteBufferWrapper from) throws IOException {
+	@Override
+	protected void writeNonBlockingInternal(BufWrapper from) throws IOException {
 		getSocketWriteBuffer().switchToWriteMode();
 //		transfer(from, getSocketBufferHandler().getWriteBuffer());
 		from.transferTo(getSocketWriteBuffer());
 		while (from.hasRemaining()) {
 			doWrite(false);
+			getSocketWriteBuffer().switchToWriteMode();
 			if (getSocketWriteBuffer().isWritable()) {
 				getSocketWriteBuffer().switchToWriteMode();
 				from.transferTo(getSocketWriteBuffer());
@@ -409,22 +393,23 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		}
 	}
 
-	@Override
-	protected void writeBlocking(BufWrapper from) throws IOException {
-		if (from instanceof ByteBufferWrapper) {
-			ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) from;
-			writeBlocking(byteBufferWrapper);
-		}
-	}
+//	@Override
+//	protected void writeBlocking(BufWrapper from) throws IOException {
+//		if (from instanceof ByteBufferWrapper) {
+//			ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) from;
+//			writeBlocking(byteBufferWrapper);
+//		}
+//	}
+//
+//	@Override
+//	protected void writeNonBlocking(BufWrapper from) throws IOException {
+//		if (from instanceof ByteBufferWrapper) {
+//			ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) from;
+//			writeNonBlocking(byteBufferWrapper);
+//		}
+//	}
 
 	@Override
-	protected void writeNonBlocking(BufWrapper from) throws IOException {
-		if (from instanceof ByteBufferWrapper) {
-			ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) from;
-			writeNonBlocking(byteBufferWrapper);
-		}
-	}
-
 	protected void flushBlocking() throws IOException {
 		doWrite(true);
 
@@ -438,6 +423,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 	}
 
+	@Override
 	protected boolean flushNonBlocking() throws IOException {
 		boolean dataLeft = !getSocketWriteBuffer().isEmpty();
 
@@ -677,6 +663,12 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		}
 
 		@Override
+		public BufWrapper slice(int limit) {
+			// TODO Auto-generated method stub
+			return null;
+		}
+
+		@Override
 		public int getPosition() {
 			return delegate.position();
 		}
@@ -703,6 +695,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 			return delegate.array();
 		}
 
+		@Override
 		public int getArrayOffset() {
 			return delegate.arrayOffset();
 		}
@@ -870,7 +863,8 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 			}
 		}
 
-		public int transferTo(ByteBufferWrapper to) {
+		@Override
+		public int transferTo(BufWrapper to) {
 			if (!this.isReadMode() || this.hasNoRemaining()) {
 				throw new RuntimeException();
 			}
@@ -879,10 +873,16 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 			}
 			int max = Math.min(this.getRemaining(), to.getRemaining());
 			if (max > 0) {
-				int fromLimit = this.getLimit();
+				int oldLimit = this.getLimit();
 				this.setLimit(this.getPosition() + max);
-				to.delegate.put(this.delegate);
-				this.setLimit(fromLimit);
+				if (to instanceof ByteBufferWrapper) {
+					((ByteBufferWrapper) to).delegate.put(this.delegate);
+				} else {
+					while (this.hasRemaining()) {
+						to.putByte(this.getByte());
+					}
+				}
+				this.setLimit(oldLimit);
 			}
 			return max;
 		}

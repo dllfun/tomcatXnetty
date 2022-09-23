@@ -1037,7 +1037,7 @@ public class SecureNio2Channel extends Nio2Channel {
 	}
 
 	@Override
-	public <A> void read(final ByteBufferWrapper[] dsts, final int offset, final int length, final long timeout,
+	public <A> void read(final BufWrapper[] dsts, final int offset, final int length, final long timeout,
 			final TimeUnit unit, final A attachment, final CompletionHandler<Long, ? super A> handler) {
 		System.out.println("read timeout " + timeout);
 		if (offset < 0 || dsts == null || (offset + length) > dsts.length) {
@@ -1061,7 +1061,7 @@ public class SecureNio2Channel extends Nio2Channel {
 						long read = 0;
 						// the SSL engine result
 						SSLEngineResult unwrap;
-						ByteBufferWrapper[] dsts2 = dsts;
+						BufWrapper[] dsts2 = dsts;
 						int length2 = length;
 //						OverflowState overflowState = OverflowState.NONE;
 						do {
@@ -1076,7 +1076,7 @@ public class SecureNio2Channel extends Nio2Channel {
 								if (!dsts2[i].isWriteMode()) {
 									throw new RuntimeException();
 								}
-								buffers[i] = dsts2[i].getByteBuffer();
+								buffers[i] = ((ByteBufferWrapper) dsts2[i]).getByteBuffer();
 							}
 							unwrap = sslEngine.unwrap(netInBuffer, buffers, offset, length2);
 							// compact the buffer
@@ -1192,7 +1192,7 @@ public class SecureNio2Channel extends Nio2Channel {
 	}
 
 	@Override
-	public <A> void write(final ByteBufferWrapper src, final long timeout, final TimeUnit unit, final A attachment,
+	public <A> void write(final BufWrapper src, final long timeout, final TimeUnit unit, final A attachment,
 			final CompletionHandler<Integer, ? super A> handler) {
 		System.out.println("write timeout " + timeout + src);
 		// Check state
@@ -1207,7 +1207,7 @@ public class SecureNio2Channel extends Nio2Channel {
 			if (!src.isReadMode()) {
 				throw new RuntimeException();
 			}
-			SSLEngineResult result = sslEngine.wrap(src.getByteBuffer(), netOutBuffer);
+			SSLEngineResult result = sslEngine.wrap(((ByteBufferWrapper) src).getByteBuffer(), netOutBuffer);
 			final int written = result.bytesConsumed();
 			netOutBuffer.flip();
 			if (result.getStatus() == Status.OK) {
@@ -1247,7 +1247,7 @@ public class SecureNio2Channel extends Nio2Channel {
 	}
 
 	@Override
-	public <A> void write(final ByteBufferWrapper[] srcs, final int offset, final int length, final long timeout,
+	public <A> void write(final BufWrapper[] srcs, final int offset, final int length, final long timeout,
 			final TimeUnit unit, final A attachment, final CompletionHandler<Long, ? super A> handler) {
 		System.out.println("write timeout " + timeout + srcs);
 		if ((offset < 0) || (length < 0) || (offset > srcs.length - length)) {
@@ -1267,7 +1267,7 @@ public class SecureNio2Channel extends Nio2Channel {
 				if (!srcs[i].isReadMode()) {
 					throw new RuntimeException();
 				}
-				buffers[i] = srcs[i].getByteBuffer();
+				buffers[i] = ((ByteBufferWrapper) srcs[i]).getByteBuffer();
 			}
 			SSLEngineResult result = sslEngine.wrap(buffers, offset, length, netOutBuffer);
 			final int written = result.bytesConsumed();

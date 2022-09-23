@@ -33,7 +33,7 @@ public class StreamZero extends AbstractStream {
 	public StreamZero(Http2UpgradeHandler handler) {
 		super(STREAM_ID_ZERO);
 		this.handler = handler;
-		System.out.println("conn(" + handler.connectionId + ")" + " created");
+//		System.out.println("conn(" + handler.connectionId + ")" + " created");
 	}
 
 	public StreamChannel getStream(int streamId, boolean unknownIsError) throws ConnectionException {
@@ -489,7 +489,7 @@ public class StreamZero extends AbstractStream {
 //		} catch (Exception e) {
 //			log.debug(sm.getString("upgradeHandler.socketCloseFailed"), e);
 //		}
-		System.out.println("conn(" + handler.connectionId + ")" + " closed");
+//		System.out.println("conn(" + handler.connectionId + ")" + " closed");
 	}
 
 	public enum ConnectionState {

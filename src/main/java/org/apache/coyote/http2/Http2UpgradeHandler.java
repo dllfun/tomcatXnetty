@@ -41,6 +41,7 @@ import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.codec.binary.Base64;
 import org.apache.tomcat.util.http.MimeHeaders;
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.Channel;
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SendfileState;
@@ -707,14 +708,14 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 			// This ensures the Stream processing thread has control of the socket.
 			try {
 				channel.getWriteLock().lock();
-				System.out.println("==========================print h2 header start==========================");
+//				System.out.println("==========================print h2 header start==========================");
 				int size = mimeHeaders.size();
 				for (int i = 0; i < size; i++) {
-					System.out.println(
-							" " + mimeHeaders.getName(i).toString() + " : " + mimeHeaders.getValue(i).toString());
+//					System.out.println(
+//							" " + mimeHeaders.getName(i).toString() + " : " + mimeHeaders.getValue(i).toString());
 				}
 				doWriteHeaders(stream, pushedStreamId, mimeHeaders, endOfStream, payloadSize);
-				System.out.println("==========================print h2 header end============================");
+//				System.out.println("==========================print h2 header end============================");
 			} finally {
 				channel.getWriteLock().unlock();
 			}
@@ -826,7 +827,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 			processStreamOnContainerThread(pushStream);
 		}
 
-		void writeBody(Stream stream, ByteBuffer data, int len, boolean finished) throws IOException {
+		void writeBody(Stream stream, BufWrapper data, int len, boolean finished) throws IOException {
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("upgradeHandler.writeBody", connectionId, stream.getIdentifier(),
 						Integer.toString(len)));
@@ -852,10 +853,10 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 					channel.getWriteLock().lock();
 					try {
 						channel.write(true, header, 0, header.length);
-						int orgLimit = data.limit();
-						data.limit(data.position() + len);
-						channel.write(true, ByteBufferWrapper.wrapper(data, true));
-						data.limit(orgLimit);
+						int orgLimit = data.getLimit();
+						data.setLimit(data.getPosition() + len);
+						channel.write(true, data);
+						data.setLimit(orgLimit);
 						channel.flush(true);
 					} catch (IOException ioe) {
 						handleAppInitiatedIOException(ioe);

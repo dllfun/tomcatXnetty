@@ -37,6 +37,8 @@ import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.http.MimeHeaders;
+import org.apache.tomcat.util.net.BufWrapper;
+import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
 public class Http2OutputBuffer extends ResponseAction {
@@ -175,12 +177,15 @@ public class Http2OutputBuffer extends ResponseAction {
 	}
 
 	@Override
-	protected int doWriteToChannel(ByteBuffer chunk) throws IOException {
+	protected int doWriteToChannel(BufWrapper chunk) throws IOException {
 		long contentLength = exchangeData.getResponseContentLengthLong();
-		int result = chunk.remaining();
+		int result = chunk.getRemaining();
 		written += result;
 		boolean finished = contentLength != -1 && contentLength == written
 				&& exchangeData.getTrailerFieldsSupplier() == null && sendfileData == null;
+		if (finished) {
+//			System.err.println("written match contentLength and finished");
+		}
 		((StreamChannel) processor.getChannel()).doWriteBody(chunk, finished);
 		return result;
 	}
@@ -236,8 +241,9 @@ public class Http2OutputBuffer extends ResponseAction {
 			if (!((StreamChannel) processor.getChannel()).isOutputClosed()) {
 				// Handling this special case here is simpler than trying
 				// to modify the following code to handle it.
-				System.err.println("write empty body for finish");
-				((StreamChannel) processor.getChannel()).doWriteBody(ByteBuffer.allocate(0),
+//				System.err.println("write empty body for finish");
+				((StreamChannel) processor.getChannel()).doWriteBody(
+						ByteBufferWrapper.wrapper(ByteBuffer.allocate(0), true),
 						exchangeData.getTrailerFieldsSupplier() == null);
 			}
 			writeTrailers();

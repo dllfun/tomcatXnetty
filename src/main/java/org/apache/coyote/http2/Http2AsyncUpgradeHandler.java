@@ -35,6 +35,7 @@ import org.apache.coyote.ProtocolException;
 import org.apache.coyote.http2.Http2Parser.Input;
 import org.apache.coyote.http2.Http2Parser.Output;
 import org.apache.tomcat.util.http.MimeHeaders;
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.SendfileState;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BlockingMode;
@@ -236,7 +237,7 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 		}
 
 		@Override
-		void writeBody(Stream stream, ByteBuffer data, int len, boolean finished) throws IOException {
+		void writeBody(Stream stream, BufWrapper data, int len, boolean finished) throws IOException {
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("upgradeHandler.writeBody", zero.getConnectionID(), stream.getIdentifier(),
 						Integer.toString(len)));
@@ -255,13 +256,12 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 			}
 			if (writeable) {
 				ByteUtil.set31Bits(header, 5, stream.getIdAsInt());
-				int orgLimit = data.limit();
-				data.limit(data.position() + len);
+				int orgLimit = data.getLimit();
+				data.setLimit(data.getPosition() + len);
 				getChannel().write(BlockingMode.BLOCK, protocol.getWriteTimeout(), TimeUnit.MILLISECONDS, null,
 						SocketChannel.COMPLETE_WRITE, applicationErrorCompletion,
-						ByteBufferWrapper.wrapper(ByteBuffer.wrap(header), true),
-						ByteBufferWrapper.wrapper(data, true));
-				data.limit(orgLimit);
+						ByteBufferWrapper.wrapper(ByteBuffer.wrap(header), true), data);
+				data.setLimit(orgLimit);
 				handleAsyncException();
 			}
 		}
@@ -393,7 +393,7 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 				sendfile.setLeft(sendfile.getLeft() - bytesWritten);
 				if (sendfile.getLeft() == 0) {
 					try {
-						sendfile.getStream().doWriteBody(ByteBuffer.allocate(0), true);
+						sendfile.getStream().doWriteBody(ByteBufferWrapper.wrapper(ByteBuffer.allocate(0), true), true);
 					} catch (IOException e) {
 						e.printStackTrace();
 					}

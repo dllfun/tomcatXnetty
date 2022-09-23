@@ -78,6 +78,22 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 
 	private ReentrantLock writeLock = new ReentrantLock();
 
+	/**
+	 * The max size of the individual buffered write buffers
+	 */
+	protected int bufferedWriteSize = 64 * 1024; // 64k default write buffer
+
+	/**
+	 * Additional buffer used for non-blocking writes. Non-blocking writes need to
+	 * return immediately even if the data cannot be written immediately but the
+	 * socket buffer may not be big enough to hold all of the unwritten data. This
+	 * structure provides an additional buffer to hold the data until it can be
+	 * written. Not that while the Servlet API only allows one non-blocking write at
+	 * a time, due to buffering and the possible need to write HTTP headers, this
+	 * layer may see multiple writes.
+	 */
+	protected final WriteBuffer nonBlockingWriteBuffer = new WriteBuffer(bufferedWriteSize);
+
 	public AbstractSocketChannel(E socket, AbstractEndpoint<E, ?> endpoint) {
 		this.socket = socket;
 		this.endpoint = endpoint;
@@ -180,7 +196,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 
 	@Override
 	public final int incrementKeepAlive() {
-		System.out.println(this.getRemotePort() + " incrementKeepAlive:" + keepAliveCount);
+//		System.out.println(this.getRemotePort() + " incrementKeepAlive:" + keepAliveCount);
 		return (++keepAliveCount);
 	}
 
@@ -369,7 +385,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 * @throws IOException If an IO error occurs during the write
 	 */
 	@Override
-	public final void write(boolean block, ByteBufferWrapper from) throws IOException {
+	public final void write(boolean block, BufWrapper from) throws IOException {
 		if (from == null || from.getRemaining() == 0) {
 			return;
 		}
@@ -419,7 +435,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 *
 	 * @throws IOException If an IO error occurs during the write
 	 */
-	protected abstract void writeBlocking(ByteBufferWrapper from) throws IOException;
+	protected abstract void writeBlocking(BufWrapper from) throws IOException;
 
 	/**
 	 * Transfers the data to the socket write buffer (writing that data to the
@@ -453,32 +469,34 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 *
 	 * @throws IOException If an IO error occurs during the write
 	 */
-	protected abstract void writeNonBlocking(ByteBufferWrapper from) throws IOException;
-
-	@Override
-	public final void write(boolean block, BufWrapper from) throws IOException {
-		if (from == null || from.getRemaining() == 0) {
-			return;
-		}
-
-		/*
-		 * While the implementations for blocking and non-blocking writes are very
-		 * similar they have been split into separate methods: - To allow sub-classes to
-		 * override them individually. NIO2, for example, overrides the non-blocking
-		 * write but not the blocking write. - To enable a marginally more efficient
-		 * implemented for blocking writes which do not require the additional checks
-		 * related to the use of the non-blocking write buffer
-		 */
-		if (block) {
-			writeBlocking(from);
-		} else {
-			writeNonBlocking(from);
-		}
-	}
-
-	protected abstract void writeBlocking(BufWrapper from) throws IOException;
-
 	protected abstract void writeNonBlocking(BufWrapper from) throws IOException;
+
+	/**
+	 * Separate method so it can be re-used by the socket write buffer to write data
+	 * to the network
+	 *
+	 * @param from The ByteBuffer containing the data to be written
+	 *
+	 * @throws IOException If an IO error occurs during the write
+	 */
+	protected abstract void writeNonBlockingInternal(BufWrapper from) throws IOException;
+
+//	@Override
+//	public final void write(boolean block, BufWrapper from) throws IOException {
+//		if (from == null || from.getRemaining() == 0) {
+//			return;
+//		}
+//
+//		if (block) {
+//			writeBlocking(from);
+//		} else {
+//			writeNonBlocking(from);
+//		}
+//	}
+
+//	protected abstract void writeBlocking(BufWrapper from) throws IOException;
+
+//	protected abstract void writeNonBlocking(BufWrapper from) throws IOException;
 
 	/**
 	 * Writes as much data as possible from any that remains in the buffers.
@@ -523,7 +541,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 */
 	protected abstract class OperationState<A> implements Runnable {
 		protected final boolean read;
-		protected final ByteBufferWrapper[] buffers;
+		protected final BufWrapper[] buffers;
 		protected final int offset;
 		protected final int length;
 		protected final A attachment;
@@ -536,7 +554,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 		protected final VectoredIOCompletionHandler<A> completion;
 		protected final AtomicBoolean callHandler;
 
-		protected OperationState(boolean read, ByteBufferWrapper[] buffers, int offset, int length, BlockingMode block,
+		protected OperationState(boolean read, BufWrapper[] buffers, int offset, int length, BlockingMode block,
 				long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 				CompletionHandler<Long, ? super A> handler, Semaphore semaphore,
 				VectoredIOCompletionHandler<A> completion) {
@@ -825,7 +843,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 */
 	@Override
 	public final <A> CompletionState read(BlockingMode block, long timeout, TimeUnit unit, A attachment,
-			CompletionCheck check, CompletionHandler<Long, ? super A> handler, ByteBufferWrapper... dsts) {
+			CompletionCheck check, CompletionHandler<Long, ? super A> handler, BufWrapper... dsts) {
 		if (dsts == null) {
 			throw new IllegalArgumentException();
 		}
@@ -853,9 +871,8 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 * @param <A>        The attachment type
 	 * @return the completion state (done, done inline, or still pending)
 	 */
-	public final <A> CompletionState read(ByteBufferWrapper[] dsts, int offset, int length, BlockingMode block,
-			long timeout, TimeUnit unit, A attachment, CompletionCheck check,
-			CompletionHandler<Long, ? super A> handler) {
+	public final <A> CompletionState read(BufWrapper[] dsts, int offset, int length, BlockingMode block, long timeout,
+			TimeUnit unit, A attachment, CompletionCheck check, CompletionHandler<Long, ? super A> handler) {
 		return vectoredOperation(true, dsts, offset, length, block, timeout, unit, attachment, check, handler);
 	}
 
@@ -903,7 +920,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 */
 	@Override
 	public final <A> CompletionState write(BlockingMode block, long timeout, TimeUnit unit, A attachment,
-			CompletionCheck check, CompletionHandler<Long, ? super A> handler, ByteBufferWrapper... srcs) {
+			CompletionCheck check, CompletionHandler<Long, ? super A> handler, BufWrapper... srcs) {
 		if (srcs == null) {
 			throw new IllegalArgumentException();
 		}
@@ -931,9 +948,8 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 * @param <A>        The attachment type
 	 * @return the completion state (done, done inline, or still pending)
 	 */
-	public final <A> CompletionState write(ByteBufferWrapper[] srcs, int offset, int length, BlockingMode block,
-			long timeout, TimeUnit unit, A attachment, CompletionCheck check,
-			CompletionHandler<Long, ? super A> handler) {
+	public final <A> CompletionState write(BufWrapper[] srcs, int offset, int length, BlockingMode block, long timeout,
+			TimeUnit unit, A attachment, CompletionCheck check, CompletionHandler<Long, ? super A> handler) {
 		return vectoredOperation(false, srcs, offset, length, block, timeout, unit, attachment, check, handler);
 	}
 
@@ -959,8 +975,8 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 * @param <A>        The attachment type
 	 * @return the completion state (done, done inline, or still pending)
 	 */
-	protected final <A> CompletionState vectoredOperation(boolean read, ByteBufferWrapper[] buffers, int offset,
-			int length, BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
+	protected final <A> CompletionState vectoredOperation(boolean read, BufWrapper[] buffers, int offset, int length,
+			BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 			CompletionHandler<Long, ? super A> handler) {
 		IOException ioe = getError();
 		if (ioe != null) {
@@ -1030,7 +1046,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 		return state.state;
 	}
 
-	protected abstract <A> OperationState<A> newOperationState(boolean read, ByteBufferWrapper[] buffers, int offset,
+	protected abstract <A> OperationState<A> newOperationState(boolean read, BufWrapper[] buffers, int offset,
 			int length, BlockingMode block, long timeout, TimeUnit unit, A attachment, CompletionCheck check,
 			CompletionHandler<Long, ? super A> handler, Semaphore semaphore, VectoredIOCompletionHandler<A> completion);
 
@@ -1061,7 +1077,7 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 //		return max;
 //	}
 
-	protected static boolean buffersArrayHasRemaining(ByteBufferWrapper[] buffers, int offset, int length) {
+	protected static boolean buffersArrayHasRemaining(BufWrapper[] buffers, int offset, int length) {
 		for (int pos = offset; pos < offset + length; pos++) {
 			if (buffers[pos].hasRemaining()) {
 				return true;

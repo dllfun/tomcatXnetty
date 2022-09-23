@@ -25,6 +25,7 @@ import javax.servlet.http.WebConnection;
 
 import org.apache.coyote.ContainerThreadMarker;
 import org.apache.coyote.ProtocolException;
+import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.SocketChannel.BlockingMode;
 import org.apache.tomcat.util.net.SocketChannel.CompletionCheck;
@@ -87,8 +88,7 @@ class Http2AsyncParser extends Http2Parser {
 		}
 
 		@Override
-		public CompletionHandlerCall callHandler(CompletionState state, ByteBufferWrapper[] buffers, int offset,
-				int length) {
+		public CompletionHandlerCall callHandler(CompletionState state, BufWrapper[] buffers, int offset, int length) {
 			if (offset != 0 || length != 3) {
 				try {
 					throw new IllegalArgumentException(sm.getString("http2Parser.invalidBuffers"));
@@ -214,8 +214,7 @@ class Http2AsyncParser extends Http2Parser {
 		}
 
 		@Override
-		public CompletionHandlerCall callHandler(CompletionState state, ByteBufferWrapper[] buffers, int offset,
-				int length) {
+		public CompletionHandlerCall callHandler(CompletionState state, BufWrapper[] buffers, int offset, int length) {
 			if (offset != 0 || length != 2) {
 				try {
 					throw new IllegalArgumentException(sm.getString("http2Parser.invalidBuffers"));
@@ -227,8 +226,8 @@ class Http2AsyncParser extends Http2Parser {
 			return validate(state, buffers[0], buffers[1]);
 		}
 
-		protected CompletionHandlerCall validate(CompletionState state, ByteBufferWrapper frameHeaderBuffer,
-				ByteBufferWrapper payload) {
+		protected CompletionHandlerCall validate(CompletionState state, BufWrapper frameHeaderBuffer,
+				BufWrapper payload) {
 			if (!parsedFrameHeader) {
 				// The first buffer should be 9 bytes long
 				if (frameHeaderBuffer.getPosition() < 9) {

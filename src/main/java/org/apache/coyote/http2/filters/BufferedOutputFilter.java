@@ -14,6 +14,9 @@ import org.apache.coyote.http2.StreamChannel;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
+import org.apache.tomcat.util.net.BufWrapper;
+import org.apache.tomcat.util.net.Channel;
+import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.WriteBuffer;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -22,8 +25,8 @@ public class BufferedOutputFilter extends ProcessorComponent implements OutputFi
 	private static final Log log = LogFactory.getLog(BufferedOutputFilter.class);
 	private static final StringManager sm = StringManager.getManager(Stream.class);
 
-	private final ByteBufferWrapper buffer = ByteBufferWrapper.wrapper(ByteBuffer.allocate(8 * 1024), false);
 	private final WriteBuffer writeBuffer = new WriteBuffer(32 * 1024);
+	private BufWrapper buffer = null;
 	// Flag that indicates that data was left over on a previous
 	// non-blocking write. Once set, this flag stays set until all the data
 	// has been written.
@@ -47,6 +50,17 @@ public class BufferedOutputFilter extends ProcessorComponent implements OutputFi
 	@Override
 	public void actived() {
 
+	}
+
+	@Override
+	public void onChannelReady(Channel channel) {
+		if (channel instanceof StreamChannel) {
+			// buffer = ((StreamChannel) channel).getSocketChannel().allocate(8 * 1024);
+			buffer = ByteBufferWrapper.wrapper(ByteBuffer.allocate(8 * 1024), false);
+			buffer.switchToWriteMode();
+		} else {
+			throw new RuntimeException();
+		}
 	}
 
 	public boolean isDataLeft() {
@@ -114,7 +128,7 @@ public class BufferedOutputFilter extends ProcessorComponent implements OutputFi
 //		buffer.flip();
 		buffer.switchToReadMode();
 		while (buffer.hasRemaining()) {
-			int len = next.doWrite(buffer.getByteBuffer());
+			int len = next.doWrite(buffer);
 			if (len == 0) {
 //				buffer.compact();
 				buffer.switchToWriteMode();
@@ -127,14 +141,17 @@ public class BufferedOutputFilter extends ProcessorComponent implements OutputFi
 	}
 
 	@Override
-	public synchronized boolean writeFromBuffer(ByteBufferWrapper src, boolean blocking) throws IOException {
+	public synchronized boolean writeFromBuffer(BufWrapper src, boolean blocking) throws IOException {
 		while (src.getRemaining() > 0) {
 //			int thisTime = Math.min(buffer.getRemaining(), src.getRemaining());
 //			int chunkLimit = src.getLimit();
 //			src.setLimit(src.getPosition() + thisTime);
 //			buffer.put(src);
 //			src.limit(chunkLimit);
-			src.transferTo(buffer);
+//			buffer.switchToWriteMode();
+			if (buffer.hasRemaining()) {
+				src.transferTo(buffer);
+			}
 			if (flush(false, blocking)) {
 				return true;
 			}
@@ -143,33 +160,33 @@ public class BufferedOutputFilter extends ProcessorComponent implements OutputFi
 	}
 
 	@Override
-	public int doWrite(ByteBuffer chunk) throws IOException {
+	public int doWrite(BufWrapper chunk) throws IOException {
 		boolean block = processor.isBlockingWrite();
 		// chunk is always fully written
-		ByteBufferWrapper wrapper = ByteBufferWrapper.wrapper(chunk, true);
-		int result = wrapper.getRemaining();
+		int result = chunk.getRemaining();
 		if (writeBuffer.isEmpty()) {
-			while (wrapper.hasRemaining()) {
+			while (chunk.hasRemaining()) {
 //				int thisTime = Math.min(buffer.getRemaining(), wrapper.remaining());
 //				int chunkLimit = wrapper.limit();
 //				wrapper.limit(wrapper.position() + thisTime);
 //				buffer.put(wrapper);
 //				wrapper.limit(chunkLimit);
+//				buffer.switchToWriteMode();
 				if (buffer.hasRemaining()) {
-					wrapper.transferTo(buffer);
+					chunk.transferTo(buffer);
 				}
-				if (wrapper.hasRemaining() && !buffer.hasRemaining()) {
+				if (chunk.hasRemaining() && !buffer.hasRemaining()) {
 					// Only flush if we have more data to write and the buffer
 					// is full
 					if (flush(true, block)) {
-						writeBuffer.add(wrapper);
+						writeBuffer.add(chunk);
 						dataLeft = true;
 						break;
 					}
 				}
 			}
 		} else {
-			writeBuffer.add(wrapper);
+			writeBuffer.add(chunk);
 		}
 		return result;
 	}
