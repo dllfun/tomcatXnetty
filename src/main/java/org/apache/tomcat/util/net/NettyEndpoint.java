@@ -15,6 +15,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -35,6 +36,7 @@ import org.apache.tomcat.util.net.openssl.ciphers.Cipher;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
+import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
@@ -56,6 +58,8 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.ByteToMessageDecoder.Cumulator;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.GenericFutureListener;
 
 public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel, io.netty.channel.Channel> {
 
@@ -69,8 +73,6 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 	private EventLoopGroup bossGroup;
 	private EventLoopGroup workerGroup;
-
-	private static boolean debug = false;
 
 	public NettyEndpoint() {
 
@@ -253,15 +255,629 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		return ret;
 	}
 
+	private static class ByteBufWrapper implements BufWrapper {
+
+//		private NettyChannel channel;
+
+		private int readCount = 0;
+
+		protected volatile ByteBuf delegate = Unpooled.EMPTY_BUFFER;
+
+		private volatile int mainRefCount = 0;
+
+		private volatile AtomicInteger sliceRefCount = new AtomicInteger(0);
+
+		private boolean trace = false;
+
+		private boolean readMode = true;
+
+		public ByteBufWrapper() {
+			super();
+//			this.channel = channel;
+		}
+
+		public ByteBufWrapper(ByteBuf delegate) {
+//			this(channel);
+			this.delegate = delegate;
+			this.mainRefCount = delegate.refCnt();
+		}
+
+		public void setDelegate(ByteBuf delegate) {
+			this.delegate = delegate;
+		}
+
+		// protected void releaseBuf() {
+		// delegate.release();
+		// }
+
+		@Override
+		public void switchToWriteMode(boolean compact) {
+			if (readMode) {
+				if (compact) {
+					if (delegate.readerIndex() == delegate.writerIndex() && delegate.readerIndex() > 0) {
+//						delegate.discardReadBytes();
+						int refCnt = refCount();
+						while (refCnt-- > 0) {
+							delegate.release();
+						}
+						delegate = Unpooled.EMPTY_BUFFER;
+					} else {
+//					int capacity = delegate.capacity();
+//						delegate.discardReadBytes();
+//					if (capacity != delegate.capacity()) {
+//						System.err.println("capacity changed after compact");
+//					}
+					}
+				}
+//				if (compact && delegate.readerIndex() > 0) {
+//					if (!delegate.isReadable() && !delegate.isWritable()) {
+//						// 正常情况
+//						if (channel != null) {
+//							int capacity = delegate.capacity();
+//							releaseDelegate();
+//							if (NettyEndpoint.debug) {
+//								System.out.println("delegate.release();");
+//							}
+//							delegate = channel.channel.alloc().buffer(capacity);
+//							System.out.println(this + " delegate after compact:" + delegate);
+//						} else {
+//							delegate.discardReadBytes();
+//						}
+//					} else {
+//						if (delegate.isReadable()) {
+//							System.err.println(channel.getRemotePort() + " byteBuf还有未读数据");
+//						}
+//						// delegate.readerIndex(delegate.writerIndex());
+//						delegate.discardReadBytes();
+//					}
+//				}
+				readMode = false;
+			}
+		}
+
+		@Override
+		public void switchToWriteMode() {
+			switchToWriteMode(true);
+		}
+
+		@Override
+		public void setRetain(int retain) {
+			throw new RuntimeException();
+		}
+
+		@Override
+		public void clearRetain() {
+			throw new RuntimeException();
+		}
+
+		@Override
+		public int getRetain() {
+			throw new RuntimeException();
+		}
+
+		@Override
+		public boolean isWriteMode() {
+			return !readMode;
+		}
+
+		@Override
+		public void switchToReadMode() {
+			if (!readMode) {
+				readMode = true;
+			}
+		}
+
+		@Override
+		public boolean isReadMode() {
+			return readMode;
+		}
+
+		@Override
+		public boolean reuseable() {
+			return false;
+		}
+
+		@Override
+		public int getLimit() {
+			if (readMode) {
+				return delegate.writerIndex();
+			} else {
+				return delegate.capacity();
+			}
+		}
+
+		@Override
+		public void setLimit(int limit) {
+			if (trace) {
+				System.out.println("setLimit");
+			}
+			if (readMode) {
+				delegate.writerIndex(limit);
+			} else {
+				delegate.capacity(limit);
+//				if (delegate.capacity() < limit) {
+//					ByteBuf buf = channel.channel.alloc().buffer(limit);
+//					buf.writeBytes(delegate);
+//					releaseDelegate();
+//					if (NettyEndpoint.debug) {
+//						System.err.println(this + " set Limit release");
+//					}
+//					delegate = buf;
+//					System.out.println(this + " delegate changed");
+//				} else if (delegate.capacity() == limit) {
+//
+//				} else {
+//					delegate.capacity(limit);
+//				}
+			}
+		}
+
+		@Override
+		public byte getByte() {
+			if (!readMode) {
+				throw new RuntimeException();
+			}
+			if (trace) {
+				System.out.println("getByte");
+			}
+			return delegate.readByte();
+		}
+
+		@Override
+		public void getBytes(byte[] b, int off, int len) {
+			if (!readMode) {
+				throw new RuntimeException();
+			}
+			if (trace) {
+				System.out.println("getByte b");
+			}
+			if (delegate.refCnt() == 0) {
+				throw new RuntimeException();
+			}
+			delegate.readBytes(b, off, len);
+		}
+
+		@Override
+		public byte getByte(int index) {
+			if (!readMode) {
+				throw new RuntimeException();
+			}
+			return delegate.getByte(index);
+		}
+
+		@Override
+		public ByteBufWrapper getSlice(int len) {
+			if (!readMode) {
+				throw new RuntimeException();
+			}
+			if (delegate == Unpooled.EMPTY_BUFFER) {
+				throw new RuntimeException();
+			}
+			ByteBuf slice = delegate.slice(delegate.readerIndex(), len);
+			delegate.readerIndex(delegate.readerIndex() + len);
+			return new SlicedByteBufWrapper(slice, this.sliceRefCount);
+		}
+
+		@Override
+		public BufWrapper getRetaindSlice(int len) {
+			ByteBufWrapper slice = getSlice(len);
+			slice.retain();
+			return slice;
+		}
+
+		@Override
+		public int getPosition() {
+			if (readMode) {
+				return delegate.readerIndex();
+			} else {
+				return delegate.writerIndex();
+			}
+		}
+
+		@Override
+		public void setPosition(int position) {
+			if (trace) {
+				System.out.println("setPosition");
+			}
+			if (readMode) {
+				delegate.readerIndex(position);
+			} else {
+				delegate.writerIndex(position);
+			}
+		}
+
+		@Override
+		public boolean hasArray() {
+			return delegate.hasArray();
+		}
+
+		@Override
+		public byte[] getArray() {
+			return delegate.array();
+		}
+
+		@Override
+		public int getArrayOffset() {
+			return delegate.arrayOffset();
+		}
+
+		@Override
+		public boolean isDirect() {
+			return delegate.isDirect();
+		}
+
+		@Override
+		public boolean isEmpty() {
+			return delegate.readerIndex() == delegate.writerIndex();
+		}
+
+		@Override
+		public boolean isWritable() {
+			return delegate.writableBytes() > 0;
+		}
+
+		@Override
+		public int getRemaining() {
+			if (readMode) {
+				return delegate.writerIndex() - delegate.readerIndex();
+			} else {
+				return delegate.capacity() - delegate.writerIndex();
+			}
+		}
+
+		@Override
+		public boolean hasRemaining() {
+			if (readMode) {
+				return delegate.writerIndex() > delegate.readerIndex();
+			} else {
+				return delegate.capacity() > delegate.writerIndex();
+			}
+		}
+
+		@Override
+		public boolean hasNoRemaining() {
+			if (readMode) {
+				return delegate.writerIndex() <= delegate.readerIndex();
+			} else {
+				return delegate.capacity() <= delegate.writerIndex();
+			}
+		}
+
+		@Override
+		public int getCapacity() {
+			return delegate.capacity();
+		}
+
+		@Override
+		public void setByte(int index, byte b) {
+			if (readMode) {
+				throw new RuntimeException();
+			}
+			if (trace) {
+				System.out.println("setByte");
+			}
+			delegate.setByte(index, b);
+		}
+
+		@Override
+		public void putByte(byte b) {
+			if (readMode) {
+				throw new RuntimeException();
+			}
+			delegate.writeByte(b);
+		}
+
+		@Override
+		public void putBytes(byte[] b) {
+			if (readMode) {
+				throw new RuntimeException();
+			}
+			delegate.writeBytes(b);
+		}
+
+		@Override
+		public void putBytes(byte[] b, int off, int len) {
+			if (readMode) {
+				throw new RuntimeException();
+			}
+			delegate.writeBytes(b, off, len);
+		}
+
+		@Override
+		public void putBytes(ByteBuffer byteBuffer) {
+			if (readMode) {
+				throw new RuntimeException();
+			}
+			delegate.writeBytes(byteBuffer);
+		}
+
+		@Override
+		public int transferTo(BufWrapper to) {
+			if (!this.isReadMode() || this.hasNoRemaining()) {
+				throw new RuntimeException();
+			}
+			if (!to.isWriteMode() || to.hasNoRemaining()) {
+				throw new RuntimeException();
+			}
+			int len = Math.min(to.getRemaining(), this.getRemaining());
+			if (len > 0) {
+//				int oldLimit = this.getLimit();
+//				this.setLimit(this.getPosition() + max);
+				if (to instanceof ByteBufferWrapper) {
+					if (len < this.getRemaining()) {
+						ByteBufWrapper slice = this.getSlice(len);
+						((ByteBufferWrapper) to).getByteBuffer().put(slice.delegate.nioBuffer());
+					} else {
+						((ByteBufferWrapper) to).getByteBuffer().put(this.delegate.nioBuffer());
+						this.delegate.skipBytes(len);
+					}
+				} else if (to instanceof ByteBufWrapper) {
+					if (len < this.getRemaining()) {
+						ByteBufWrapper slice = this.getSlice(len);
+						((ByteBufWrapper) to).delegate.writeBytes(slice.delegate);
+					} else {
+						((ByteBufWrapper) to).delegate.writeBytes(this.delegate);
+					}
+				} else {
+					throw new RuntimeException();
+				}
+
+//				this.setLimit(oldLimit);
+			}
+			return len;
+		}
+
+		@Override
+		public void clearWrite() {
+			delegate.writerIndex(delegate.readerIndex());
+		}
+
+//		@Override
+//		public boolean fill(boolean block) throws IOException {
+//			if (channel != null) {
+//				int nRead = channel.read(block, this);
+//				if (nRead > 0) {
+//					return true;
+//				} else if (nRead == -1) {
+//					throw new EOFException(sm.getString("iib.eof.error"));
+//				} else {
+//					return false;
+//				}
+//			} else {
+//				throw new CloseNowException(sm.getString("iib.eof.error"));
+//			}
+//		}
+
+//		@Override
+//		public int doRead(PreInputBuffer handler) throws IOException {
+//			if (trace) {
+//				System.out.println("doRead");
+//			}
+//			if (hasNoRemaining()) {
+//				// byteBuf.release();
+//				fill(true);
+//			}
+//			int length = delegate.writerIndex() - delegate.readerIndex();
+//			handler.setBufWrapper(this.duplicate());//
+//			delegate.readerIndex(delegate.writerIndex());
+//			return length;
+//		}
+
+		@Override
+		public void reset() {
+			if (trace) {
+				System.out.println("reset");
+			}
+			// TODO Auto-generated method stub
+			// byteBuf.release();
+			if (delegate.writerIndex() > delegate.capacity()) {
+				System.out.println("writerIndex bigger then capacity");
+			}
+//			delegate.readerIndex(delegate.writerIndex());
+			switchToWriteMode();
+			delegate.writerIndex(0);
+		}
+
+		@Override
+		public ByteBuffer nioBuffer() {
+			if (trace) {
+				System.out.println("nioBuffer");
+			}
+			return delegate.nioBuffer();
+		}
+
+		@Override
+		public BufWrapper duplicate() {
+			if (trace) {
+				System.out.println("duplicate");
+			}
+			ByteBufWrapper bufWrapper = new ByteBufWrapper(delegate.duplicate());
+//			bufWrapper.delegate = delegate.duplicate();
+			return bufWrapper;
+		}
+
+		@Override
+		public void startTrace() {
+			// trace = true;
+		}
+
+		@Override
+		public void stopTrace() {
+			// TODO Auto-generated method stub
+
+		}
+
+		@Override
+		public void retain() {
+			if (delegate == Unpooled.EMPTY_BUFFER) {
+				mainRefCount++;
+			} else {
+				retainDelegate();
+				mainRefCount++;
+			}
+		}
+
+		@Override
+		public boolean released() {
+			if (refCount() == 0) {
+				return true;
+			}
+			return false;
+		}
+
+		@Override
+		public void release() {
+			if (delegate == Unpooled.EMPTY_BUFFER) {
+				mainRefCount--;
+				if (mainRefCount < 0) {
+					throw new RuntimeException();
+				}
+				return;
+			} else {
+				mainRefCount--;
+				if (delegate.isReadable()) {
+					byte[] bytes = new byte[Math.min(delegate.readableBytes(), 100)];
+					for (int i = 0; i < bytes.length; i++) {
+						bytes[i] = delegate.readByte();
+					}
+//					System.out.println("释放buffer时还有未读数据：" + new String(bytes));
+				}
+				releaseDelegate();
+			}
+//			delegate = Unpooled.EMPTY_BUFFER;
+		}
+
+		@Override
+		public int refCount() {
+			if (delegate == Unpooled.EMPTY_BUFFER) {
+				return mainRefCount;
+			} else {
+				if (mainRefCount + sliceRefCount.get() != delegate.refCnt()) {
+					System.out.println("mainRefCount:" + mainRefCount + " sliceRefCount:" + sliceRefCount
+							+ " delegate.refCnt():" + delegate.refCnt());
+					throw new RuntimeException();
+				}
+				return mainRefCount;
+			}
+		}
+
+		@Override
+		public String printInfo() {
+			StringBuffer sb = new StringBuffer();
+			sb.append("\r\n");
+			sb.append("isEmptyBuffer : " + (delegate == Unpooled.EMPTY_BUFFER) + "\t");
+			sb.append("refCnt : " + delegate.refCnt() + "\t");
+			sb.append("readerIndex : " + delegate.readerIndex() + "\t");
+			sb.append("writerIndex : " + delegate.writerIndex() + "\t");
+			sb.append("hashCode : " + delegate.hashCode() + "\t");
+//			sb.append("nioBuffer : " + delegate.nioBuffer());
+			return sb.toString();
+		}
+
+		@Override
+		public void expand(int newSize) {
+			// NO-OP
+		}
+
+		private void retainDelegate() {
+			delegate.retain();
+		}
+
+		private void releaseDelegate() {
+			if (mainRefCount > 0) {
+				delegate.release();
+			} else if (mainRefCount == 0) {
+				if (sliceRefCount.get() + 1 != delegate.refCnt()) {
+					throw new RuntimeException();
+				}
+				delegate.release();
+				delegate = Unpooled.EMPTY_BUFFER;
+				sliceRefCount = new AtomicInteger(0);
+			} else {
+				throw new RuntimeException();
+			}
+		}
+
+	}
+
+	private static class SlicedByteBufWrapper extends ByteBufWrapper {
+
+		private final AtomicInteger sliceRefCount;
+
+		public SlicedByteBufWrapper(ByteBuf delegate, AtomicInteger sliceRefCount) {
+			super(delegate);
+			this.sliceRefCount = sliceRefCount;
+		}
+
+		@Override
+		public void retain() {
+			delegate.retain();
+			sliceRefCount.incrementAndGet();
+		}
+
+		@Override
+		public int refCount() {
+			return delegate.refCnt();
+		}
+
+		@Override
+		public boolean released() {
+			return delegate.refCnt() == 0;
+		}
+
+		@Override
+		public void release() {
+			delegate.release();
+			sliceRefCount.decrementAndGet();
+		}
+
+	}
+
+	private static class TimedWrapper {
+
+		private ByteBuf byteBuf;
+
+		private long createTime;
+
+		public TimedWrapper(ByteBuf byteBuf) {
+			super();
+			this.byteBuf = byteBuf;
+			this.createTime = System.currentTimeMillis();
+		}
+
+		public ByteBuf getByteBuf() {
+			return byteBuf;
+		}
+
+		public long getCreateTime() {
+			return createTime;
+		}
+
+	}
+
 	public static class NettyChannel extends AbstractSocketChannel<io.netty.channel.Channel> {
+
+		/**
+		 * Cumulate {@link ByteBuf}s.
+		 */
+		public interface Cumulator {
+			/**
+			 * Cumulate the given {@link ByteBuf}s and return the {@link ByteBuf} that holds
+			 * the cumulated bytes. The implementation is responsible to correctly handle
+			 * the life-cycle of the given {@link ByteBuf}s and so call
+			 * {@link ByteBuf#release()} if a {@link ByteBuf} is fully consumed.
+			 */
+			void cumulate(ByteBufAllocator alloc, ByteBufWrapper cumulation, ByteBuf in);
+		}
 
 		/**
 		 * Cumulate {@link ByteBuf}s by merge them into one {@link ByteBuf}'s, using
 		 * memory copies.
 		 */
 		public static final Cumulator MERGE_CUMULATOR = new Cumulator() {
-			@Override
-			public ByteBuf cumulate(ByteBufAllocator alloc, ByteBuf cumulation, ByteBuf in) {
+
+			// @Override
+			public void cumulate(ByteBufAllocator alloc, ByteBufWrapper cumulation, ByteBuf in) {
 //				if (cumulation.readerIndex() == 0 && cumulation.writerIndex() == 0 && in.isContiguous()) {
 //					// If cumulation is empty and input buffer is contiguous, use it directly
 //					int refCnt = cumulation.refCnt();
@@ -273,20 +889,21 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 //				}
 				try {
 					final int required = in.readableBytes();
-					if (required > cumulation.maxWritableBytes()
-							|| (required > cumulation.maxFastWritableBytes() && cumulation.refCnt() > 1)
-							|| cumulation.isReadOnly()) {
+					if (required > cumulation.delegate.maxWritableBytes()
+							|| (required > cumulation.delegate.maxFastWritableBytes()
+									&& cumulation.delegate.refCnt() > 1)
+							|| cumulation.delegate.isReadOnly()) {
 						// Expand cumulation (by replacing it) under the following conditions:
 						// - cumulation cannot be resized to accommodate the additional data
 						// - cumulation can be expanded with a reallocation operation to accommodate but
 						// the buffer is
 						// assumed to be shared (e.g. refCnt() > 1) and the reallocation may not be
 						// safe.
-						return expandCumulation(alloc, cumulation, in);
+						expandCumulation(alloc, cumulation, in);
+						return;
 					}
-					cumulation.writeBytes(in, in.readerIndex(), required);
+					cumulation.delegate.writeBytes(in, in.readerIndex(), required);
 					in.readerIndex(in.writerIndex());
-					return cumulation;
 				} finally {
 					// We must release in in all cases as otherwise it may produce a leak if
 					// writeBytes(...) throw
@@ -295,24 +912,27 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				}
 			}
 
-			ByteBuf expandCumulation(ByteBufAllocator alloc, ByteBuf oldCumulation, ByteBuf in) {
-				int refCnt = oldCumulation.refCnt();
-				int readerIndex = oldCumulation.readerIndex();
-				int writerIndex = oldCumulation.writerIndex();
+			void expandCumulation(ByteBufAllocator alloc, ByteBufWrapper cumulation, ByteBuf in) {
+				int refCnt = cumulation.mainRefCount;
+				int readerIndex = cumulation.delegate.readerIndex();
+				int writerIndex = cumulation.delegate.writerIndex();
 				int newBytes = in.readableBytes();
 				int totalBytes = writerIndex + newBytes;
-				ByteBuf newCumulation = alloc.buffer(alloc.calculateNewCapacity(totalBytes, MAX_VALUE));
-				ByteBuf toRelease = newCumulation;
+				ByteBuf newDelegate = alloc.buffer(alloc.calculateNewCapacity(totalBytes, MAX_VALUE));
+				ByteBuf toRelease = newDelegate;
 				try {
 					// This avoids redundant checks and stack depth compared to calling
 					// writeBytes(...)
-					newCumulation.setBytes(0, oldCumulation, 0, writerIndex)
+					newDelegate.setBytes(0, cumulation.delegate, 0, writerIndex)
 							.setBytes(writerIndex, in, in.readerIndex(), newBytes).writerIndex(totalBytes)
 							.readerIndex(readerIndex);
 					in.readerIndex(in.writerIndex());
-					toRelease = oldCumulation;
-					newCumulation.retain(refCnt - 1);
-					return newCumulation;
+					toRelease = cumulation.delegate;
+					if (refCnt > 1) {
+						newDelegate.retain(refCnt - 1);
+					}
+					cumulation.sliceRefCount = new AtomicInteger(0);
+					cumulation.delegate = newDelegate;
 				} finally {
 					while (refCnt-- > 0) {
 						toRelease.release();
@@ -321,7 +941,52 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			}
 		};
 
-		private SocketChannel channel;
+		/**
+		 * Cumulate {@link ByteBuf}s by add them to a {@link CompositeByteBuf} and so do
+		 * no memory copy whenever possible. Be aware that {@link CompositeByteBuf} use
+		 * a more complex indexing implementation so depending on your use-case and the
+		 * decoder implementation this may be slower then just use the
+		 * {@link #MERGE_CUMULATOR}.
+		 */
+		public static final Cumulator COMPOSITE_CUMULATOR = new Cumulator() {
+			@Override
+			public void cumulate(ByteBufAllocator alloc, ByteBufWrapper cumulation, ByteBuf in) {
+//				if (!cumulation.isReadable()) {
+//					cumulation.release();
+//					return in;
+//				}
+				CompositeByteBuf composite = null;
+				try {
+					if (cumulation.delegate instanceof CompositeByteBuf && cumulation.delegate.refCnt() == 1) {
+						composite = (CompositeByteBuf) cumulation.delegate;
+						// Writer index must equal capacity if we are going to "write"
+						// new components to the end
+						if (composite.writerIndex() != composite.capacity()) {
+							composite.capacity(composite.writerIndex());
+						}
+					} else {
+						composite = alloc.compositeBuffer(Integer.MAX_VALUE).addFlattenedComponents(true,
+								cumulation.delegate);
+					}
+					composite.addFlattenedComponents(true, in);
+					in = null;
+					cumulation.sliceRefCount = new AtomicInteger(0);
+					cumulation.delegate = composite;
+				} finally {
+					if (in != null) {
+						// We must release if the ownership was not transferred as otherwise it may
+						// produce a leak
+						in.release();
+						// Also release any new buffer allocated if we're not returning it
+						if (composite != null && composite != cumulation.delegate) {
+							composite.release();
+						}
+					}
+				}
+			}
+		};
+
+		private SocketChannel socketChannel;
 
 		private NettyEndpoint endpoint;
 
@@ -343,9 +1008,13 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 		protected SSLEngine sslEngine;
 
-		public NettyChannel(SocketChannel channel, NettyEndpoint endpoint) {
-			super(channel, endpoint);
-			this.channel = channel;
+		private volatile long writeUseTotalTime = 0;
+
+		private volatile ChannelFuture lastWriteFuture;
+
+		public NettyChannel(SocketChannel socketChannel, NettyEndpoint endpoint) {
+			super(socketChannel, endpoint);
+			this.socketChannel = socketChannel;
 			this.endpoint = endpoint;
 		}
 
@@ -361,13 +1030,26 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			}
 			try {
 				dequeLock.lock();
-				for (BufWrapper bufWrapper : deque) {
-					if (bufWrapper.hasNoRemaining()) {
-						System.err.println("has bug here");
-					}
-				}
+//				for (BufWrapper bufWrapper : deque) {
+//					if (bufWrapper.hasNoRemaining()) {
+//						System.err.println("has bug here");
+//					}
+//				}
 				deque.offer(byteBuf);
-				notEmpty.signalAll();
+				if (needDispatchRead) {
+					needDispatchRead = false;
+					if (registeReadTimeStamp != -1) {
+						long useTime = System.currentTimeMillis() - registeReadTimeStamp;
+						awaitReadTime += useTime;
+//						System.out.println(getRemotePort() + " await read use " + useTime + " total wait use "
+//								+ awaitReadTime + " count " + registeReadCount);
+					}
+					startProcessTimeStamp = System.currentTimeMillis();
+//					System.out.println(nettyChannel.getRemotePort() + " " + "processSocketRead");
+					endpoint.getHandler().processSocket(this, SocketEvent.OPEN_READ, true);
+				} else {
+					notEmpty.signalAll();
+				}
 			} finally {
 				dequeLock.unlock();
 			}
@@ -383,7 +1065,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			}
 		}
 
-		protected boolean needDispatchIfEmpty() {
+		protected boolean dispatchReadIfEmpty() {
 			try {
 				dequeLock.lock();
 				boolean empty = deque.isEmpty();
@@ -435,12 +1117,12 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		public void initAppReadBuffer(int headerBufferSize) {
 			// TODO Auto-generated method stub
 			if (appReadBuffer.delegate == Unpooled.EMPTY_BUFFER) {
-				if (appReadBuffer.refCount != 0) {
+				if (appReadBuffer.mainRefCount != 0) {
 					throw new RuntimeException();
 				}
-				appReadBuffer.refCount++;
+				appReadBuffer.mainRefCount++;
 			} else {
-				if (appReadBuffer.refCount != appReadBuffer.delegate.refCnt() || appReadBuffer.refCount != 1) {
+				if (appReadBuffer.mainRefCount != appReadBuffer.delegate.refCnt() || appReadBuffer.mainRefCount != 1) {
 					throw new RuntimeException();
 				}
 			}
@@ -453,7 +1135,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 		@Override
 		public BufWrapper allocate(int size) {
-			ByteBuf byteBuf = channel.alloc().buffer(size);
+			ByteBuf byteBuf = socketChannel.alloc().buffer(size);
 			ByteBufWrapper byteBufWrapper = new ByteBufWrapper(byteBuf);
 //			byteBufWrapper.delegate = byteBuf;
 			return byteBufWrapper;
@@ -466,35 +1148,35 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 		@Override
 		protected void populateRemoteAddr() {
-			InetSocketAddress ipSocket = channel.remoteAddress();
+			InetSocketAddress ipSocket = socketChannel.remoteAddress();
 			remoteAddr = ipSocket.getAddress().getHostAddress();
 		}
 
 		@Override
 		protected void populateRemoteHost() {
-			InetSocketAddress ipSocket = channel.remoteAddress();
+			InetSocketAddress ipSocket = socketChannel.remoteAddress();
 			remoteHost = ipSocket.getAddress().getHostName();
 		}
 
 		@Override
 		protected void populateRemotePort() {
-			InetSocketAddress ipSocket = channel.remoteAddress();
+			InetSocketAddress ipSocket = socketChannel.remoteAddress();
 			remotePort = ipSocket.getPort();
 		}
 
 		@Override
 		protected void populateLocalName() {
-			localName = channel.localAddress().getAddress().getHostName();
+			localName = socketChannel.localAddress().getAddress().getHostName();
 		}
 
 		@Override
 		protected void populateLocalAddr() {
-			localAddr = channel.localAddress().getAddress().getHostAddress();
+			localAddr = socketChannel.localAddress().getAddress().getHostAddress();
 		}
 
 		@Override
 		protected void populateLocalPort() {
-			localPort = channel.localAddress().getPort();
+			localPort = socketChannel.localAddress().getPort();
 		}
 
 		@Override
@@ -549,7 +1231,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		@Override
 		public boolean canWrite() {
 			// TODO Auto-generated method stub
-			return channel.isWritable() && nonBlockingWriteBuffer.isEmpty();
+			return socketChannel.isWritable() && nonBlockingWriteBuffer.isEmpty();
 		}
 
 		private ByteBufWrapper getFromQueue(boolean block) throws IOException {
@@ -606,13 +1288,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 					}
 
 				} else {
-					for (BufWrapper wrapper : deque) {
-						if (wrapper.hasNoRemaining()) {
-							System.err.println("has bug here");
-						}
-					}
 					byteBuf = deque.poll();
-
 				}
 				if (byteBuf != null) {
 					if (byteBuf.refCount() != 1) {
@@ -661,7 +1337,76 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		}
 
 		@Override
-		public int read(boolean block, ByteBufferWrapper to) throws IOException {
+		public int read(boolean block, BufWrapper to) throws IOException {
+
+			if (exception != null) {
+				throw exception;
+			}
+			if (to instanceof ByteBufWrapper) {
+				ByteBufWrapper byteBufWrapper = (ByteBufWrapper) to;
+				int read = read(block, byteBufWrapper);
+				return read;
+			} else if (to instanceof ByteBufferWrapper) {
+				ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) to;
+				int read = read(block, byteBufferWrapper);
+				return read;
+			} else {
+				throw new RuntimeException();
+			}
+		}
+
+		public int read(boolean block, ByteBufWrapper to) throws IOException {
+			if (exception != null) {
+				throw exception;
+			}
+			// return byteBufWrapper.read(block, to);
+			int read = 0;
+			do {
+				ByteBufWrapper tempBuf = getFromQueue(block);
+				if (tempBuf == null) {
+					return read;
+				}
+				read += tempBuf.getRemaining();
+				if (tempBuf.released()) {
+					throw new RuntimeException();
+				}
+				if (tempBuf.hasNoRemaining()) {
+					throw new RuntimeException();
+				}
+				if (to.delegate == null || (to.delegate.readerIndex() == 0 && to.delegate.writerIndex() == 0)) {
+//				System.err.println("use buffer exchange");
+					to.readCount++;
+					int refCnt = to.mainRefCount;
+					ByteBuf toRelease = to.delegate;
+					to.sliceRefCount = new AtomicInteger(0);
+					to.delegate = tempBuf.delegate;
+					if (refCnt > 1) {
+						to.delegate.retain(refCnt - 1);
+					}
+					if (toRelease == Unpooled.EMPTY_BUFFER) {
+
+					} else {
+						while (refCnt-- > 0) {
+							toRelease.release();
+						}
+					}
+					if (to.delegate.refCnt() == 0) {
+						throw new RuntimeException();
+					}
+				} else {
+//				System.err.println("use buffer cumulator");
+					MERGE_CUMULATOR.cumulate(socketChannel.alloc(), to, tempBuf.delegate);
+					to.readCount++;
+					if (to.delegate.refCnt() == 0) {
+						throw new RuntimeException();
+					}
+				}
+			} while (!isDequeEmpty());
+			return read;
+		}
+
+		// @Override
+		protected int read(boolean block, ByteBufferWrapper to) throws IOException {
 
 			if (exception != null) {
 				throw exception;
@@ -675,9 +1420,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				}
 
 				int minLength = Math.min(byteBuf.getRemaining(), to.getRemaining());
-				for (int index = 0; index < minLength; index++) {
-					to.putByte(byteBuf.getByte());
-				}
+				to.getByteBuffer().put(byteBuf.getSlice(minLength).nioBuffer());
 				read += minLength;
 				if (byteBuf.getRemaining() > 0) {
 					try {
@@ -694,97 +1437,12 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		}
 
 		@Override
-		public int read(boolean block, BufWrapper to) throws IOException {
-
-			if (exception != null) {
-				throw exception;
-			}
-			if (to instanceof ByteBufWrapper) {
-				BufWrapper tempBuf = getFromQueue(block);
-				if (tempBuf == null) {
-					return 0;
-				}
-
-				int length = tempBuf.getRemaining();
-				if (tempBuf.released()) {
-					throw new RuntimeException();
-				}
-				if (tempBuf.hasNoRemaining()) {
-					System.err.println("has bug here");
-				}
-				if (tempBuf instanceof ByteBufWrapper) {
-					ByteBufWrapper byteBuf = (ByteBufWrapper) tempBuf;
-					ByteBufWrapper byteBufWrapper = (ByteBufWrapper) to;
-					if (byteBufWrapper.delegate == null || (byteBufWrapper.delegate.readerIndex() == 0
-							&& byteBufWrapper.delegate.writerIndex() == 0)) {
-//						System.err.println("use buffer exchange");
-						byteBufWrapper.readCount++;
-						ByteBuf toRelease = byteBufWrapper.delegate;
-						byteBufWrapper.delegate = ((ByteBufWrapper) byteBuf).delegate;
-						byteBufWrapper.delegate.retain(byteBufWrapper.refCount - 1);
-						if (toRelease == Unpooled.EMPTY_BUFFER) {
-
-						} else {
-							while (toRelease.refCnt() > 0) {
-								toRelease.release();
-							}
-						}
-						if (byteBufWrapper.delegate.refCnt() == 0) {
-							throw new RuntimeException();
-						}
-					} else {
-						byteBufWrapper.delegate = MERGE_CUMULATOR.cumulate(channel.alloc(), byteBufWrapper.delegate,
-								byteBuf.delegate);
-						byteBufWrapper.readCount++;
-						if (byteBufWrapper.delegate.refCnt() == 0) {
-							throw new RuntimeException();
-						}
-					}
-				} else if (tempBuf instanceof ByteBufferWrapper) {
-					ByteBufferWrapper byteBuf = (ByteBufferWrapper) tempBuf;
-					ByteBufWrapper byteBufWrapper = (ByteBufWrapper) to;
-					ByteBuf delegate = channel.alloc().buffer(byteBuf.getRemaining());
-					while (byteBuf.hasRemaining()) {
-						delegate.writeByte(byteBuf.getByte());
-					}
-					if (byteBufWrapper.delegate == null || byteBufWrapper.delegate == Unpooled.EMPTY_BUFFER) {
-						byteBufWrapper.readCount++;
-						byteBufWrapper.delegate = delegate;
-						if (byteBufWrapper.delegate.refCnt() == 0) {
-							throw new RuntimeException();
-						}
-					} else {
-						byteBufWrapper.delegate = MERGE_CUMULATOR.cumulate(channel.alloc(), byteBufWrapper.delegate,
-								delegate);
-						byteBufWrapper.readCount++;
-						if (byteBufWrapper.delegate.refCnt() == 0) {
-							throw new RuntimeException();
-						}
-					}
-				} else {
-					throw new RuntimeException();
-				}
-
-				return length;
-			} else if (to instanceof ByteBufferWrapper) {
-				ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) to;
-				int read = read(block, byteBufferWrapper);
-				byteBufferWrapper.switchToReadMode();
-				return read;
-			} else {
-				throw new RuntimeException();
-			}
-		}
-
-		@Override
 		public void unRead(ByteBufferWrapper returnedInput) {
 			if (returnedInput != null && returnedInput.getByteBuffer() != null) {
 				returnedInput.switchToReadMode();
 				if (returnedInput.hasRemaining()) {
-					ByteBuf delegate = channel.alloc().buffer(returnedInput.getRemaining());
-					while (returnedInput.hasRemaining()) {
-						delegate.writeByte(returnedInput.getByte());
-					}
+					ByteBuf delegate = socketChannel.alloc().buffer(returnedInput.getRemaining());
+					delegate.writeBytes(returnedInput.getByteBuffer());
 					ByteBufWrapper byteBufWrapper = new ByteBufWrapper(delegate);
 					byteBufWrapper.switchToReadMode();
 					try {
@@ -803,21 +1461,26 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		// }
 
 		@Override
-		public void registerReadInterest() {
+		public boolean registerReadInterest() {
 			// System.out.println("registe read");
-			if (!needDispatchIfEmpty()) {
+			if (!dispatchReadIfEmpty()) {
 //				System.out.println(getRemotePort() + " processSocketRead again");
-				endpoint.getHandler().processSocket(this, SocketEvent.OPEN_READ, true);
+//				endpoint.getHandler().processSocket(this, SocketEvent.OPEN_READ, true);
+				return false;
 			} else {
-//				System.out.println(getRemotePort() + " registerReadInterest");
-				channel.read();
+//				System.out.println(getRemotePort() + " registerReadInterest 处理时长:"
+//						+ (System.currentTimeMillis() - startProcessTimeStamp));
+//				socketChannel.read();
+				registeReadTimeStamp = System.currentTimeMillis();
+				registeReadCount++;
+				return true;
 			}
 		}
 
 		protected boolean dispatchWriteIfNotWriteable() {
 			try {
 				writableLock.lock();
-				boolean writable = channel.isWritable();
+				boolean writable = socketChannel.isWritable();
 				if (!writable) {
 					needDispatchWrite = true;
 				} else {
@@ -844,12 +1507,14 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		}
 
 		@Override
-		public void registerWriteInterest() {
+		public boolean registerWriteInterest() {
 			if (!dispatchWriteIfNotWriteable()) {
-//				System.out.println(getRemotePort() + " processSocketWrite again");
+				System.out.println(getRemotePort() + " processSocketWrite again");
 				endpoint.getHandler().processSocket(this, SocketEvent.OPEN_WRITE, true);
+				return true;
 			} else {
-//				System.err.println(getRemotePort() + " registerWriteInterest");
+				System.out.println(getRemotePort() + " registerWriteInterest");
+				return true;
 			}
 		}
 
@@ -858,14 +1523,33 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			if (exception != null) {
 				throw exception;
 			}
+
+			ByteBuf byteBuf = socketChannel.alloc().buffer(len);
+			byteBuf.writeBytes(buf, off, len);
 			// System.out.println("write " + buf + " start");
-			ChannelFuture future = channel.writeAndFlush(Unpooled.wrappedBuffer(buf, off, len));
+			TimedWrapper wrapper = new TimedWrapper(byteBuf);
+			ChannelFuture future = socketChannel.writeAndFlush(wrapper);
+//			future.addListener(new GenericFutureListener<Future<? super Void>>() {
+
+//				@Override
+//				public void operationComplete(Future<? super Void> future) throws Exception {
+			// TODO Auto-generated method stub
+//					long useTime = System.currentTimeMillis() - wrapper.getCreateTime();
+//					writeUseTotalTime += useTime;
+//					System.out.println(getRemotePort() + " 写出TimedWrapper用时：" + useTime + " 总用时：" + writeUseTotalTime);
+//				}
+//			});
+
 			try {
-				future.sync();
+				lastWriteFuture = future;
+				if (lastWriteFuture != null && !lastWriteFuture.isDone()) {
+					lastWriteFuture.await();
+				}
 			} catch (InterruptedException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
+
 			// System.out.println("write " + buf + " finish");
 		}
 
@@ -878,17 +1562,28 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				ByteBufWrapper byteBufWrapper = (ByteBufWrapper) from;
 				// System.out.println("write " + buf + " start");
 				ByteBuf delegate = byteBufWrapper.delegate;
-				ByteBuf newDelegate = channel.alloc().buffer(delegate.capacity());
-				if (delegate.refCnt() > 1) {
-					newDelegate.retain(delegate.refCnt() - 1);
-					while (delegate.refCnt() > 1) {
-						delegate.release();
+				if (from instanceof SlicedByteBufWrapper) {
+					delegate.retain();
+					System.err.println("slice retain");
+				} else {
+					if (byteBufWrapper.mainRefCount != 1) {
+						throw new RuntimeException();
 					}
+					ByteBuf newDelegate = socketChannel.alloc().buffer(delegate.capacity());
+//					if (delegate.refCnt() > 1) {
+//						newDelegate.retain(delegate.refCnt() - 1);
+//						while (delegate.refCnt() > 1) {
+//							delegate.release();
+//						}
+//					}
+					byteBufWrapper.delegate = newDelegate;
 				}
-				byteBufWrapper.delegate = newDelegate;
-				ChannelFuture future = channel.writeAndFlush(delegate);
+				ChannelFuture future = socketChannel.writeAndFlush(new TimedWrapper(delegate));
 				try {
-					future.sync();
+					lastWriteFuture = future;
+					if (lastWriteFuture != null && !lastWriteFuture.isDone()) {
+						lastWriteFuture.await();
+					}
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -896,14 +1591,15 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				// System.out.println("write " + buf + " finish");
 			} else if (from instanceof ByteBufferWrapper) {
 				// System.out.println("writeBlocking");
-				ByteBuf byteBuf = channel.alloc().buffer(from.getRemaining());
-				while (from.hasRemaining()) {
-					byteBuf.writeByte(from.getByte());
-				}
+				ByteBuf byteBuf = socketChannel.alloc().buffer(from.getRemaining());
+				byteBuf.writeBytes(((ByteBufferWrapper) from).getByteBuffer());
 				// System.out.println("write " + byteBuf + " start");
-				ChannelFuture future = channel.writeAndFlush(byteBuf);
+				ChannelFuture future = socketChannel.writeAndFlush(new TimedWrapper(byteBuf));
 				try {
-					future.sync();
+					lastWriteFuture = future;
+					if (lastWriteFuture != null && !lastWriteFuture.isDone()) {
+						lastWriteFuture.await();
+					}
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -916,24 +1612,27 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			if (exception != null) {
 				throw exception;
 			}
-			if (len > 0 && nonBlockingWriteBuffer.isEmpty() && channel.isWritable()) {
-				if (!channel.isWritable()) {
+			if (len > 0 && nonBlockingWriteBuffer.isEmpty() && socketChannel.isWritable()) {//
+				if (!socketChannel.isWritable()) {
 					System.err.println("not writeable but still write");
 				}
 
-				ChannelFuture future = channel.writeAndFlush(Unpooled.wrappedBuffer(buf, off, len));
+				ByteBuf byteBuf = socketChannel.alloc().buffer(len);
+				byteBuf.writeBytes(buf, off, len);
+				ChannelFuture future = socketChannel.writeAndFlush(new TimedWrapper(byteBuf));
 
+			} else {
+				if (len > 0) {
+					// Remaining data must be buffered
+					nonBlockingWriteBuffer.add(buf, off, len);
+				}
 			}
 
-			if (len > 0) {
-				// Remaining data must be buffered
-				nonBlockingWriteBuffer.add(buf, off, len);
-			}
 		}
 
 		@Override
 		protected void writeNonBlocking(BufWrapper from) throws IOException {
-			if (from.hasRemaining() && nonBlockingWriteBuffer.isEmpty() && channel.isWritable()) {
+			if (from.hasRemaining() && nonBlockingWriteBuffer.isEmpty() && socketChannel.isWritable()) {//
 				writeNonBlockingInternal(from);
 			}
 
@@ -949,34 +1648,40 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				throw exception;
 			}
 			if (from instanceof ByteBufWrapper) {
-				if (!channel.isWritable()) {
+				if (!socketChannel.isWritable()) {
 					System.err.println("not writeable but still write");
 				}
 
 				ByteBufWrapper byteBufWrapper = (ByteBufWrapper) from;
 				// System.out.println("write " + buf + " start");
 				ByteBuf delegate = byteBufWrapper.delegate;
-				ByteBuf newDelegate = channel.alloc().buffer(delegate.capacity());
-				if (delegate.refCnt() > 1) {
-					newDelegate.retain(delegate.refCnt() - 1);
-					while (delegate.refCnt() > 1) {
-						delegate.release();
+				if (from instanceof SlicedByteBufWrapper) {
+					delegate.retain();
+					System.err.println("slice retain");
+				} else {
+					if (byteBufWrapper.mainRefCount != 1) {
+						throw new RuntimeException();
 					}
+					ByteBuf newDelegate = socketChannel.alloc().buffer(delegate.capacity());
+//					if (delegate.refCnt() > 1) {
+//						newDelegate.retain(delegate.refCnt() - 1);
+//						while (delegate.refCnt() > 1) {
+//							delegate.release();
+//						}
+//					}
+					byteBufWrapper.delegate = newDelegate;
 				}
-				byteBufWrapper.delegate = newDelegate;
-				ChannelFuture future = channel.writeAndFlush(delegate);
+				ChannelFuture future = socketChannel.writeAndFlush(new TimedWrapper(delegate));
 				// System.out.println("write " + buf + " finish");
 			} else if (from instanceof ByteBufferWrapper) {
 				ByteBufferWrapper byteBufferWrapper = (ByteBufferWrapper) from;
-				if (!channel.isWritable()) {
+				if (!socketChannel.isWritable()) {
 					System.err.println("not writeable but still write");
 				}
 
-				ByteBuf byteBuf = channel.alloc().buffer(from.getRemaining());
-				while (from.hasRemaining()) {
-					byteBuf.writeByte(from.getByte());
-				}
-				ChannelFuture future = channel.writeAndFlush(byteBuf);
+				ByteBuf byteBuf = socketChannel.alloc().buffer(from.getRemaining());
+				byteBuf.writeBytes(((ByteBufferWrapper) from).getByteBuffer());
+				ChannelFuture future = socketChannel.writeAndFlush(new TimedWrapper(byteBuf));
 			}
 		}
 
@@ -986,7 +1691,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				throw exception;
 			}
 			// System.out.println("channel.flush();");
-			// channel.flush();
+			socketChannel.flush();
 		}
 
 		@Override
@@ -994,7 +1699,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			if (exception != null) {
 				throw exception;
 			}
-			// channel.flush();
+			// socketChannel.flush();
 			boolean dataLeft = false;
 			if (!nonBlockingWriteBuffer.isEmpty()) {
 				dataLeft = nonBlockingWriteBuffer.write(this, false);
@@ -1004,8 +1709,17 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 		@Override
 		protected void doClose() {
+			try {
+				if (lastWriteFuture != null && !lastWriteFuture.isDone()) {
+					lastWriteFuture.await();
+				}
+				lastWriteFuture = null;
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 			// releaseBuf();
-			ChannelFuture future = channel.close();
+			ChannelFuture future = socketChannel.close();
 			try {
 				future.sync();
 			} catch (InterruptedException e) {
@@ -1062,491 +1776,6 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			return null;
 		}
 
-		private static class ByteBufWrapper implements BufWrapper {
-
-//			private NettyChannel channel;
-
-			private int readCount = 0;
-
-			private volatile ByteBuf delegate = Unpooled.EMPTY_BUFFER;
-
-			private volatile int refCount = 0;
-
-			private boolean trace = false;
-
-			private boolean readMode = true;
-
-			public ByteBufWrapper() {
-				super();
-//				this.channel = channel;
-			}
-
-			public ByteBufWrapper(ByteBuf delegate) {
-//				this(channel);
-				this.delegate = delegate;
-				this.refCount = delegate.refCnt();
-			}
-
-			public void setDelegate(ByteBuf delegate) {
-				this.delegate = delegate;
-			}
-
-			// protected void releaseBuf() {
-			// delegate.release();
-			// }
-
-			@Override
-			public void switchToWriteMode(boolean compact) {
-				if (readMode) {
-					if (compact) {
-						if (!delegate.isReadable()) {
-
-						}
-						int capacity = delegate.capacity();
-						delegate.discardReadBytes();
-						if (capacity != delegate.capacity()) {
-							System.err.println("capacity changed after compact");
-						}
-					}
-//					if (compact && delegate.readerIndex() > 0) {
-//						if (!delegate.isReadable() && !delegate.isWritable()) {
-//							// 正常情况
-//							if (channel != null) {
-//								int capacity = delegate.capacity();
-//								releaseDelegate();
-//								if (NettyEndpoint.debug) {
-//									System.out.println("delegate.release();");
-//								}
-//								delegate = channel.channel.alloc().buffer(capacity);
-//								System.out.println(this + " delegate after compact:" + delegate);
-//							} else {
-//								delegate.discardReadBytes();
-//							}
-//						} else {
-//							if (delegate.isReadable()) {
-//								System.err.println(channel.getRemotePort() + " byteBuf还有未读数据");
-//							}
-//							// delegate.readerIndex(delegate.writerIndex());
-//							delegate.discardReadBytes();
-//						}
-//					}
-					readMode = false;
-				}
-			}
-
-			@Override
-			public void switchToWriteMode() {
-				switchToWriteMode(true);
-			}
-
-			@Override
-			public void setRetain(int retain) {
-				throw new RuntimeException();
-			}
-
-			@Override
-			public void clearRetain() {
-				throw new RuntimeException();
-			}
-
-			@Override
-			public int getRetain() {
-				throw new RuntimeException();
-			}
-
-			@Override
-			public boolean isWriteMode() {
-				return !readMode;
-			}
-
-			@Override
-			public void switchToReadMode() {
-				if (!readMode) {
-					readMode = true;
-				}
-			}
-
-			@Override
-			public boolean isReadMode() {
-				return readMode;
-			}
-
-			@Override
-			public boolean reuseable() {
-				return false;
-			}
-
-			@Override
-			public int getLimit() {
-				if (readMode) {
-					return delegate.writerIndex();
-				} else {
-					return delegate.capacity();
-				}
-			}
-
-			@Override
-			public void setLimit(int limit) {
-				if (trace) {
-					System.out.println("setLimit");
-				}
-				if (readMode) {
-					delegate.writerIndex(limit);
-				} else {
-					delegate.capacity(limit);
-//					if (delegate.capacity() < limit) {
-//						ByteBuf buf = channel.channel.alloc().buffer(limit);
-//						buf.writeBytes(delegate);
-//						releaseDelegate();
-//						if (NettyEndpoint.debug) {
-//							System.err.println(this + " set Limit release");
-//						}
-//						delegate = buf;
-//						System.out.println(this + " delegate changed");
-//					} else if (delegate.capacity() == limit) {
-//
-//					} else {
-//						delegate.capacity(limit);
-//					}
-				}
-			}
-
-			@Override
-			public byte getByte() {
-				if (!readMode) {
-					throw new RuntimeException();
-				}
-				if (trace) {
-					System.out.println("getByte");
-				}
-				return delegate.readByte();
-			}
-
-			@Override
-			public void getBytes(byte[] b, int off, int len) {
-				if (!readMode) {
-					throw new RuntimeException();
-				}
-				if (trace) {
-					System.out.println("getByte b");
-				}
-				if (delegate.refCnt() == 0) {
-					throw new RuntimeException();
-				}
-				delegate.readBytes(b, off, len);
-			}
-
-			@Override
-			public byte getByte(int index) {
-				if (!readMode) {
-					throw new RuntimeException();
-				}
-				return delegate.getByte(index);
-			}
-
-			@Override
-			public BufWrapper slice(int limit) {
-				// TODO aaa
-				return null;
-			}
-
-			@Override
-			public int getPosition() {
-				if (readMode) {
-					return delegate.readerIndex();
-				} else {
-					return delegate.writerIndex();
-				}
-			}
-
-			@Override
-			public void setPosition(int position) {
-				if (trace) {
-					System.out.println("setPosition");
-				}
-				if (readMode) {
-					delegate.readerIndex(position);
-				} else {
-					delegate.writerIndex(position);
-				}
-			}
-
-			@Override
-			public boolean hasArray() {
-				return delegate.hasArray();
-			}
-
-			@Override
-			public byte[] getArray() {
-				return delegate.array();
-			}
-
-			@Override
-			public int getArrayOffset() {
-				return delegate.arrayOffset();
-			}
-
-			@Override
-			public boolean isDirect() {
-				return delegate.isDirect();
-			}
-
-			@Override
-			public boolean isEmpty() {
-				return delegate.readerIndex() == delegate.writerIndex();
-			}
-
-			@Override
-			public boolean isWritable() {
-				return delegate.writableBytes() > 0;
-			}
-
-			@Override
-			public int getRemaining() {
-				if (readMode) {
-					return delegate.writerIndex() - delegate.readerIndex();
-				} else {
-					return delegate.capacity() - delegate.writerIndex();
-				}
-			}
-
-			@Override
-			public boolean hasRemaining() {
-				if (readMode) {
-					return delegate.writerIndex() > delegate.readerIndex();
-				} else {
-					return delegate.capacity() > delegate.writerIndex();
-				}
-			}
-
-			@Override
-			public boolean hasNoRemaining() {
-				if (readMode) {
-					return delegate.writerIndex() <= delegate.readerIndex();
-				} else {
-					return delegate.capacity() <= delegate.writerIndex();
-				}
-			}
-
-			@Override
-			public int getCapacity() {
-				return delegate.capacity();
-			}
-
-			@Override
-			public void setByte(int index, byte b) {
-				if (readMode) {
-					throw new RuntimeException();
-				}
-				if (trace) {
-					System.out.println("setByte");
-				}
-				delegate.setByte(index, b);
-			}
-
-			@Override
-			public void putByte(byte b) {
-				if (readMode) {
-					throw new RuntimeException();
-				}
-				delegate.writeByte(b);
-			}
-
-			@Override
-			public void putBytes(byte[] b) {
-				if (readMode) {
-					throw new RuntimeException();
-				}
-				delegate.writeBytes(b);
-			}
-
-			@Override
-			public void putBytes(byte[] b, int off, int len) {
-				if (readMode) {
-					throw new RuntimeException();
-				}
-				delegate.writeBytes(b, off, len);
-			}
-
-			@Override
-			public int transferTo(BufWrapper to) {
-				if (!this.isReadMode() || this.hasNoRemaining()) {
-					throw new RuntimeException();
-				}
-				if (!to.isWriteMode() || to.hasNoRemaining()) {
-					throw new RuntimeException();
-				}
-				int max = Math.min(this.getRemaining(), to.getRemaining());
-				if (max > 0) {
-					int oldLimit = this.getLimit();
-					this.setLimit(this.getPosition() + max);
-					while (this.hasRemaining()) {
-						to.putByte(this.getByte());
-					}
-					this.setLimit(oldLimit);
-				}
-				return max;
-			}
-
-			@Override
-			public void clearWrite() {
-				delegate.writerIndex(delegate.readerIndex());
-			}
-
-//			@Override
-//			public boolean fill(boolean block) throws IOException {
-//				if (channel != null) {
-//					int nRead = channel.read(block, this);
-//					if (nRead > 0) {
-//						return true;
-//					} else if (nRead == -1) {
-//						throw new EOFException(sm.getString("iib.eof.error"));
-//					} else {
-//						return false;
-//					}
-//				} else {
-//					throw new CloseNowException(sm.getString("iib.eof.error"));
-//				}
-//			}
-
-//			@Override
-//			public int doRead(PreInputBuffer handler) throws IOException {
-//				if (trace) {
-//					System.out.println("doRead");
-//				}
-//				if (hasNoRemaining()) {
-//					// byteBuf.release();
-//					fill(true);
-//				}
-//				int length = delegate.writerIndex() - delegate.readerIndex();
-//				handler.setBufWrapper(this.duplicate());//
-//				delegate.readerIndex(delegate.writerIndex());
-//				return length;
-//			}
-
-			@Override
-			public void reset() {
-				if (trace) {
-					System.out.println("reset");
-				}
-				// TODO Auto-generated method stub
-				// byteBuf.release();
-				if (delegate.writerIndex() > delegate.capacity()) {
-					System.out.println("writerIndex bigger then capacity");
-				}
-//				delegate.readerIndex(delegate.writerIndex());
-				switchToWriteMode();
-				delegate.writerIndex(0);
-			}
-
-			@Override
-			public ByteBuffer nioBuffer() {
-				if (trace) {
-					System.out.println("nioBuffer");
-				}
-				return delegate.nioBuffer();
-			}
-
-			@Override
-			public BufWrapper duplicate() {
-				if (trace) {
-					System.out.println("duplicate");
-				}
-				ByteBufWrapper bufWrapper = new ByteBufWrapper(delegate.duplicate());
-//				bufWrapper.delegate = delegate.duplicate();
-				return bufWrapper;
-			}
-
-			@Override
-			public void startTrace() {
-				// trace = true;
-			}
-
-			@Override
-			public void retain() {
-				if (delegate == Unpooled.EMPTY_BUFFER) {
-					refCount++;
-				} else {
-					retainDelegate();
-					refCount++;
-				}
-			}
-
-			@Override
-			public boolean released() {
-				if (refCount() == 0) {
-					return true;
-				}
-				return false;
-			}
-
-			@Override
-			public void release() {
-				if (delegate == Unpooled.EMPTY_BUFFER) {
-					refCount--;
-					if (refCount < 0) {
-						throw new RuntimeException();
-					}
-					return;
-				} else {
-					refCount--;
-					if (delegate.isReadable()) {
-						byte[] bytes = new byte[Math.min(delegate.readableBytes(), 100)];
-						for (int i = 0; i < bytes.length; i++) {
-							bytes[i] = delegate.readByte();
-						}
-//						System.out.println("释放buffer时还有未读数据：" + new String(bytes));
-					}
-					releaseDelegate();
-				}
-//				delegate = Unpooled.EMPTY_BUFFER;
-			}
-
-			@Override
-			public int refCount() {
-				if (delegate == Unpooled.EMPTY_BUFFER) {
-					return refCount;
-				} else {
-					return delegate.refCnt();
-				}
-			}
-
-			@Override
-			public String printInfo() {
-				StringBuffer sb = new StringBuffer();
-				sb.append("\r\n");
-				sb.append("isEmptyBuffer : " + (delegate == Unpooled.EMPTY_BUFFER) + "\t");
-				sb.append("refCnt : " + delegate.refCnt() + "\t");
-				sb.append("readerIndex : " + delegate.readerIndex() + "\t");
-				sb.append("writerIndex : " + delegate.writerIndex() + "\t");
-				sb.append("hashCode : " + delegate.hashCode() + "\t");
-//				sb.append("nioBuffer : " + delegate.nioBuffer());
-				return sb.toString();
-			}
-
-			@Override
-			public void expand(int newSize) {
-				// NO-OP
-			}
-
-			private void retainDelegate() {
-				delegate.retain();
-			}
-
-			private void releaseDelegate() {
-				if (delegate.refCnt() > 1) {
-					delegate.release();
-				} else if (delegate.refCnt() == 1) {
-					delegate.release();
-					delegate = Unpooled.EMPTY_BUFFER;
-					if (refCount != 0) {
-						throw new RuntimeException();
-					}
-				}
-			}
-
-		}
-
 	}
 
 	private class NettySslHandler extends ChannelDuplexHandler {
@@ -1561,6 +1790,10 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		private boolean first;
 
 		protected HandshakeStatus handshakeStatus; // gets set by handshake
+
+		private long unwrapTime = 0;
+
+		private long wrapTime = 0;
 
 		private ByteBuffer tempBuf = null;
 
@@ -1849,7 +2082,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 //			byteBuffer.position(netInBuffer.readerIndex());
 //			byteBuffer.limit(netInBuffer.writerIndex());
 
-			ByteBuf dstBuf = ctx.alloc().buffer(16384);
+			ByteBuf dstBuf = ctx.alloc().buffer(65535, Integer.MAX_VALUE);
 			ByteBuffer dst = getByteBufferForWrite(dstBuf);
 
 			// the data read
@@ -1872,7 +2105,12 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 				if (tempBuf.remaining() == 0) {
 //					System.err.println("before tempBuf remaining" + tempBuf.remaining());
 				}
+				long startTime = System.currentTimeMillis();
 				unwrap = nettyChannel.sslEngine.unwrap(tempBuf, dst);
+				long useTime = System.currentTimeMillis() - startTime;
+				unwrapTime += useTime;
+				// System.out.println(nettyChannel.getRemotePort() + " 解密用时：" + useTime + "
+				// 总用时：" + unwrapTime);
 				if (dst.position() == 0 && tempBuf.remaining() != 0) {
 //					System.err.println("after tempBuf remaining" + tempBuf.remaining());
 				}
@@ -1960,7 +2198,12 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			dstBuf.writerIndex(dstBuf.capacity());
 			ByteBuffer dst = dstBuf.nioBuffer();
 
+			long startTime = System.currentTimeMillis();
 			SSLEngineResult result = nettyChannel.sslEngine.wrap(src, dst);
+			long useTime = System.currentTimeMillis() - startTime;
+			wrapTime += useTime;
+			// System.out.println(nettyChannel.getRemotePort() + " 加密用时：" + useTime + "
+			// 总用时：" + wrapTime);
 			// The number of bytes written
 			int written = result.bytesConsumed();
 			dstBuf.readerIndex(0);
@@ -1994,10 +2237,6 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 
 	private class NettyTomcatHandler extends ChannelDuplexHandler {
 
-		private List<ByteBuf> list;
-
-		private long lastRead = -1;
-
 		@Override
 		public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
 			System.out.println(ctx.channel() + " channel added");
@@ -2025,14 +2264,8 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			if (msg instanceof ByteBuf) {
 
 				ByteBuf byteBuf = (ByteBuf) msg;
-
 				NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
-				nettyChannel.offer(new org.apache.tomcat.util.net.NettyEndpoint.NettyChannel.ByteBufWrapper(byteBuf));
-
-				if (nettyChannel.needDispatchRead()) {
-//					System.out.println(nettyChannel.getRemotePort() + " " + "processSocketRead");
-					NettyEndpoint.this.getHandler().processSocket(nettyChannel, SocketEvent.OPEN_READ, true);
-				}
+				nettyChannel.offer(new ByteBufWrapper(byteBuf));
 
 			} else {
 				ctx.fireChannelRead(msg);
@@ -2055,6 +2288,15 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 		}
 
 		@Override
+		public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+			if (msg instanceof TimedWrapper) {
+				super.write(ctx, ((TimedWrapper) msg).getByteBuf(), promise);
+			} else {
+				super.write(ctx, msg, promise);
+			}
+		}
+
+		@Override
 		public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
 			// TODO Auto-generated method stub
 			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
@@ -2073,7 +2315,7 @@ public class NettyEndpoint extends AbstractJsseEndpoint<io.netty.channel.Channel
 			// TODO Auto-generated method stub
 			NettyChannel nettyChannel = getOrAddChannel((SocketChannel) ctx.channel());
 			System.out.println(nettyChannel.getRemotePort() + " " + "exceptionCaught");
-//			cause.printStackTrace();
+			cause.printStackTrace();
 			if (nettyChannel.needDispatchRead()) {
 				NettyEndpoint.this.getHandler().processSocket(nettyChannel, SocketEvent.ERROR, true);
 			} else {

@@ -128,6 +128,11 @@ public class WsHttpUpgradeHandler implements InternalHttpUpgradeHandler {
 	}
 
 	@Override
+	public boolean processInIoThread(SocketEvent event) throws IOException {
+		return true;
+	}
+
+	@Override
 	public SocketState upgradeDispatch(SocketEvent status) {
 		switch (status) {
 		case OPEN_READ:

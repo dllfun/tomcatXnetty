@@ -193,7 +193,9 @@ public class Http11InputBuffer extends RequestAction {
 		}
 
 		if (!isRequestBodyFullyRead()) {
-			registerReadInterest();
+			if (!registerReadInterest()) {
+				return true;
+			}
 		}
 
 		return false;
@@ -245,8 +247,8 @@ public class Http11InputBuffer extends RequestAction {
 	}
 
 	@Override
-	public final void registerReadInterest() {
-		((SocketChannel) processor.getChannel()).registerReadInterest();
+	public final boolean registerReadInterest() {
+		return ((SocketChannel) processor.getChannel()).registerReadInterest();
 	}
 
 	/**
@@ -345,9 +347,9 @@ public class Http11InputBuffer extends RequestAction {
 				return ByteBuffer.wrap(appReadBuffer.getArray(), appReadBuffer.getPosition(), available);
 			} else {
 				ByteBuffer byteBuffer = ByteBuffer.allocate(appReadBuffer.getRemaining());
-				while (appReadBuffer.hasRemaining()) {
-					byteBuffer.put(appReadBuffer.getByte());
-				}
+				BufWrapper slice = appReadBuffer.getSlice(available);
+				byteBuffer.put(slice.nioBuffer());
+				byteBuffer.flip();
 				return byteBuffer;
 			}
 		} else {

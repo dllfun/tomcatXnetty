@@ -88,12 +88,19 @@ public class FlowCtrlOutputFilter extends ProcessorComponent implements OutputFi
 					return written;
 				}
 
-				int orgLimit = chunk.getLimit();
-				chunk.setLimit(chunk.getPosition() + connectionReservation);
-				// Do the write
-				int len = next.doWrite(chunk);
-				written += len;
-				chunk.setLimit(orgLimit);
+//				int orgLimit = chunk.getLimit();
+//				chunk.setLimit(chunk.getPosition() + connectionReservation);
+				if (connectionReservation < chunk.getRemaining()) {
+					BufWrapper slice = chunk.getSlice(connectionReservation);
+					// Do the write
+					int len = next.doWrite(slice);
+					written += len;
+				} else {
+					// Do the write
+					int len = next.doWrite(chunk);
+					written += len;
+				}
+//				chunk.setLimit(orgLimit);
 				streamReservation -= connectionReservation;
 				left -= connectionReservation;
 			}

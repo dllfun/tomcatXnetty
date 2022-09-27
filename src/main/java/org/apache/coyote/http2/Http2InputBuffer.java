@@ -63,7 +63,7 @@ public class Http2InputBuffer extends RequestAction {
 	}
 
 	@Override
-	public final void registerReadInterest() {
+	public final boolean registerReadInterest() {
 		// Should never be called for StreamProcessor as isReadyForRead() is
 		// overridden
 		throw new UnsupportedOperationException();
@@ -250,7 +250,7 @@ public class Http2InputBuffer extends RequestAction {
 
 	@Override
 	public void recycle() {
-
+		resetFilters();
 	}
 
 }

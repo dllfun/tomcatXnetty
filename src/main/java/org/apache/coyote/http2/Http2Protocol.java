@@ -101,6 +101,7 @@ public class Http2Protocol implements UpgradeProtocol {
 		// TODO remove
 		// setCompression("force");
 		maxConcurrentStreamExecution = 1;
+		//initialWindowSize = (1 << 30) - 1;
 	}
 
 	@Override

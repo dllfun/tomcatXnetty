@@ -139,6 +139,7 @@ class WindowAllocationManager {
 				stream.wait();
 			} else {
 				stream.wait(timeout);
+				waitingFor = NONE;
 			}
 		}
 	}
@@ -172,24 +173,27 @@ class WindowAllocationManager {
 				// to stream.notify(). Additional notify() calls may trigger
 				// unexpected timeouts.
 				waitingFor = NONE;
-				if (((AbstractProcessor) stream.getCurrentProcessor()).isBlockingWrite()) {
-					// Blocking, so use notify to release StreamOutputBuffer
-					if (log.isDebugEnabled()) {
-						log.debug(sm.getString("windowAllocationManager.notified", stream.getConnectionId(),
-								stream.getIdentifier()));
+				StreamProcessor streamProcessor = (StreamProcessor) stream.getCurrentProcessor();
+				if (streamProcessor != null) {
+					if (streamProcessor.isBlockingWrite()) {
+						// Blocking, so use notify to release StreamOutputBuffer
+						if (log.isDebugEnabled()) {
+							log.debug(sm.getString("windowAllocationManager.notified", stream.getConnectionId(),
+									stream.getIdentifier()));
+						}
+						stream.notify();
+					} else {
+						// Non-blocking so dispatch
+						if (log.isDebugEnabled()) {
+							log.debug(sm.getString("windowAllocationManager.dispatched", stream.getConnectionId(),
+									stream.getIdentifier()));
+						}
+						streamProcessor.dispatchWrite();
+						// Need to explicitly execute dispatches on the StreamProcessor
+						// as this thread is being processed by an UpgradeProcessor
+						// which won't see this dispatch
+						streamProcessor.dispatchExecute();
 					}
-					stream.notify();
-				} else {
-					// Non-blocking so dispatch
-					if (log.isDebugEnabled()) {
-						log.debug(sm.getString("windowAllocationManager.dispatched", stream.getConnectionId(),
-								stream.getIdentifier()));
-					}
-					((AbstractProcessor) stream.getCurrentProcessor()).dispatchWrite();
-					// Need to explicitly execute dispatches on the StreamProcessor
-					// as this thread is being processed by an UpgradeProcessor
-					// which won't see this dispatch
-					((AbstractProcessor) stream.getCurrentProcessor()).dispatchExecute();
 				}
 			}
 		}

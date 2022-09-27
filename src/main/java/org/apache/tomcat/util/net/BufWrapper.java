@@ -32,7 +32,9 @@ public interface BufWrapper {
 
 	public byte getByte(int index);
 
-	public BufWrapper slice(int limit);
+	public BufWrapper getSlice(int len);
+
+	public BufWrapper getRetaindSlice(int len);
 
 	public int getPosition();
 
@@ -66,6 +68,8 @@ public interface BufWrapper {
 
 	public void putBytes(byte[] b, int off, int len);
 
+	public void putBytes(ByteBuffer byteBuffer);
+
 	public int transferTo(BufWrapper to);
 
 	public void clearWrite();
@@ -96,6 +100,8 @@ public interface BufWrapper {
 	public BufWrapper duplicate();
 
 	public void startTrace();
+
+	public void stopTrace();
 
 	public void retain();
 

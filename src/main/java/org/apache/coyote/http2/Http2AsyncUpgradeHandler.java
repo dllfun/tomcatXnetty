@@ -256,12 +256,15 @@ public class Http2AsyncUpgradeHandler extends Http2UpgradeHandler {
 			}
 			if (writeable) {
 				ByteUtil.set31Bits(header, 5, stream.getIdAsInt());
-				int orgLimit = data.getLimit();
-				data.setLimit(data.getPosition() + len);
+//				int orgLimit = data.getLimit();
+//				data.setLimit(data.getPosition() + len);
+				if (len < data.getRemaining()) {
+					data = data.getSlice(len);
+				}
 				getChannel().write(BlockingMode.BLOCK, protocol.getWriteTimeout(), TimeUnit.MILLISECONDS, null,
 						SocketChannel.COMPLETE_WRITE, applicationErrorCompletion,
 						ByteBufferWrapper.wrapper(ByteBuffer.wrap(header), true), data);
-				data.setLimit(orgLimit);
+//				data.setLimit(orgLimit);
 				handleAsyncException();
 			}
 		}

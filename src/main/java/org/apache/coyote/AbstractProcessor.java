@@ -438,6 +438,11 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 	protected abstract SocketState dispatchFinishActions() throws IOException;
 
 	@Override
+	public boolean processInIoThread(SocketEvent event) throws IOException {
+		return true;
+	}
+
+	@Override
 	protected final SocketState service(SocketEvent event) throws IOException {
 		SocketState state = SocketState.OPEN;
 		boolean cont = false;
@@ -818,6 +823,8 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 		if (recycled) {
 			throw new RuntimeException();
 		}
+//		System.out.println(exchangeData.getRequestURI().toString() + "处理请求总用时："
+//				+ (System.currentTimeMillis() - exchangeData.getStartTime()));
 		errorState = ErrorState.NONE;
 		exchangeData.recycle();
 		asyncStateMachine.recycle();

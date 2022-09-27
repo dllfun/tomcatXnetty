@@ -105,7 +105,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 
 	public NioEndpoint() {
 		// TODO remove
-		// setUseAsyncIO(false);
+		setUseAsyncIO(false);
 	}
 
 	/**
@@ -763,7 +763,15 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 							// Read goes before write
 							if (sk.isReadable()) {
 								if (socketWrapper.getReadLatch() != null) {
-									System.out.println(socketWrapper.getRemotePort() + " countDownReadLatch");
+									if (socketWrapper.registeReadTimeStamp != -1) {
+										long useTime = System.currentTimeMillis() - socketWrapper.registeReadTimeStamp;
+										socketWrapper.awaitReadTime += useTime;
+//										System.out.println(socketWrapper.getRemotePort() + " await read use " + useTime
+//												+ " total wait use " + socketWrapper.awaitReadTime + " count "
+//												+ socketWrapper.registeReadCount);
+									}
+									socketWrapper.startProcessTimeStamp = System.currentTimeMillis();
+//									System.out.println(socketWrapper.getRemotePort() + " countDownReadLatch");
 									socketWrapper.getReadLatch().countDown();
 								} else {
 									if (socketWrapper.getReadOperation() != null) {
@@ -771,13 +779,22 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 											closeSocket = true;
 										}
 									} else {
+										if (socketWrapper.registeReadTimeStamp != -1) {
+											long useTime = System.currentTimeMillis()
+													- socketWrapper.registeReadTimeStamp;
+											socketWrapper.awaitReadTime += useTime;
+//											System.out.println(socketWrapper.getRemotePort() + " await read use "
+//													+ useTime + " total wait use " + socketWrapper.awaitReadTime
+//													+ " count " + socketWrapper.registeReadCount);
+										}
+										socketWrapper.startProcessTimeStamp = System.currentTimeMillis();
 										getHandler().processSocket(socketWrapper, SocketEvent.OPEN_READ, true);
 									}
 								}
 							}
 							if (!closeSocket && sk.isWritable()) {
 								if (socketWrapper.getWriteLatch() != null) {
-									System.out.println(socketWrapper.getRemotePort() + " countDownWriteLatch");
+//									System.out.println(socketWrapper.getRemotePort() + " countDownWriteLatch");
 									socketWrapper.getWriteLatch().countDown();
 								} else {
 									if (socketWrapper.getWriteOperation() != null) {
@@ -981,10 +998,10 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 								// socketWrapper.interestOps(0);
 								socketWrapper.setError(new SocketTimeoutException());
 								if (readTimeout && socketWrapper.getReadLatch() != null) {
-									System.out.println(socketWrapper.getRemotePort() + " countDownReadLatch");
+//									System.out.println(socketWrapper.getRemotePort() + " countDownReadLatch");
 									socketWrapper.getReadLatch().countDown();
 								} else if (writeTimeout && socketWrapper.getWriteLatch() != null) {
-									System.out.println(socketWrapper.getRemotePort() + " countDownWriteLatch");
+//									System.out.println(socketWrapper.getRemotePort() + " countDownWriteLatch");
 									socketWrapper.getWriteLatch().countDown();
 								} else if (readTimeout && socketWrapper.getReadOperation() != null) {
 									if (!socketWrapper.getReadOperation().process()) {
@@ -1110,12 +1127,12 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		}
 
 		public void awaitReadLatch(long timeout, TimeUnit unit) throws InterruptedException {
-			System.out.println(getRemotePort() + " awaitReadLatch");
+//			System.out.println(getRemotePort() + " awaitReadLatch");
 			awaitLatch(readLatch, timeout, unit);
 		}
 
 		public void awaitWriteLatch(long timeout, TimeUnit unit) throws InterruptedException {
-			System.out.println(getRemotePort() + " awaitWriteLatch");
+//			System.out.println(getRemotePort() + " awaitWriteLatch");
 			awaitLatch(writeLatch, timeout, unit);
 		}
 
@@ -1221,7 +1238,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		}
 
 		@Override
-		public int read(boolean block, ByteBufferWrapper to) throws IOException {
+		protected int read(boolean block, ByteBufferWrapper to) throws IOException {
 			int nRead = populateReadBuffer(to);
 			if (nRead > 0) {
 				return nRead;
@@ -1382,7 +1399,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 							time = System.currentTimeMillis(); // reset our timeout timer
 							continue; // we successfully wrote, try again without a selector
 						}
-						System.out.println(getRemotePort() + " blockWriteFail");
+//						System.out.println(getRemotePort() + " blockWriteFail");
 						// }
 
 						if (getWriteLatch() == null || getWriteLatch().getCount() == 0) {
@@ -1425,6 +1442,9 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 				// registered for write once as both container and user code can trigger
 				// write registration.
 			} else {
+				if (!from.isReadMode()) {
+					throw new RuntimeException();
+				}
 				int n = 0;
 				do {
 					n = socket.write(from);
@@ -1437,7 +1457,7 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 		}
 
 		@Override
-		public void registerReadInterest() {
+		public boolean registerReadInterest() {
 			// if (isProcessing()) {
 			// registe will be handled by processor
 			// return;
@@ -1445,17 +1465,22 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("endpoint.debug.registerRead", this));
 			}
-			System.out.println(getRemotePort() + " registerReadInterest");
+			registeReadTimeStamp = System.currentTimeMillis();
+			registeReadCount++;
+//			System.out.println(getRemotePort() + " registerReadInterest 处理时长:"
+//					+ (System.currentTimeMillis() - startProcessTimeStamp));
 			getPoller().add(this, SelectionKey.OP_READ);
+			return true;
 		}
 
 		@Override
-		public void registerWriteInterest() {
+		public boolean registerWriteInterest() {
 			if (log.isDebugEnabled()) {
 				log.debug(sm.getString("endpoint.debug.registerWrite", this));
 			}
-			System.out.println(getRemotePort() + " registerWriteInterest");
+//			System.out.println(getRemotePort() + " registerWriteInterest");
 			getPoller().add(this, SelectionKey.OP_WRITE);
+			return true;
 		}
 
 		@Override
@@ -1709,9 +1734,6 @@ public class NioEndpoint extends SocketWrapperBaseEndpoint<NioChannel, SocketCha
 				}
 				if (nBytes > 0 || (nBytes == 0 && !buffersArrayHasRemaining(buffers, offset, length))) {
 					// The bytes processed are only updated in the completion handler
-					if (nBytes == 0) {
-						System.out.println("nBytes == 0");
-					}
 					completion.completed(Long.valueOf(nBytes), this);
 				} else if (nBytes < 0 || getError() != null) {
 					IOException error = getError();

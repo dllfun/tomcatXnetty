@@ -146,7 +146,7 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		if (getSocketWriteBuffer() == null) {
 			throw new IllegalStateException(sm.getString("socket.closed"));
 		}
-		getSocketWriteBuffer().switchToWriteMode();
+//		getSocketWriteBuffer().switchToWriteMode();
 		return getSocketWriteBuffer().isWritable() && nonBlockingWriteBuffer.isEmpty();
 	}
 
@@ -210,7 +210,6 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 //			}
 //			delegate.limit(delegate.capacity());
 			int nRead = read(block, byteBufferWrapper);
-			byteBufferWrapper.switchToReadMode();
 			// after read buffer may has changed if buffer is appReadBuffer
 //			delegate = byteBufferWrapper.getByteBuffer();
 //			delegate.limit(delegate.position()).reset();
@@ -225,6 +224,8 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 			throw new RuntimeException();
 		}
 	}
+
+	protected abstract int read(boolean block, ByteBufferWrapper to) throws IOException;
 
 	/**
 	 * Return input that has been read to the input buffer for re-reading by the
@@ -547,6 +548,9 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 
 		@Override
 		public void switchToWriteMode(boolean compact) {
+			if (trace) {
+				System.out.println();
+			}
 			if (released()) {
 				throw new RuntimeException();
 			}
@@ -663,9 +667,19 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		}
 
 		@Override
-		public BufWrapper slice(int limit) {
-			// TODO Auto-generated method stub
-			return null;
+		public ByteBufferWrapper getSlice(int len) {
+			if (!readMode) {
+				throw new RuntimeException();
+			}
+			ByteBuffer slice = delegate.slice();
+			slice.limit(len);
+			delegate.position(delegate.position() + len);
+			return ByteBufferWrapper.wrapper(slice, true);
+		}
+
+		@Override
+		public BufWrapper getRetaindSlice(int len) {
+			return getSlice(len);
 		}
 
 		@Override
@@ -784,6 +798,17 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		}
 
 		@Override
+		public void putBytes(ByteBuffer byteBuffer) {
+			if (readMode) {
+				throw new RuntimeException();
+			}
+			if (getPosition() < retain) {
+				throw new RuntimeException();
+			}
+			delegate.put(byteBuffer);
+		}
+
+		@Override
 		public void clearWrite() {
 			if (readMode) {
 				throw new RuntimeException();
@@ -871,20 +896,28 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 			if (!to.isWriteMode() || to.hasNoRemaining()) {
 				throw new RuntimeException();
 			}
-			int max = Math.min(this.getRemaining(), to.getRemaining());
-			if (max > 0) {
-				int oldLimit = this.getLimit();
-				this.setLimit(this.getPosition() + max);
+			int len = Math.min(this.getRemaining(), to.getRemaining());
+			if (len > 0) {
+//				int oldLimit = this.getLimit();
+//				this.setLimit(this.getPosition() + max);
 				if (to instanceof ByteBufferWrapper) {
-					((ByteBufferWrapper) to).delegate.put(this.delegate);
+					if (len < this.getRemaining()) {
+						ByteBufferWrapper slice = this.getSlice(len);
+						((ByteBufferWrapper) to).delegate.put(slice.delegate);
+					} else {
+						((ByteBufferWrapper) to).delegate.put(this.delegate);
+					}
 				} else {
-					while (this.hasRemaining()) {
-						to.putByte(this.getByte());
+					if (len < this.getRemaining()) {
+						ByteBufferWrapper slice = this.getSlice(len);
+						to.putBytes(slice.delegate);
+					} else {
+						to.putBytes(this.delegate);
 					}
 				}
-				this.setLimit(oldLimit);
+//				this.setLimit(oldLimit);
 			}
-			return max;
+			return len;
 		}
 
 		/**
@@ -964,6 +997,11 @@ public abstract class SocketWrapperBase<E> extends AbstractSocketChannel<E> {
 		@Override
 		public void startTrace() {
 			trace = true;
+		}
+
+		@Override
+		public void stopTrace() {
+			trace = false;
 		}
 
 		@Override

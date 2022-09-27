@@ -1,7 +1,6 @@
 package org.apache.coyote;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.NoSuchElementException;
 
@@ -12,6 +11,9 @@ import org.apache.tomcat.util.net.BufWrapper;
 
 public abstract class ResponseAction implements HttpOutputBuffer {
 
+	private final AbstractProcessor processor;
+
+	private final ExchangeData exchangeData;
 	/**
 	 * Filter library for processing the response body.
 	 */
@@ -32,7 +34,9 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 	 */
 	protected boolean responseFinished;
 
-	private AbstractProcessor processor;
+	private long writeTime = 0;
+
+	private boolean firstWrite = true;
 
 	private HttpOutputBuffer channelOutputBuffer = new HttpOutputBuffer() {
 
@@ -64,6 +68,7 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 
 	public ResponseAction(AbstractProcessor processor) {
 		this.processor = processor;
+		this.exchangeData = processor.exchangeData;
 		filterLibrary = new OutputFilter[0];
 		activeFilters = new OutputFilter[0];
 		lastActiveFilter = -1;
@@ -150,19 +155,28 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 
 	@Override
 	public final int doWrite(BufWrapper chunk) throws IOException {
-
+		long startTime = System.currentTimeMillis();
+		if (firstWrite) {
+			firstWrite = false;
+//			System.out.println(exchangeData.getRequestURI().toString() + "第一次写出用时："
+//					+ (System.currentTimeMillis() - exchangeData.getStartTime()));
+		}
 		// if (!responseData.isCommitted()) {
 		// Send the connector a request for commit. The connector should
 		// then validate the headers, send them (using sendHeaders) and
 		// set the filters accordingly.
 		// processor.actionCOMMIT();
 		// }
-
+		int written = -1;
 		if (lastActiveFilter == -1) {
-			return channelOutputBuffer.doWrite(chunk);
+			written = channelOutputBuffer.doWrite(chunk);
 		} else {
-			return activeFilters[lastActiveFilter].doWrite(chunk);
+			written = activeFilters[lastActiveFilter].doWrite(chunk);
 		}
+		long useTime = System.currentTimeMillis() - startTime;
+		writeTime += useTime;
+//		System.out.println("responseWrite 用时：" + useTime + "总用时：" + writeTime);
+		return written;
 	}
 
 	protected abstract int doWriteToChannel(BufWrapper chunk) throws IOException;
@@ -317,6 +331,8 @@ public abstract class ResponseAction implements HttpOutputBuffer {
 		}
 		lastActiveFilter = -1;
 		responseFinished = false;
+		writeTime = 0;
+		firstWrite = true;
 	}
 
 	public abstract void recycle();

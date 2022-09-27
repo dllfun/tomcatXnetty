@@ -288,7 +288,7 @@ public class Http2OutputBuffer extends ResponseAction {
 
 	@Override
 	public void recycle() {
-
+		resetFilter();
 	}
 
 }

@@ -181,9 +181,9 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 			result = readChunk.duplicate();
 			readChunk.setPosition(readChunk.getLimit());
 		} else {
-			result = readChunk.duplicate();
-			result.setLimit(readChunk.getPosition() + remaining);
-			readChunk.setPosition(readChunk.getPosition() + remaining);
+			result = readChunk.getSlice(remaining);
+//			result.setLimit(readChunk.getPosition() + remaining);
+//			readChunk.setPosition(readChunk.getPosition() + remaining);
 			remaining = 0;
 			// we need a CRLF
 			if ((readChunk.getPosition() + 1) >= readChunk.getLimit()) {
@@ -246,8 +246,9 @@ public class ChunkedInputFilter extends ProcessorComponent implements InputFilte
 	public void recycle() {
 		remaining = 0;
 		if (readChunk != null) {
-			readChunk.setPosition(0);
-			readChunk.setLimit(0);
+//			readChunk.setPosition(0);
+//			readChunk.setLimit(0);
+			readChunk = null;
 		}
 		endChunk = false;
 		needCRLFParse = false;

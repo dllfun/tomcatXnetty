@@ -347,6 +347,8 @@ class StreamProcessor extends AbstractProcessor implements HeaderEmitter {
 		if (cookieHeader != null) {
 			exchangeData.getRequestHeaders().addValue("cookie").setString(cookieHeader.toString());
 		}
+//		System.out.println(exchangeData.getRequestURI().toString() + "处理请求头用时："
+//				+ (System.currentTimeMillis() - exchangeData.getStartTime()));
 		return headerState == HEADER_STATE_REGULAR || headerState == HEADER_STATE_PSEUDO;
 	}
 

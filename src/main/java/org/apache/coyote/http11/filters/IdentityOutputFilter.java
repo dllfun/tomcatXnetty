@@ -80,6 +80,7 @@ public class IdentityOutputFilter extends ProcessorComponent implements OutputFi
 					// in the body; changing the chunk length to the number
 					// of bytes remaining
 					chunk.setLimit(chunk.getPosition() + (int) remaining);
+//					chunk = chunk.getSlice((int) remaining);
 					result = (int) remaining;
 					remaining = 0;
 				} else {

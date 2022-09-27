@@ -94,6 +94,14 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 	 */
 	protected final WriteBuffer nonBlockingWriteBuffer = new WriteBuffer(bufferedWriteSize);
 
+	public volatile int registeReadCount = 0;
+
+	public volatile long registeReadTimeStamp = -1;
+
+	public volatile long awaitReadTime = 0;
+
+	public volatile long startProcessTimeStamp = -1;
+
 	public AbstractSocketChannel(E socket, AbstractEndpoint<E, ?> endpoint) {
 		this.socket = socket;
 		this.endpoint = endpoint;
@@ -104,6 +112,12 @@ public abstract class AbstractSocketChannel<E> extends AbstractChannel implement
 			readPending = null;
 			writePending = null;
 		}
+	}
+
+	@Override
+	public void resetStatics() {
+		registeReadCount = 0;
+		awaitReadTime = 0;
 	}
 
 	// @Override

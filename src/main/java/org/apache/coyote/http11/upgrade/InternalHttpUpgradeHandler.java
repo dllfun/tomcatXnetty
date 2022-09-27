@@ -16,6 +16,8 @@
  */
 package org.apache.coyote.http11.upgrade;
 
+import java.io.IOException;
+
 import javax.servlet.http.HttpUpgradeHandler;
 
 import org.apache.tomcat.util.net.Endpoint.Handler.SocketState;
@@ -27,6 +29,8 @@ import org.apache.tomcat.util.net.SocketEvent;
  * access to Tomcat's I/O layer rather than going through the Servlet API.
  */
 public interface InternalHttpUpgradeHandler extends HttpUpgradeHandler {
+
+	boolean processInIoThread(SocketEvent event) throws IOException;
 
 	SocketState upgradeDispatch(SocketEvent status);
 

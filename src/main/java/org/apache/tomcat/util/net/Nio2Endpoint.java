@@ -857,7 +857,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		}
 
 		@Override
-		public int read(boolean block, ByteBufferWrapper to) throws IOException {
+		protected int read(boolean block, ByteBufferWrapper to) throws IOException {
 			checkError();
 
 			if (getSocket() == null) {
@@ -1367,11 +1367,11 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 		}
 
 		@Override
-		public void registerReadInterest() {
+		public boolean registerReadInterest() {
 			synchronized (readCompletionHandler) {
 				// A notification is already being sent
 				if (readNotify) {
-					return;
+					return false;
 				}
 				if (log.isDebugEnabled()) {
 					log.debug(sm.getString("endpoint.debug.registerRead", this));
@@ -1394,14 +1394,15 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					}
 				}
 			}
+			return true;
 		}
 
 		@Override
-		public void registerWriteInterest() {
+		public boolean registerWriteInterest() {
 			synchronized (writeCompletionHandler) {
 				// A notification is already being sent
 				if (writeNotify) {
-					return;
+					return false;
 				}
 				if (log.isDebugEnabled()) {
 					log.debug(sm.getString("endpoint.debug.registerWrite", this));
@@ -1415,6 +1416,7 @@ public class Nio2Endpoint extends SocketWrapperBaseEndpoint<Nio2Channel, Asynchr
 					// }
 				}
 			}
+			return true;
 		}
 
 		@Override

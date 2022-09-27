@@ -149,6 +149,7 @@ public class SecureNioChannel extends NioChannel {
 	 */
 	@Override
 	public boolean flush(boolean block, Selector s, long timeout) throws IOException {
+		netOutBuffer.switchToReadMode();
 		if (!block) {
 			flush(netOutBuffer);
 		} else {
@@ -258,6 +259,7 @@ public class SecureNioChannel extends NioChannel {
 						}
 					}
 				} else if (handshake.getStatus() == Status.CLOSED) {
+					netOutBuffer.switchToReadMode();
 					flush(netOutBuffer);
 					return HandShakeable.HANDSHAKE_FAIL;
 				} else {
@@ -265,6 +267,7 @@ public class SecureNioChannel extends NioChannel {
 					throw new IOException(
 							sm.getString("channel.nio.ssl.unexpectedStatusDuringWrap", handshake.getStatus()));
 				}
+				netOutBuffer.switchToReadMode();
 				if (handshakeStatus != HandshakeStatus.NEED_UNWRAP || (!flush(netOutBuffer))) {
 					// should actually return OP_READ if we have NEED_UNWRAP
 					if (handshakeStatus == HandshakeStatus.FINISHED) {
@@ -983,6 +986,10 @@ public class SecureNioChannel extends NioChannel {
 
 			// Force a flush
 			flush(netOutBuffer);
+
+			if (!src.isReadMode()) {
+				System.out.println();
+			}
 
 			return written;
 		}

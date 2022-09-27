@@ -22,7 +22,7 @@ public abstract class RequestAction implements InputReader {
 
 	private final AbstractProcessor processor;
 
-	// private RequestData requestData;
+	private final ExchangeData exchangeData;
 
 	// Used to avoid useless B2C conversion on the host name.
 	private char[] hostNameC = new char[0];
@@ -54,6 +54,10 @@ public abstract class RequestAction implements InputReader {
 	 */
 	private boolean swallowInput;
 
+	private long readTime = 0;
+
+	private boolean firstRead = true;
+
 	private InputReader channelInputReader = new InputReader() {
 
 		@Override
@@ -64,7 +68,7 @@ public abstract class RequestAction implements InputReader {
 
 	public RequestAction(AbstractProcessor processor) {
 		this.processor = processor;
-		// this.requestData = processor.requestData;
+		this.exchangeData = processor.exchangeData;
 		filterLibrary = new InputFilter[0];
 		activeFilters = new InputFilter[0];
 		lastActiveFilter = -1;
@@ -198,10 +202,22 @@ public abstract class RequestAction implements InputReader {
 
 	@Override
 	public final BufWrapper doRead() throws IOException {
-		if (lastActiveFilter == -1)
-			return channelInputReader.doRead();
-		else
-			return activeFilters[lastActiveFilter].doRead();
+		long startTime = System.currentTimeMillis();
+		if (firstRead) {
+			firstRead = false;
+//			System.out.println(exchangeData.getRequestURI().toString() + "第一次读取用时："
+//					+ (System.currentTimeMillis() - exchangeData.getStartTime()));
+		}
+		BufWrapper result = null;
+		if (lastActiveFilter == -1) {
+			result = channelInputReader.doRead();
+		} else {
+			result = activeFilters[lastActiveFilter].doRead();
+		}
+		long useTime = System.currentTimeMillis() - startTime;
+		readTime += useTime;
+//		System.out.println("requestRead 用时：" + useTime + "总用时：" + readTime);
+		return result;
 	}
 
 	protected abstract BufWrapper doReadFromChannel() throws IOException;
@@ -242,7 +258,7 @@ public abstract class RequestAction implements InputReader {
 
 	public abstract boolean isRequestBodyFullyRead();
 
-	public abstract void registerReadInterest();
+	public abstract boolean registerReadInterest();
 
 	public abstract boolean isTrailerFieldsReady();
 
@@ -378,6 +394,8 @@ public abstract class RequestAction implements InputReader {
 
 		lastActiveFilter = -1;
 		swallowInput = true;
+		readTime = 0;
+		firstRead = true;
 	}
 
 	public abstract void recycle();

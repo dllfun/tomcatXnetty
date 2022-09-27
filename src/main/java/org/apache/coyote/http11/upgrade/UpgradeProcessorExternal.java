@@ -80,6 +80,11 @@ public class UpgradeProcessorExternal extends UpgradeProcessorBase {
 	// ------------------------------------------- Implemented Processor methods
 
 	@Override
+	public boolean processInIoThread(SocketEvent event) throws IOException {
+		return true;
+	}
+
+	@Override
 	public final SocketState dispatch(SocketEvent status) {
 		if (status == SocketEvent.OPEN_READ) {
 			upgradeServletInputStream.onDataAvailable();

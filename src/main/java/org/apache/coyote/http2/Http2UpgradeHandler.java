@@ -351,6 +351,11 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 	}
 
 	@Override
+	public boolean processInIoThread(SocketEvent event) throws IOException {
+		return true;
+	}
+
+	@Override
 	public SocketState upgradeDispatch(SocketEvent status) {
 		if (log.isDebugEnabled()) {
 			log.debug(sm.getString("upgradeHandler.upgradeDispatch.entry", connectionId, status));
@@ -367,11 +372,11 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 
 			switch (status) {
 			case OPEN_READ:
-				if (channel.canWrite()) {
-					// Only send a ping if there is no other data waiting to be sent.
-					// Ping manager will ensure they aren't sent too frequently.
-					pingManager.sendPing(false);
-				}
+				// if (channel.canWrite()) {
+				// Only send a ping if there is no other data waiting to be sent.
+				// Ping manager will ensure they aren't sent too frequently.
+				pingManager.sendPing(false);
+				// }
 				try {
 					// There is data to read so use the read timeout while
 					// reading frames ...
@@ -528,7 +533,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 
 	@Override
 	public void destroy() {
-		// NO-OP
+		parser.destroy();
 	}
 
 	void checkPauseState() throws IOException {
@@ -671,6 +676,7 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 				}
 				channel.flush(true);
 			} catch (IOException ioe) {
+				ioe.printStackTrace();
 				String msg = sm.getString("upgradeHandler.sendPrefaceFail", connectionId);
 				if (log.isDebugEnabled()) {
 					log.debug(msg);
@@ -853,10 +859,13 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 					channel.getWriteLock().lock();
 					try {
 						channel.write(true, header, 0, header.length);
-						int orgLimit = data.getLimit();
-						data.setLimit(data.getPosition() + len);
+//						int orgLimit = data.getLimit();
+//						data.setLimit(data.getPosition() + len);
+						if (len < data.getRemaining()) {
+							data = data.getSlice(len);
+						}
 						channel.write(true, data);
-						data.setLimit(orgLimit);
+//						data.setLimit(orgLimit);
 						channel.flush(true);
 					} catch (IOException ioe) {
 						handleAppInitiatedIOException(ioe);
@@ -1024,12 +1033,12 @@ public class Http2UpgradeHandler implements InternalHttpUpgradeHandler {
 		}
 
 		@Override
-		public boolean fill(boolean block, ByteBufferWrapper buffer) throws IOException {
+		public boolean fill(boolean block, BufWrapper buffer) throws IOException {
 			return channel.read(block, buffer) > 0;
 		}
 
 		@Override
-		public void fullFill(ByteBufferWrapper buffer) throws IOException {
+		public void fullFill(BufWrapper buffer) throws IOException {
 			do {
 				channel.read(true, buffer);
 			} while (buffer.hasRemaining());

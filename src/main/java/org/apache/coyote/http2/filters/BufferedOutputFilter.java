@@ -1,10 +1,7 @@
 package org.apache.coyote.http2.filters;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-
 import org.apache.coyote.AbstractProcessor;
-import org.apache.coyote.ExchangeData;
 import org.apache.coyote.ProcessorComponent;
 import org.apache.coyote.http11.Constants;
 import org.apache.coyote.http11.HttpOutputBuffer;
@@ -13,10 +10,8 @@ import org.apache.coyote.http2.Stream;
 import org.apache.coyote.http2.StreamChannel;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.Channel;
-import org.apache.tomcat.util.net.SocketChannel;
 import org.apache.tomcat.util.net.WriteBuffer;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -55,8 +50,8 @@ public class BufferedOutputFilter extends ProcessorComponent implements OutputFi
 	@Override
 	public void onChannelReady(Channel channel) {
 		if (channel instanceof StreamChannel) {
-			// buffer = ((StreamChannel) channel).getSocketChannel().allocate(8 * 1024);
-			buffer = ByteBufferWrapper.wrapper(ByteBuffer.allocate(8 * 1024), false);
+//			buffer = ByteBufferWrapper.wrapper(ByteBuffer.allocate(8 * 1024), false);
+			buffer = ((StreamChannel) channel).getSocketChannel().allocate(8 * 1024);
 			buffer.switchToWriteMode();
 		} else {
 			throw new RuntimeException();
@@ -148,7 +143,7 @@ public class BufferedOutputFilter extends ProcessorComponent implements OutputFi
 //			src.setLimit(src.getPosition() + thisTime);
 //			buffer.put(src);
 //			src.limit(chunkLimit);
-//			buffer.switchToWriteMode();
+			buffer.switchToWriteMode();
 			if (buffer.hasRemaining()) {
 				src.transferTo(buffer);
 			}
@@ -205,6 +200,7 @@ public class BufferedOutputFilter extends ProcessorComponent implements OutputFi
 	public void recycle() {
 		buffer.switchToWriteMode();
 		buffer.clearWrite();
+		buffer.release();
 	}
 
 	@Override

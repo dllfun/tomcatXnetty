@@ -48,6 +48,11 @@ public class UpgradeProcessorInternal extends UpgradeProcessorBase {
 	}
 
 	@Override
+	public boolean processInIoThread(SocketEvent event) throws IOException {
+		return internalHttpUpgradeHandler.processInIoThread(event);
+	}
+
+	@Override
 	public SocketState dispatch(SocketEvent status) {
 		return internalHttpUpgradeHandler.upgradeDispatch(status);
 	}

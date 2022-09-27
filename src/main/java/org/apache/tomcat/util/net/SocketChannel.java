@@ -52,13 +52,11 @@ public interface SocketChannel extends Channel {
 
 	public boolean hasDataToRead();
 
-	public void registerReadInterest();
+	public boolean registerReadInterest();
 
 	public void unRead(ByteBufferWrapper returnedInput);
 
 	public int read(boolean block, byte[] b, int off, int len) throws IOException;
-
-	public int read(boolean block, ByteBufferWrapper to) throws IOException;
 
 	public int read(boolean block, BufWrapper to) throws IOException;
 
@@ -70,7 +68,7 @@ public interface SocketChannel extends Channel {
 
 	public boolean hasDataToWrite();
 
-	public void registerWriteInterest();
+	public boolean registerWriteInterest();
 
 	public void write(boolean block, byte[] buf, int off, int len) throws IOException;
 
@@ -91,6 +89,8 @@ public interface SocketChannel extends Channel {
 	public boolean hasAsyncIO();
 
 	public boolean isReadPending();
+
+	public void resetStatics();
 
 	public enum BlockingMode {
 		/**

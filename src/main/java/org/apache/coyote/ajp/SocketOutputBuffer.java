@@ -164,8 +164,9 @@ public class SocketOutputBuffer extends ResponseAction {
 
 			responseMessage.reset();
 			responseMessage.appendByte(Constants.JK_AJP13_SEND_BODY_CHUNK);
-			chunk.setLimit(chunk.getPosition() + thisTime);
-			responseMessage.appendBytes(chunk);
+//			chunk.setLimit(chunk.getPosition() + thisTime);
+			BufWrapper slice = chunk.getSlice(thisTime);
+			responseMessage.appendBytes(slice);
 			responseMessage.end();
 
 			((SocketChannel) processor.getChannel()).write(blocking, responseMessage.getBuffer(), 0,
@@ -363,6 +364,7 @@ public class SocketOutputBuffer extends ResponseAction {
 
 	@Override
 	public void recycle() {
+		resetFilter();
 		bytesWritten = 0;
 		responseFinished = false;
 		swallowResponse = false;

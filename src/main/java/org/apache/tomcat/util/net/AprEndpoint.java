@@ -2020,7 +2020,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 		}
 
 		@Override
-		public int read(boolean block, ByteBufferWrapper to) throws IOException {
+		protected int read(boolean block, ByteBufferWrapper to) throws IOException {
 			int nRead = populateReadBuffer(to);
 			if (nRead > 0) {
 				return nRead;
@@ -2269,11 +2269,11 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 		}
 
 		@Override
-		public void registerReadInterest() {
+		public boolean registerReadInterest() {
 			// Make sure an already closed socket is not added to the poller
 			synchronized (closed) {
 				if (isClosed()) {
-					return;
+					return false;
 				}
 				if (log.isDebugEnabled()) {
 					log.debug(sm.getString("endpoint.debug.registerRead", this));
@@ -2283,14 +2283,15 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 					p.add(getSocket().longValue(), getReadTimeout(), Poll.APR_POLLIN);
 				}
 			}
+			return true;
 		}
 
 		@Override
-		public void registerWriteInterest() {
+		public boolean registerWriteInterest() {
 			// Make sure an already closed socket is not added to the poller
 			synchronized (closed) {
 				if (isClosed()) {
-					return;
+					return false;
 				}
 				if (log.isDebugEnabled()) {
 					log.debug(sm.getString("endpoint.debug.registerWrite", this));
@@ -2298,6 +2299,7 @@ public class AprEndpoint extends SocketWrapperBaseEndpoint<Long, Long> implement
 				((AprEndpoint) getEndpoint()).getPoller().add(getSocket().longValue(), getWriteTimeout(),
 						Poll.APR_POLLOUT);
 			}
+			return true;
 		}
 
 		@Override

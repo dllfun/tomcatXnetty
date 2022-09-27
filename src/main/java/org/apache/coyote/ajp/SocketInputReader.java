@@ -672,7 +672,9 @@ public class SocketInputReader extends RequestAction {
 		}
 
 		if (!isRequestBodyFullyRead()) {
-			registerReadInterest();
+			if (!registerReadInterest()) {
+				return true;
+			}
 		}
 
 		return false;
@@ -684,8 +686,8 @@ public class SocketInputReader extends RequestAction {
 	}
 
 	@Override
-	public final void registerReadInterest() {
-		((SocketChannel) processor.getChannel()).registerReadInterest();
+	public final boolean registerReadInterest() {
+		return ((SocketChannel) processor.getChannel()).registerReadInterest();
 	}
 
 	@Override
@@ -887,6 +889,7 @@ public class SocketInputReader extends RequestAction {
 
 	@Override
 	public void recycle() {
+		resetFilters();
 		endOfStream = false;
 		first = true;
 		empty = true;

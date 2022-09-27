@@ -363,12 +363,11 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel {
 			return -1;
 		}
 		int n = Math.min(to.remaining(), bufWrapper.getRemaining());
-		int orgLimit = bufWrapper.getLimit();
-		bufWrapper.setLimit(bufWrapper.getPosition() + n);
-		while (to.hasRemaining() && bufWrapper.getRemaining() > 0) {
-			to.put(bufWrapper.getByte());
-		}
-		bufWrapper.setLimit(orgLimit);
+//		int orgLimit = bufWrapper.getLimit();
+//		bufWrapper.setLimit(bufWrapper.getPosition() + n);
+		BufWrapper slice = bufWrapper.getSlice(n);
+		to.put(slice.nioBuffer());
+//		bufWrapper.setLimit(orgLimit);
 		to.limit(to.position()).position(to.position() - n);
 		return n;
 	}

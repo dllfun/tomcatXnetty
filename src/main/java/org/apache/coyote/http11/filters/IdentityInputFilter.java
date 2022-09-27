@@ -130,7 +130,8 @@ public class IdentityInputFilter extends ProcessorComponent implements InputFilt
 					// The chunk is longer than the number of bytes remaining
 					// in the body; changing the chunk length to the number
 					// of bytes remaining
-					result.setLimit(result.getPosition() + (int) remaining);
+//					result.setLimit(result.getPosition() + (int) remaining);
+					result = result.getSlice((int) remaining);
 					// result = (int) remaining;
 				} else {
 					// result = nRead;

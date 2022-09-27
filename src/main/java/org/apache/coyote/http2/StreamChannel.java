@@ -3,7 +3,9 @@ package org.apache.coyote.http2;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
@@ -13,6 +15,7 @@ import org.apache.coyote.ExchangeData;
 import org.apache.coyote.http2.HpackDecoder.HeaderEmitter;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.http.MimeHeaders;
+import org.apache.tomcat.util.net.AbstractSocketChannel;
 import org.apache.tomcat.util.net.BufWrapper;
 import org.apache.tomcat.util.net.SocketWrapperBase.ByteBufferWrapper;
 
@@ -54,13 +57,35 @@ public class StreamChannel extends Stream {
 	private final ReentrantLock writeLock = new ReentrantLock();
 	// private volatile int bufferIndex = -1;
 	// private ByteBuffer[] buffers = new ByteBuffer[2];
-	private final Deque<ByteBufferWrapper> deque = new ArrayDeque<>();
+	private final Deque<BufWrapper> deque = new ArrayDeque<>();
 	private volatile boolean readInterest;
 	private volatile boolean resetReceived = false;
 
 	private volatile boolean inputClosed = false;
 	private volatile boolean outputClosed = false;
 	protected volatile StreamException resetException = null;
+
+	private boolean trace = false;
+
+	private volatile long updateTime = 0;
+
+	private volatile long updateCount = 0;
+
+	private volatile long waitTime = 0;
+
+	private volatile long lastReadTime = -1;
+
+	private volatile long readTime = 0;
+
+	private volatile long readCount = 0;
+
+	private volatile long mergeTime = 0;
+
+	private volatile long lastWriteTime = -1;
+
+	private volatile long writeTime = 0;
+
+	private volatile long offerSize = 0;
 
 //	private volatile boolean endOfStreamSent = false;
 
@@ -123,6 +148,7 @@ public class StreamChannel extends Stream {
 
 	@Override
 	protected boolean receivedEndOfHeadersInternal() throws ConnectionException {
+		getSocketChannel().resetStatics();
 		StreamProcessor processor = ((StreamProcessor) getCurrentProcessor());
 		if (processor != null) {
 			return processor.receivedEndOfHeadersInternal();
@@ -150,12 +176,6 @@ public class StreamChannel extends Stream {
 		} else {
 			System.err.println("stream" + getIdentifier() + " processor cleared too early");
 		}
-	}
-
-	@Override
-	protected void closeInternal() throws IOException {
-		swallowUnread();
-		clearCurrentProcessor();
 	}
 
 //	@Override
@@ -198,6 +218,62 @@ public class StreamChannel extends Stream {
 //		}
 //	}
 
+	public boolean offer(BufWrapper buffer) throws IOException {
+//		System.out.println("stream" + getIdAsString() + " offer " + buffer.remaining());
+		try {
+			readLock.lock();
+			offerSize += buffer.getRemaining();
+			if (trace) {
+				System.out.println(" offer size:" + offerSize);
+			}
+			deque.offer(buffer);
+			if (inputClosed) {
+				swallowUnread();
+			} else {
+				notEmpty.signalAll();
+			}
+			return true;
+		} finally {
+			readLock.unlock();
+		}
+	}
+
+	private final void swallowUnread() throws IOException {
+		int unreadByteCount = 0;
+		try {
+			readLock.lock();
+			inputClosed = true;
+			if (deque.size() > 0) {
+				for (BufWrapper buffer : deque) {
+					unreadByteCount += buffer.getRemaining();
+					buffer.release();
+				}
+//				unreadByteCount = buffers[bufferIndex].position();
+				if (log.isDebugEnabled()) {
+					log.debug(sm.getString("stream.inputBuffer.swallowUnread", Integer.valueOf(unreadByteCount)));
+				}
+//				if (unreadByteCount > 0) {
+//					buffers[bufferIndex].position(0);
+//					buffers[bufferIndex].limit(buffers[bufferIndex].limit() - unreadByteCount);
+//				}
+//				buffers[0] = ByteBuffer.allocate(0);
+//				buffers[1] = ByteBuffer.allocate(0);
+				deque.clear();
+				notEmpty.signalAll();
+			}
+		} finally {
+			readLock.unlock();
+		}
+		// Do this outside of the sync because:
+		// - it doesn't need to be inside the sync
+		// - if inside the sync it can trigger a deadlock
+		// https://markmail.org/message/vbglzkvj6wxlhh3p
+		if (unreadByteCount > 0) {
+//			System.out.println("stream" + getIdentifier() + " swallowUnread: " + unreadByteCount);
+			handler.getWriter().writeWindowUpdate(this, unreadByteCount, false);
+		}
+	}
+
 	@Override
 	public final int available() {
 		try {
@@ -206,7 +282,7 @@ public class StreamChannel extends Stream {
 				return 0;
 			}
 			int available = 0;
-			for (ByteBufferWrapper buf : deque) {
+			for (BufWrapper buf : deque) {
 				available += buf.getRemaining();
 			}
 			return available;
@@ -250,92 +326,154 @@ public class StreamChannel extends Stream {
 		}
 	}
 
-	@Override
-	public final BufWrapper doRead() throws IOException {
+	private BufWrapper getFromDeque(boolean block) throws IOException {
 
-//		ensureBuffersExist();
-		ByteBufferWrapper buffer = null;
-		// Ensure that only one thread accesses inBuffer at a time
 		try {
 			readLock.lock();
 			if (inputClosed) {
 				return null;
 			}
-			int available = 0;
-			for (ByteBufferWrapper buf : deque) {
-				available += buf.getRemaining();
-			}
-			if (available > 0) {
-				buffer = ByteBufferWrapper.wrapper(ByteBuffer.allocate(available), false);
-				ByteBufferWrapper buf = null;
-				while ((buf = deque.poll()) != null) {
-//					buffer.put(buf);
-					buf.transferTo(buffer);
-				}
-//				buffer.flip();
-				buffer.switchToReadMode();
-			}
-			boolean canRead = false;
-			while ((buffer == null || buffer.getRemaining() == 0)
-					&& (canRead = this.isActive() && !this.isInputFinished())) {
-				// Need to block until some data is written
-				try {
-					if (log.isDebugEnabled()) {
-						log.debug(sm.getString("stream.inputBuffer.empty"));
-					}
 
-					long readTimeout = handler.getProtocol().getStreamReadTimeout();
-					if (readTimeout < 0) {
-						notEmpty.await();
+			BufWrapper result = null;
+			if (block) {
+
+				boolean canRead = false;
+				while (deque.isEmpty() && (canRead = this.isActive() && !this.isInputFinished())) {
+					// Need to block until some data is written
+					try {
+						if (log.isDebugEnabled()) {
+							log.debug(sm.getString("stream.inputBuffer.empty"));
+						}
+
+						long readTimeout = handler.getProtocol().getStreamReadTimeout();
+						if (readTimeout < 0) {
+							notEmpty.await();
 //						buffer = deque.poll();
-					} else {
-						notEmpty.await(readTimeout, TimeUnit.MILLISECONDS);
+						} else {
+							notEmpty.await(readTimeout, TimeUnit.MILLISECONDS);
 //						buffer = deque.poll(readTimeout, TimeUnit.MILLISECONDS);
-					}
+						}
 
-					if (resetReceived) {
-						throw new IOException(sm.getString("stream.inputBuffer.reset"));
-					}
+						if (resetReceived) {
+							throw new IOException(sm.getString("stream.inputBuffer.reset"));
+						}
 
-					if (inputClosed) {
-						return null;
-					}
+						if (inputClosed) {
+							return null;
+						}
 
-					buffer = deque.poll();
-
-					if (buffer == null && this.isActive() && !this.isInputFinished()) {
-						String msg = sm.getString("stream.inputBuffer.readTimeout");
-						StreamException se = new StreamException(msg, Http2Error.ENHANCE_YOUR_CALM, this.getIdAsInt());
-						// Trigger a reset once control returns to Tomcat
-						((StreamProcessor) getCurrentProcessor()).getExchangeData().setError();
-						resetException = se;
-						throw new CloseNowException(msg, se);
+						if (deque.isEmpty() && this.isActive() && !this.isInputFinished()) {
+							String msg = sm.getString("stream.inputBuffer.readTimeout");
+							StreamException se = new StreamException(msg, Http2Error.ENHANCE_YOUR_CALM,
+									this.getIdAsInt());
+							// Trigger a reset once control returns to Tomcat
+							((StreamProcessor) getCurrentProcessor()).getExchangeData().setError();
+							resetException = se;
+							throw new CloseNowException(msg, se);
+						}
+					} catch (InterruptedException e) {
+						// Possible shutdown / rst or similar. Use an
+						// IOException to signal to the client that further I/O
+						// isn't possible for this Stream.
+						throw new IOException(e);
 					}
-				} catch (InterruptedException e) {
-					// Possible shutdown / rst or similar. Use an
-					// IOException to signal to the client that further I/O
-					// isn't possible for this Stream.
-					throw new IOException(e);
 				}
-			}
 
-			if (buffer != null) {
-				// Data is available in the readingBuffer. Copy it to the
-				// outBuffer.
+				result = deque.poll();
+
+				if (result != null) {
+					// Data is available in the readingBuffer. Copy it to the
+					// outBuffer.
 //				bufferIndex = (bufferIndex + 1) % 2;
 //				buffers[bufferIndex].clear();
-				// buffers[bufferIndex.intValue()].get(outBuffer, 0, written);
-				// buffers[bufferIndex.intValue()].clear();
-				// applicationBufferHandler.setBufWrapper();
+					// buffers[bufferIndex.intValue()].get(outBuffer, 0, written);
+					// buffers[bufferIndex.intValue()].clear();
+					// applicationBufferHandler.setBufWrapper();
 
-			} else if (!canRead) {
-				return null;
+				} else if (!canRead) {
+					return null;
+				} else {
+					// Should never happen
+					throw new IllegalStateException();
+				}
 			} else {
-				// Should never happen
-				throw new IllegalStateException();
+				result = deque.poll();
 			}
+			return result;
 		} finally {
 			readLock.unlock();
+		}
+	}
+
+	@Override
+	public final BufWrapper doRead() throws IOException {
+
+		if (lastReadTime != -1) {
+			long useTime = System.currentTimeMillis() - lastReadTime;
+			readTime += useTime;
+			readCount++;
+			if (trace) {
+				System.out.println(getSocketChannel().getRemotePort() + " 处理数据用时：" + useTime + " 总用时：" + readTime
+						+ " 处理次数：" + readCount);
+			}
+		}
+
+//		ensureBuffersExist();
+		// Ensure that only one thread accesses inBuffer at a time
+		boolean first = true;
+		int available = 0;
+		int pollCount = 0;
+		List<BufWrapper> bufs = new ArrayList<>();
+
+		{
+			long startTime = System.currentTimeMillis();
+			BufWrapper buf = null;
+			do {
+				buf = getFromDeque(first);
+				first = false;
+				if (buf != null) {
+					pollCount++;
+					available += buf.getRemaining();
+					bufs.add(buf);
+				}
+			} while (buf != null);
+			long useTime = System.currentTimeMillis() - startTime;
+			waitTime += useTime;
+			if (trace) {
+				System.out.println(getSocketChannel().getRemotePort() + " 读取数据用时：" + useTime + " 总用时：" + waitTime);
+			}
+		}
+
+		if (available > 0) {
+			long startTime = System.currentTimeMillis();
+			handler.getWriter().writeWindowUpdate(this, available, true);
+			long useTime = (System.currentTimeMillis() - startTime);
+			updateTime += useTime;
+			updateCount++;
+			// (((AbstractSocketChannel<?>) getSocketChannel()).registeReadTimeStamp)
+			if (trace) {
+				System.out.println(getSocketChannel().getRemotePort() + " 更新窗口用时：" + useTime + " 总用时：" + updateTime
+						+ " 更新次数：" + updateCount + " pollCount:" + pollCount + " 窗口大小：" + available);
+			}
+			((AbstractSocketChannel<?>) getSocketChannel()).registeReadTimeStamp = System.currentTimeMillis();
+		}
+
+		ByteBufferWrapper buffer = null;
+		if (available > 0) {
+			long startTime = System.currentTimeMillis();
+			buffer = ByteBufferWrapper.wrapper(ByteBuffer.allocate(available), false);
+			for (int i = 0; i < bufs.size(); i++) {
+				BufWrapper buf = bufs.get(i);
+				buf.transferTo(buffer);
+				buf.release();
+			}
+//			buffer.flip();
+			buffer.switchToReadMode();
+			long useTime = (System.currentTimeMillis() - startTime);
+			mergeTime += useTime;
+			if (trace) {
+				System.out.println(getSocketChannel().getRemotePort() + " 合并数据用时：" + useTime + " 总用时：" + mergeTime);
+			}
 		}
 
 		// Increment client-side flow control windows by the number of bytes
@@ -343,11 +481,10 @@ public class StreamChannel extends Stream {
 //		int freeIndex = (bufferIndex + 1) % 2;
 //		buffers[freeIndex].flip();
 //		buffer.flip();
-		int written = buffer.getRemaining();
 		if (log.isDebugEnabled()) {
-			log.debug(sm.getString("stream.inputBuffer.copy", Integer.toString(written)));
+			log.debug(sm.getString("stream.inputBuffer.copy", Integer.toString(available)));
 		}
-		handler.getWriter().writeWindowUpdate(this, written, true);
+		lastReadTime = System.currentTimeMillis();
 //		System.out.println("stream" + getIdAsString() + " take:" + toreturn.getRemaining());
 		return buffer;
 	}
@@ -370,8 +507,8 @@ public class StreamChannel extends Stream {
 	protected final void receiveResetInternal(long errorCode) {
 		String uri = (getCurrentProcessor() == null ? ""
 				: " uri:" + ((StreamProcessor) getCurrentProcessor()).getExchangeData().getRequestURI().toString());
-//		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")"
-//				+ " receiveReset errorCode: " + errorCode + uri);
+		System.out.println("conn(" + getConnectionId() + ") " + "stream(" + getIdentifier() + ")"
+				+ " receiveReset errorCode: " + errorCode + uri);
 //		if (bufferIndex != -1) {
 		try {// synchronized (buffers[bufferIndex.intValue()])
 			readLock.lock();
@@ -397,7 +534,7 @@ public class StreamChannel extends Stream {
 	/*
 	 * Called after placing some data in the readingBuffer.
 	 */
-	final boolean onDataAvailable() {
+	final void onDataAvailable() {
 		try {// synchronized (buffers[bufferIndex.intValue()])
 			readLock.lock();
 			if (readInterest) {
@@ -410,15 +547,16 @@ public class StreamChannel extends Stream {
 				// the incoming connection and streams are processed on their
 				// own.
 				((AbstractProcessor) getCurrentProcessor()).dispatchExecute();
-				return true;
-			} else {
-				if (log.isDebugEnabled()) {
-					log.debug(sm.getString("stream.inputBuffer.signal"));
-				}
-
-				notEmpty.signalAll();
-				return false;
+//				return true;
 			}
+//			else {
+//				if (log.isDebugEnabled()) {
+//					log.debug(sm.getString("stream.inputBuffer.signal"));
+//				}
+//
+//				notEmpty.signalAll();
+//				return false;
+//			}
 		} finally {
 			readLock.unlock();
 		}
@@ -428,62 +566,13 @@ public class StreamChannel extends Stream {
 		int size = handler.getLocalSettings().getInitialWindowSize();
 		try {
 			readLock.lock();
-			for (ByteBufferWrapper buffer : deque) {
+			for (BufWrapper buffer : deque) {
 				size -= buffer.getRemaining();
 			}
 //			System.out.println("availableWindowSize:" + size);
 			return size;
 		} finally {
 			readLock.unlock();
-		}
-	}
-
-	public boolean offer(ByteBufferWrapper buffer) throws IOException {
-//		System.out.println("stream" + getIdAsString() + " offer " + buffer.remaining());
-		try {
-			readLock.lock();
-			deque.offer(buffer);
-			if (inputClosed) {
-				swallowUnread();
-			}
-			return true;
-		} finally {
-			readLock.unlock();
-		}
-	}
-
-	private final void swallowUnread() throws IOException {
-		int unreadByteCount = 0;
-		try {
-			readLock.lock();
-			inputClosed = true;
-			if (deque.size() > 0) {
-				for (ByteBufferWrapper buffer : deque) {
-					unreadByteCount += buffer.getRemaining();
-				}
-//				unreadByteCount = buffers[bufferIndex].position();
-				if (log.isDebugEnabled()) {
-					log.debug(sm.getString("stream.inputBuffer.swallowUnread", Integer.valueOf(unreadByteCount)));
-				}
-//				if (unreadByteCount > 0) {
-//					buffers[bufferIndex].position(0);
-//					buffers[bufferIndex].limit(buffers[bufferIndex].limit() - unreadByteCount);
-//				}
-//				buffers[0] = ByteBuffer.allocate(0);
-//				buffers[1] = ByteBuffer.allocate(0);
-				deque.clear();
-				notEmpty.signalAll();
-			}
-		} finally {
-			readLock.unlock();
-		}
-		// Do this outside of the sync because:
-		// - it doesn't need to be inside the sync
-		// - if inside the sync it can trigger a deadlock
-		// https://markmail.org/message/vbglzkvj6wxlhh3p
-		if (unreadByteCount > 0) {
-//			System.out.println("stream" + getIdentifier() + " swallowUnread: " + unreadByteCount);
-			handler.getWriter().writeWindowUpdate(this, unreadByteCount, false);
 		}
 	}
 
@@ -525,8 +614,14 @@ public class StreamChannel extends Stream {
 			if (isClosed() || isOutputClosed()) {
 				throw new IllegalStateException(sm.getString("stream.closed", getConnectionId(), getIdentifier()));
 			}
+			lastWriteTime = System.currentTimeMillis();
 			getHandler().getWriter().writeHeaders(this, 0, headers, finished,
 					org.apache.coyote.http2.Constants.DEFAULT_HEADERS_FRAME_SIZE);
+			long useTime = System.currentTimeMillis() - lastWriteTime;
+			writeTime += useTime;
+			if (trace) {
+				System.out.println(getSocketChannel().getRemotePort() + " 写出数据用时：" + useTime + " 总用时：" + writeTime);
+			}
 		} catch (Exception e) {
 			throw e;
 		} finally {
@@ -550,7 +645,13 @@ public class StreamChannel extends Stream {
 			// chunk is always fully written
 			int result = chunk.getRemaining();
 //			System.out.println("stream(" + getIdentifier() + ") write: " + chunk.getRemaining());
+			lastWriteTime = System.currentTimeMillis();
 			getHandler().getWriter().writeBody(this, chunk, result, finished);
+			long useTime = System.currentTimeMillis() - lastWriteTime;
+			writeTime += useTime;
+			if (trace) {
+				System.out.println(getSocketChannel().getRemotePort() + " 写出数据用时：" + useTime + " 总用时：" + writeTime);
+			}
 			return result;
 		} finally {
 			getWriteLock().unlock();
@@ -577,6 +678,12 @@ public class StreamChannel extends Stream {
 	@Override
 	public boolean isOutputClosed() {
 		return outputClosed;
+	}
+
+	@Override
+	protected void closeInternal() throws IOException {
+		swallowUnread();
+		clearCurrentProcessor();
 	}
 
 //	@Override

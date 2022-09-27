@@ -21,6 +21,7 @@ import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.DispatchHandler;
 import org.apache.coyote.ParseInIoHandler;
 import org.apache.coyote.ProcessorHandler;
+import org.apache.coyote.http2.Http2Protocol;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
@@ -45,7 +46,7 @@ public class Http11NettyProtocol extends AbstractHttp11JsseProtocol<Channel> {
 
 	public Http11NettyProtocol() {
 		super(new NettyEndpoint());
-
+		// addUpgradeProtocol(new Http2Protocol());
 		Handler processorHandler = new ProcessorHandler(this);
 		Handler nettyHandler = new NettyHandler(processorHandler);
 		Handler dispatchHandler = new DispatchHandler(nettyHandler, this);
